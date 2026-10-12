@@ -26,9 +26,9 @@ Data lives in one JSON file in the App Group `group.com.tombaxter.taken`, read a
 
 ## CI
 
-`.github/workflows/ci.yml` runs on every push to `main` (docs and brand changes excluded) and on demand. On a `macos-26` runner with Xcode 26 it generates the project, builds, runs the unit tests on an iOS 26 iPhone simulator, and captures App Store screenshots on the iPhone 17 Pro Max simulator with `-demo` data. The PNGs are in the run's `screenshots` artifact.
+`.github/workflows/ci.yml` runs on every push to `main` (docs and brand changes excluded) and on demand. On `macos-26` runners with Xcode 26 it generates the project and, in parallel: builds and runs the unit tests on an iOS 26 iPhone simulator; builds Release for a generic iOS device without signing; and captures App Store screenshots on the iPhone 17 Pro Max simulator with `-demo` data. The PNGs are in the run's `screenshots` artifact.
 
-The app accepts `-demo` (seeded stack and five weeks of history in a temporary store, never the real one) and `-screen today|today-done|add|settings|day` to open straight onto a state.
+The app accepts `-demo` (seeded stack and five weeks of history in a temporary store, never the real one) and `-screen today|today-done|add|settings|day|log` to open straight onto a state. `-screen widgets` renders the widget designs in the app for review and `-screen empty` shows first run.
 
 ## Release to TestFlight
 
@@ -45,6 +45,8 @@ Repository secrets (names only, values never go in the repo):
 | `DIST_CERT_PASSWORD` | Password of that `.p12` |
 | `PROFILE_APP_BASE64` | App Store profile for `com.tombaxter.taken`, base64 |
 | `PROFILE_WIDGETS_BASE64` | App Store profile for `com.tombaxter.taken.widgets`, base64 |
+
+The same project also ships through EAS Build (`eas.json`, `.eas/build/build-ios.yml`), which runs `xcodegen generate` and signs with EAS-held credentials for the targets `Taken` and `TakenWidgets`. Release signing settings in `project.yml` are plain keys so either path can set them.
 
 Optional repository variable `ASC_APP_ID`: the app's numeric Apple ID, passed to `altool` so the upload always lands on this app.
 

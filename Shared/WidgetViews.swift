@@ -35,10 +35,12 @@ struct WidgetSnapshot: Sendable {
         takenDue = summary.takenDueDoses
         dueDoses = summary.dueDoses
         pendingItems = summary.pendingItems.count
-        rows = summary.due.map { row in
+        let all = summary.due.map { row in
             WidgetRow(id: row.item.id, code: row.item.code, name: row.item.name,
                       taken: row.takenCount, due: row.dosesPerDay, lastTime: row.lastDose?.takenAt)
         }
+        // What is still to take comes first, so the rows a widget has room for are the ones worth tapping.
+        rows = all.filter { !$0.done } + all.filter { $0.done }
         lastDose = summary.lastDose?.takenAt
         hasStack = !summary.isEmpty
     }

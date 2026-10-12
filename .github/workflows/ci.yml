@@ -63,6 +63,58 @@ jobs:
             build/TakenTests.xcresult
           retention-days: 7
 
+  device-build:
+    name: Release build for device (unsigned)
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode 26
+        run: scripts/select-xcode.sh
+
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Build Release for generic iOS
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild build \
+            -project Taken.xcodeproj \
+            -scheme Taken \
+            -configuration Release \
+            -destination "generic/platform=iOS" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/xcodebuild-release.log | xcbeautify --renderer github-actions
+
+      - name: Check the built bundles
+        run: |
+          set -euo pipefail
+          app="build/DerivedData/Build/Products/Release-iphoneos/Taken.app"
+          appex="$app/PlugIns/TakenWidgets.appex"
+          test -d "$appex"
+          for bundle in "$app" "$appex"; do
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle/Info.plist"
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$bundle/Info.plist"
+            /usr/libexec/PlistBuddy -c 'Print :CFBundleVersion' "$bundle/Info.plist"
+            test -f "$bundle/PrivacyInfo.xcprivacy"
+            test -f "$bundle/GeistMono-Medium.ttf"
+          done
+          test -f "$app/Metadata.appintents/extract.actionsdata" && echo "App Intents metadata present"
+          ls "$app" | head -50
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: release-build-log
+          path: build/xcodebuild-release.log
+          retention-days: 7
+
   screenshots:
     name: Screenshots
     runs-on: macos-26

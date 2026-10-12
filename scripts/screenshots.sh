@@ -50,8 +50,22 @@ shoot() {
   sleep 1
   xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" >/dev/null
   sleep 6
-  xcrun simctl io "$udid" screenshot --type=png "$out/$name.png"
-  echo "captured $out/$name.png"
+  local attempt size
+  for attempt in 1 2 3 4; do
+    xcrun simctl io "$udid" screenshot --type=png "$out/$name.png" >/dev/null
+    size=$(stat -f%z "$out/$name.png")
+    # A frame with only the background compresses below ~100 KB; a real screen is well above it.
+    if [ "$size" -gt 110000 ]; then break; fi
+    echo "::warning::$name looks blank ($size bytes), attempt $attempt"
+    diagnose "$name-blank-$attempt"
+    if [ "$attempt" -eq 2 ]; then
+      xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+      sleep 1
+      xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" >/dev/null
+    fi
+    sleep 4
+  done
+  echo "captured $out/$name.png ($size bytes)"
   diagnose "$name"
 }
 

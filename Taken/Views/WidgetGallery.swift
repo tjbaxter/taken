@@ -20,23 +20,24 @@ struct WidgetGallery: View {
                     tile(width: 170, height: 170) { SmallStackView(snapshot: done) }
                 }
                 tile(width: 364, height: 170) { MediumStackView(snapshot: partial) }
-                    .padding(.top, 22)
-                tile(width: 364, height: 170) { MediumStackView(snapshot: done) }
-                    .padding(.top, 22)
-                HStack(spacing: 22) {
-                    tile(width: 170, height: 170) { SmallStackView(snapshot: empty) }
-                }
-                .padding(.top, 22)
+                    .padding(.top, 18)
 
                 SectionHeader(index: "W2", title: "LOCK SCREEN", trailing: "ACCESSORY")
-                HStack(spacing: 18) {
+                HStack(spacing: 14) {
                     accessory(width: 76, height: 76) { CircularStackView(snapshot: partial) }
                     accessory(width: 76, height: 76) { CircularStackView(snapshot: done) }
                     accessory(width: 172, height: 76) { RectangularStackView(snapshot: partial) }
                 }
-                HStack(spacing: 18) {
+                HStack(spacing: 14) {
                     accessory(width: 172, height: 76) { RectangularStackView(snapshot: done) }
-                    accessory(width: 172, height: 26) { InlineStackView(snapshot: partial) }
+                    accessory(width: 180, height: 26) { InlineStackView(snapshot: partial) }
+                }
+                .padding(.top, 14)
+
+                SectionHeader(index: "W3", title: "MORE STATES")
+                tile(width: 364, height: 170) { MediumStackView(snapshot: done) }
+                HStack(spacing: 22) {
+                    tile(width: 170, height: 170) { SmallStackView(snapshot: empty) }
                 }
                 .padding(.top, 18)
             }
@@ -57,6 +58,7 @@ struct WidgetGallery: View {
     private func accessory<Content: View>(width: CGFloat, height: CGFloat, @ViewBuilder _ content: () -> Content) -> some View {
         content()
             .foregroundStyle(.white)
+            .padding(.horizontal, 6)
             .frame(width: width, height: height)
             .background(Color.white.opacity(0.06), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
     }
