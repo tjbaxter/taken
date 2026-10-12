@@ -148,7 +148,7 @@ async function drawLock(ctx, W, H, P, L) {
   ctx.fillStyle = ink; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
   ctx.font = `600 ${21 * P}px ${SYS}`; ctx.fillText(L.date, W / 2, 124 * P);
   ctx.save(); ctx.font = `700 ${106 * P}px ${SYS}`; ctx.letterSpacing = `${-3 * P}px`; ctx.fillText(L.time, W / 2, 226 * P); ctx.restore();
-  // the app's Lock Screen widgets (TakenWidgets/StackWidget.swift), as iOS draws them: monochrome, vibrant.
+  // the app's Lock Screen widgets (Shared/WidgetViews.swift), as iOS draws them: monochrome, vibrant.
   // accessoryCircular = a capacity gauge with "4/6" inside; accessoryRectangular = "TAKEN 4/6" over three rows.
   const cs = 74, rw = 168, gap = 18, wy = 250, vib = "rgba(255,255,255,0.9)";
   const wx = (W / P - (cs + gap + rw)) / 2;

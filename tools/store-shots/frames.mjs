@@ -43,16 +43,18 @@ const cap = (name) => ({ kind: "capture", name });
 
 // The drawn Lock Screen: the 21:00 nudge over the app's own Lock Screen widgets, on the demo day ci.yml captures
 // (Shared/DemoData.swift: VD3, FIN, FSH x2, CRE, MAG due; four doses in by morning, so FSH and MAG are pending).
+// The widgets are TakenWidgets' own accessory families as iOS draws them on a Lock Screen: monochrome.
 // generate.mjs swaps in the date ci.yml took the captures on, so the Lock Screen agrees with the app's top bar.
 const LOCK = {
   kind: "lock",
   date: "Monday 12 October",
   time: "21:00",
   gauge: { done: 4, due: 6 },
+  // the rectangular widget lists what is still to take first (Shared/WidgetViews.swift), three rows
   rows: [
-    { code: "VD3", value: "07:42", done: true },
-    { code: "FIN", value: "07:42", done: true },
     { code: "FSH", value: "1/2", done: false },
+    { code: "MAG", value: "--:--", done: false },
+    { code: "VD3", value: "07:42", done: true },
   ],
   title: "Taken",
   body: "2 pending: FSH, MAG",
