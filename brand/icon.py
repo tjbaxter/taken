@@ -25,6 +25,7 @@ from PIL import Image, ImageCms
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
 APPICON_DIR = os.path.join(REPO, "Taken", "Assets.xcassets", "AppIcon.appiconset")
+FINAL_K = 1.08  # capsule scale in the shipped icon (1.0 felt small at 60 px, 1.15 crowded the brackets)
 
 
 def hexrgb(h):
@@ -561,13 +562,13 @@ def dashes_along(pts, dash, period, phase=0.0, closed=True):
     return out
 
 
-def concept_split2(r, dashed=False, core=0.0):
+def concept_split2(r, dashed=False, core=0.0, k=1.0):
     """Refined split capsule: bigger mark, finer brackets, the unlit half reads as PENDING."""
     r.background(lift=1.0)
     viewfinder(r, half=322.0, arm=104.0, t=16.0, role="line", opacity=0.9)
     edge_ticks(r, half=322.0, length=40.0, t=12.0, role="line_dim")
     cx = cy = 512.0
-    hl, rad, gap, stroke = 156.0, 116.0, 18.0, 16.0
+    hl, rad, gap, stroke = 156.0 * k, 116.0 * k, 18.0, 16.0
     cap, near, far = capsule_halves(cx, cy, 45.0, hl, rad, gap)
     r.fill(far, "fill_deep")
     if dashed:
@@ -645,7 +646,7 @@ CONCEPTS = {
     "split2": concept_split2,
     "split2dash": lambda r: concept_split2(r, dashed=True),
     "split2core": lambda r: concept_split2(r, core=0.55),
-    "taken": lambda r: concept_split2(r, core=0.3),
+    "taken": lambda r: concept_split2(r, core=0.3, k=FINAL_K),
     "reticle2": concept_reticle2,
     "reticle": concept_reticle,
     "engraved": concept_engraved,
@@ -654,7 +655,7 @@ CONCEPTS = {
     "checkpills": concept_checkpills,
 }
 
-FINAL = "taken"  # the shipped icon: split2 with a faint phosphor core
+FINAL = "taken"  # the shipped icon: split2, capsule at FINAL_K scale, faint phosphor core
 
 
 def render(concept, variant="default", size=1024, ss=4, **kw):
@@ -694,7 +695,7 @@ def _capsule_paths(hl, rad, gap, stroke):
 def svg_mark(full=True):
     """The icon as SVG. full=True: the whole 1024 icon (square, background, brackets).
     full=False: the capsule glyph alone on a transparent background, tightly framed."""
-    hl, rad, gap, stroke = 156.0, 116.0, 18.0, 16.0
+    hl, rad, gap, stroke = 156.0 * FINAL_K, 116.0 * FINAL_K, 18.0, 16.0
     lit, shell, outline = _capsule_paths(hl, rad, gap, stroke)
     capsule = (
         f'<g transform="translate(512 512) rotate(-45)">'
