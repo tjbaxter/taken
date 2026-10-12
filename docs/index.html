@@ -290,7 +290,13 @@
   const label = root.querySelector("[data-label]");
   const toast = root.querySelector("[data-toast]");
   const takeAll = root.querySelector("[data-takeall]");
-  const seed = () => rows.map((r, i) => (i === 0 ? new Date(Date.now() - (9 * 60 + 12) * 60000) : null));
+  // The first item was taken at 07:42 this morning (or a few minutes ago, before 07:52).
+  const morning = () => {
+    const d = new Date();
+    d.setHours(7, 42, 0, 0);
+    return Date.now() - d.getTime() > 10 * 60000 ? d : new Date(Date.now() - 6 * 60000);
+  };
+  const seed = () => rows.map((r, i) => (i === 0 ? morning() : null));
   let taken = seed();
   let toastTimer = 0;
 
@@ -307,7 +313,6 @@
     count.textContent = n + "/" + rows.length;
     segs.forEach((s, i) => s.classList.toggle("on", i < n));
     const done = pending === 0;
-    const was = root.classList.contains("is-done");
     root.classList.toggle("is-done", done);
     label.textContent = done ? "ALL TAKEN" : "TAKEN TODAY";
     takeAll.hidden = pending < 2;
@@ -324,12 +329,6 @@
         row.setAttribute("aria-label", name + ", pending, tap to mark taken");
       }
     });
-    if (done && !was) {
-      const sweep = root.querySelector(".status__sweep");
-      sweep.style.animation = "none";
-      void sweep.offsetWidth;
-      sweep.style.animation = "";
-    }
   };
 
   rows.forEach((row, i) => {
@@ -348,12 +347,12 @@
 
   takeAll.addEventListener("click", () => {
     const t = new Date();
-    let k = 0;
-    taken = taken.map((v) => { if (v) return v; k += 1; return t; });
+    const codes = [];
+    taken = taken.map((v, i) => { if (v) return v; codes.push(rows[i].dataset.code); return t; });
     rows.forEach((r) => r.classList.add("just"));
     render();
     setTimeout(() => rows.forEach((r) => r.classList.remove("just")), 400);
-    say("<b>" + k + "</b> TAKEN " + clock(t));
+    say("<b>" + codes.join(" ") + "</b> TAKEN " + clock(t));
   });
 
   root.querySelector("[data-reset]").addEventListener("click", () => {
