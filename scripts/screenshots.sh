@@ -16,7 +16,7 @@ xcrun simctl status_bar "$udid" override \
   --time "9:41" \
   --dataNetwork wifi --wifiMode active --wifiBars 3 \
   --cellularMode active --cellularBars 4 --operatorName "" \
-  --batteryState charged --batteryLevel 100
+  --batteryState discharging --batteryLevel 100
 xcrun simctl install "$udid" "$app"
 
 # Warm launch so first-run work (font registration, caches) does not land in a screenshot.
@@ -39,6 +39,7 @@ shoot 02-today-done today-done
 shoot 03-add add
 shoot 04-settings settings
 shoot 05-day day
+shoot 06-log log
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
 ls -la "$out"

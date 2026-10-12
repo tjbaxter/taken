@@ -139,49 +139,63 @@ private struct DayItemRow: View {
                 Text(subtitle).hud(10, subtitleColor, tracking: 0.12)
             }
             Spacer(minLength: 8)
-            VStack(alignment: .trailing, spacing: 6) {
-                ForEach(row.doses) { dose in
-                    Button {
-                        onRemove(dose)
-                    } label: {
-                        HStack(spacing: 6) {
-                            Text(Fmt.clock(dose.takenAt, clock))
-                                .font(.monoFixed(13, .monoMedium))
-                                .foregroundStyle(Palette.signal)
-                            Image(systemName: "xmark")
-                                .font(.system(size: 8, weight: .bold))
-                                .foregroundStyle(Palette.fgSubtle)
-                        }
-                        .padding(.horizontal, 9)
-                        .frame(height: 32)
-                        .background(Palette.signalWash, in: RoundedRectangle(cornerRadius: 3))
-                        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.signalEdge, lineWidth: 1))
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Taken at \(Fmt.spoken(dose.takenAt)). Remove.")
-                }
-                if row.isPending || row.doses.isEmpty {
-                    Button(action: onLog) {
-                        Text("+ LOG \(logLabel)")
-                            .font(.monoFixed(11, .monoSemibold))
-                            .tracking(11 * 0.1)
-                            .foregroundStyle(Palette.fg)
-                            .padding(.horizontal, 10)
-                            .frame(height: 32)
-                            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.lineStrong, lineWidth: 1))
-                            .frame(minHeight: 44)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(PressStyle())
-                    .accessibilityLabel("Log \(row.item.name) at \(logLabel)")
-                }
-            }
+            actions
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
         .frame(minHeight: 70)
+    }
+
+    private var showsLog: Bool { row.isPending || row.doses.isEmpty }
+
+    @ViewBuilder
+    private var actions: some View {
+        if row.doses.count + (showsLog ? 1 : 0) <= 2 {
+            HStack(spacing: 6) { actionItems }
+        } else {
+            VStack(alignment: .trailing, spacing: 6) { actionItems }
+        }
+    }
+
+    @ViewBuilder
+    private var actionItems: some View {
+        ForEach(row.doses) { dose in
+            Button {
+                onRemove(dose)
+            } label: {
+                HStack(spacing: 6) {
+                    Text(Fmt.clock(dose.takenAt, clock))
+                        .font(.monoFixed(13, .monoMedium))
+                        .foregroundStyle(Palette.signal)
+                    Image(systemName: "xmark")
+                        .font(.system(size: 8, weight: .bold))
+                        .foregroundStyle(Palette.fgSubtle)
+                }
+                .padding(.horizontal, 9)
+                .frame(height: 32)
+                .background(Palette.signalWash, in: RoundedRectangle(cornerRadius: 3))
+                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.signalEdge, lineWidth: 1))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Taken at \(Fmt.spoken(dose.takenAt)). Remove.")
+        }
+        if showsLog {
+            Button(action: onLog) {
+                Text("+ LOG \(logLabel)")
+                    .font(.monoFixed(11, .monoSemibold))
+                    .tracking(11 * 0.1)
+                    .foregroundStyle(Palette.fg)
+                    .padding(.horizontal, 10)
+                    .frame(height: 32)
+                    .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.lineStrong, lineWidth: 1))
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Log \(row.item.name) at \(logLabel)")
+        }
     }
 
     private var subtitle: String {

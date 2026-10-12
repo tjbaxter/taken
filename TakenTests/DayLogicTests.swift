@@ -20,7 +20,7 @@ final class DayLogicTests: XCTestCase {
     // MARK: Rollover
 
     func testDayRolloverAtFourAM() {
-        let c = clock(4)
+        let c = londonClock(4)
         let monday = DayKey(year: 2026, month: 10, day: 12)
         XCTAssertEqual(c.day(for: at(2026, 10, 13, 1, 0)), monday, "01:00 Tuesday still belongs to Monday")
         XCTAssertEqual(c.day(for: at(2026, 10, 13, 3, 59)), monday)
@@ -29,13 +29,13 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testMidnightRolloverWhenDayStartsAtZero() {
-        let c = clock(0)
+        let c = londonClock(0)
         XCTAssertEqual(c.day(for: at(2026, 10, 13, 0, 30)), DayKey(year: 2026, month: 10, day: 13))
     }
 
     func testRolloverAcrossDaylightSavingStart() {
         // UK clocks go forward at 01:00 GMT on 29 Mar 2026.
-        let c = clock(4)
+        let c = londonClock(4)
         let sunday = DayKey(year: 2026, month: 3, day: 29)
         XCTAssertEqual(c.day(for: at(2026, 3, 29, 3, 30)), sunday.adding(-1))
         XCTAssertEqual(c.day(for: at(2026, 3, 29, 4, 30)), sunday, "04:30 BST is after the rollover")
@@ -45,7 +45,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testDateOnDayMapsEarlyHoursToNextCalendarDate() {
-        let c = clock(4)
+        let c = londonClock(4)
         let monday = DayKey(year: 2026, month: 10, day: 12)
         let late = c.date(on: monday, hour: 1, minute: 15)
         XCTAssertEqual(late, at(2026, 10, 13, 1, 15))
@@ -56,7 +56,7 @@ final class DayLogicTests: XCTestCase {
     // MARK: Frequencies
 
     func testAlternateDaysDueLogic() {
-        let c = clock()
+        let c = londonClock()
         let created = at(2026, 10, 1, 8)
         let zinc = makeItem("Zinc", "ZNC", .alternateDays, created: created)
         let monday = DayKey(year: 2026, month: 10, day: 12)
@@ -82,7 +82,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testAlternateDayItemTakenYesterdayIsInNotDueGroup() {
-        let c = clock()
+        let c = londonClock()
         let created = at(2026, 10, 1, 8)
         let vd3 = makeItem("Vitamin D3", "VD3", created: created, sortIndex: 0)
         let zinc = makeItem("Zinc", "ZNC", .alternateDays, created: created, sortIndex: 1)
@@ -95,7 +95,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testWeekdayFrequency() {
-        let c = clock()
+        let c = londonClock()
         let mwf = makeItem("Minoxidil", "MIN", .weekdays([2, 4, 6]), created: at(2026, 10, 1, 8))
         let engine = StackEngine(state: StackState(items: [mwf]), clock: c)
         let monday = DayKey(year: 2026, month: 10, day: 12)
@@ -109,7 +109,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testMultiDoseCompletion() {
-        let c = clock()
+        let c = londonClock()
         let fish = makeItem("Fish Oil", "FSH", .daily(times: 2), created: at(2026, 10, 1, 8))
         var state = StackState(items: [fish])
         let now = at(2026, 10, 12, 8)
@@ -133,7 +133,7 @@ final class DayLogicTests: XCTestCase {
     // MARK: Take all
 
     func testTakeAllOnlyTouchesPendingDueDoses() {
-        let c = clock()
+        let c = londonClock()
         let created = at(2026, 10, 1, 8)
         let vd3 = makeItem("Vitamin D3", "VD3", created: created, sortIndex: 0)
         let fin = makeItem("Finasteride", "FIN", created: created, sortIndex: 1)
@@ -157,7 +157,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testWidgetLogNeverDoubleLogs() {
-        let c = clock()
+        let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
         var state = StackState(items: [vd3])
         let now = at(2026, 10, 12, 9)
@@ -169,7 +169,7 @@ final class DayLogicTests: XCTestCase {
     // MARK: Undo and backfill
 
     func testUndoRemovesOnlyThatDose() {
-        let c = clock()
+        let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
         var state = StackState(items: [vd3])
         let yesterday = state.logDose(itemId: vd3.id, at: at(2026, 10, 11, 8))!
@@ -185,7 +185,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testBackfillOnPastDay() {
-        let c = clock()
+        let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
         var state = StackState(items: [vd3])
         let saturday = DayKey(year: 2026, month: 10, day: 10)
@@ -198,7 +198,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testBackfillBeforeItemWasAddedExtendsHistory() {
-        let c = clock()
+        let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 12, 8))
         var state = StackState(items: [vd3])
         let sunday = DayKey(year: 2026, month: 10, day: 11)
@@ -218,7 +218,7 @@ final class DayLogicTests: XCTestCase {
     // MARK: Stats
 
     func testStreakSkipsNothingDueDaysAndIgnoresUnfinishedToday() {
-        let c = clock()
+        let c = londonClock()
         let created = at(2026, 10, 1, 8)
         let mwf = makeItem("Minoxidil", "MIN", .weekdays([2, 4, 6]), created: created)
         var state = StackState(items: [mwf])
@@ -234,7 +234,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testStreakBreaksOnMissedDay() {
-        let c = clock()
+        let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
         var state = StackState(items: [vd3])
         for day in [8, 9, 11] { state.logDose(itemId: vd3.id, at: at(2026, 10, day, 8)) }
@@ -243,7 +243,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testThirtyDayAdherence() {
-        let c = clock()
+        let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 9, 1, 8))
         var state = StackState(items: [vd3])
         let today = DayKey(year: 2026, month: 10, day: 12)
@@ -266,7 +266,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testHistoryGridShape() {
-        let c = clock()
+        let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 9, 1, 8))
         var state = StackState(items: [vd3])
         state.logDose(itemId: vd3.id, at: at(2026, 10, 11, 8))
@@ -282,7 +282,7 @@ final class DayLogicTests: XCTestCase {
     }
 
     func testArchivedItemKeepsHistoryButLeavesToday() {
-        let c = clock()
+        let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8), sortIndex: 0)
         let mag = makeItem("Magnesium", "MAG", created: at(2026, 10, 1, 8), sortIndex: 1)
         var state = StackState(items: [vd3, mag])
@@ -302,7 +302,7 @@ final class DayLogicTests: XCTestCase {
         state.deleteItem(id: mag.id)
         XCTAssertEqual(state.items.map(\.id), [vd3.id])
         XCTAssertEqual(state.doses.count, 1)
-        let summary = StackEngine(state: state, clock: clock()).summary(for: DayKey(year: 2026, month: 10, day: 5))
+        let summary = StackEngine(state: state, clock: londonClock()).summary(for: DayKey(year: 2026, month: 10, day: 5))
         XCTAssertEqual(summary.status, .complete)
     }
 

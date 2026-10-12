@@ -44,21 +44,28 @@ struct TodayView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                if model.hasStack {
-                    stackContent
-                } else {
-                    EmptyStackView()
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(alignment: .leading, spacing: 0) {
+                    if model.hasStack {
+                        stackContent
+                    } else {
+                        EmptyStackView()
+                    }
                 }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 28)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 28)
+            .scrollIndicators(.hidden)
+            .background(Palette.bg.ignoresSafeArea())
+            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
+            .safeAreaInset(edge: .bottom, spacing: 0) { BottomDock() }
+            .onChange(of: model.scrollTarget) { _, target in
+                guard let target else { return }
+                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(target, anchor: .top) }
+                model.scrollTarget = nil
+            }
         }
-        .scrollIndicators(.hidden)
-        .background(Palette.bg.ignoresSafeArea())
-        .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
-        .safeAreaInset(edge: .bottom, spacing: 0) { BottomDock() }
     }
 
     @ViewBuilder
@@ -66,7 +73,8 @@ struct TodayView: View {
         let today = model.today
         SectionHeader(index: "01", title: "STATUS", trailing: today.allTaken ? "LOCKED" : "LIVE",
                       trailingColor: today.allTaken ? Palette.signal : Palette.fgSubtle)
-        StatusPanel(summary: today, now: model.now, clock: model.clock, lockInCount: model.lockInCount)
+        StatusPanel(summary: today, now: model.now, clock: model.clock, lockInCount: model.lockInCount,
+                    streak: model.streak)
 
         SectionHeader(index: "02", title: "STACK", trailing: "\(today.due.count) DUE")
         if today.due.isEmpty {
@@ -95,6 +103,7 @@ struct TodayView: View {
         }
 
         SectionHeader(index: "03", title: "LOG", trailing: "5 WEEKS")
+            .id("log")
         HistoryGrid(rows: model.history) { day in
             model.sheet = .day(day)
         }

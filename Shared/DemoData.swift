@@ -50,7 +50,8 @@ enum DemoData {
             log(mag, today, 21, 12)
         }
 
-        return StackState(items: [vd3, fin, fsh, cre, mag, znc], doses: doses, settings: StackSettings())
+        return StackState(items: [vd3, fin, fsh, cre, mag, znc], doses: doses,
+                          settings: StackSettings(reminderEnabled: true))
     }
 
     /// The partly taken day shown in the day-sheet screenshot.

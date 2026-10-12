@@ -46,6 +46,10 @@ final class AppModel {
     var sheet: SheetRoute?
     var toast: Toast?
     var expandedItemID: UUID?
+    /// Section the TODAY scroll view should jump to (screenshots, deep links).
+    var scrollTarget: String?
+    /// Chips pre-selected in the Add sheet for the `-demo -screen add` screenshot.
+    let demoPreselect: [String]
     /// Increments each time the day locks in (ALL TAKEN) from a tap, to run the lock-in animation once.
     private(set) var lockInCount = 0
     private(set) var notificationsDenied = false
@@ -59,6 +63,7 @@ final class AppModel {
         self.isDemo = isDemo
         self.launchScreen = launchScreen
         self.clockNow = clockNow
+        self.demoPreselect = isDemo && launchScreen == "add" ? ["Vitamin D3", "Fish Oil", "Finasteride"] : []
         let state = store.load()
         let now = clockNow()
         let engine = StackEngine(state: state, clock: DayClock(dayStartHour: state.settings.dayStartHour))
@@ -87,7 +92,10 @@ final class AppModel {
         let demoNow = DemoData.referenceNow()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("taken-demo-\(UUID().uuidString).json")
         let store = TakenStore(fileURL: url, postsChangeNotifications: false)
-        try? store.replace(with: DemoData.state(now: demoNow, allTaken: screen == "today-done"))
+        let seeded = screen == "add"
+            ? StackState(settings: StackSettings(reminderEnabled: true))
+            : DemoData.state(now: demoNow, allTaken: screen == "today-done")
+        try? store.replace(with: seeded)
         return AppModel(store: store, isDemo: true, launchScreen: screen, clockNow: { demoNow })
     }
 
@@ -154,6 +162,7 @@ final class AppModel {
         case "add": sheet = .add
         case "settings": sheet = .settings
         case "day": sheet = .day(DemoData.sheetDay(now: now))
+        case "log": scrollTarget = "log"
         default: break
         }
     }

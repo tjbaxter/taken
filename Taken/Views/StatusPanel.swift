@@ -7,17 +7,19 @@ struct StatusPanel: View {
     let now: Date
     let clock: DayClock
     let lockInCount: Int
+    let streak: Int
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var sweep: CGFloat = 0
     @State private var sweeping = false
     @State private var snap = false
 
-    init(summary: DaySummary, now: Date, clock: DayClock, lockInCount: Int) {
+    init(summary: DaySummary, now: Date, clock: DayClock, lockInCount: Int, streak: Int) {
         self.summary = summary
         self.now = now
         self.clock = clock
         self.lockInCount = lockInCount
+        self.streak = streak
     }
 
     private var locked: Bool { summary.allTaken }
@@ -110,10 +112,17 @@ struct StatusPanel: View {
                 }
                 .scaleEffect(snap ? 1 : 0.6)
             }
-            if let last = summary.lastDose {
-                Text("LAST DOSE \(Fmt.clock(last.takenAt, clock)) \u{00B7} \(Fmt.ago(last.takenAt, now: now))")
-                    .hud(11, Palette.fgMuted, tracking: 0.12)
+            HStack(spacing: 12) {
+                if streak > 0 {
+                    Text("STREAK \(streak)D").hud(11, Palette.signal, tracking: 0.12)
+                }
+                if let last = summary.lastDose {
+                    Text("LAST DOSE \(Fmt.clock(last.takenAt, clock)) \u{00B7} \(Fmt.ago(last.takenAt, now: now))")
+                        .hud(11, Palette.fgMuted, tracking: 0.12)
+                }
             }
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
         }
         .padding(.vertical, 4)
     }
@@ -215,9 +224,15 @@ struct DayRuler: View {
                 }
                 let nowFraction = now.timeIntervalSince(dayStart) / span
                 if nowFraction >= 0 && nowFraction <= 1 {
-                    let x = width * CGFloat(nowFraction)
-                    context.fill(Path(CGRect(x: x - 0.5, y: 0, width: 1, height: size.height)),
-                                 with: .color(Palette.fgMuted))
+                    let x = min(max(width * CGFloat(nowFraction), 3), width - 3)
+                    context.fill(Path(CGRect(x: x - 0.75, y: 3, width: 1.5, height: size.height - 3)),
+                                 with: .color(Palette.fg))
+                    var cap = Path()
+                    cap.move(to: CGPoint(x: x - 3.5, y: 0))
+                    cap.addLine(to: CGPoint(x: x + 3.5, y: 0))
+                    cap.addLine(to: CGPoint(x: x, y: 4.5))
+                    cap.closeSubpath()
+                    context.fill(cap, with: .color(Palette.fg))
                 }
                 for dose in doses {
                     let fraction = dose.timeIntervalSince(dayStart) / span
@@ -225,12 +240,12 @@ struct DayRuler: View {
                     let x = width * CGFloat(fraction)
                     context.drawLayer { layer in
                         layer.addFilter(.shadow(color: Palette.signal.opacity(0.8), radius: 3))
-                        layer.fill(Path(CGRect(x: x - 1.5, y: 0, width: 3, height: size.height)),
+                        layer.fill(Path(CGRect(x: x - 1.5, y: 4, width: 3, height: size.height - 4)),
                                    with: .color(Palette.signal))
                     }
                 }
             }
-            .frame(height: 12)
+            .frame(height: 16)
             HStack(spacing: 0) {
                 ForEach(0..<5, id: \.self) { index in
                     if index > 0 { Spacer(minLength: 0) }

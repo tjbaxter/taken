@@ -4,7 +4,7 @@ import Foundation
 /// Fixed zone so day math is deterministic on any CI machine.
 let london = TimeZone(identifier: "Europe/London")!
 
-func clock(_ dayStartHour: Int = 4, _ timeZone: TimeZone = london) -> DayClock {
+func londonClock(_ dayStartHour: Int = 4, _ timeZone: TimeZone = london) -> DayClock {
     DayClock(dayStartHour: dayStartHour, timeZone: timeZone)
 }
 

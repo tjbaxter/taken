@@ -117,6 +117,9 @@ struct AddSheet: View {
         .presentationDragIndicator(.hidden)
         .presentationBackground(Palette.bg)
         .animation(.snappy(duration: 0.22), value: showCustom)
+        .onAppear {
+            if selected.isEmpty && !model.demoPreselect.isEmpty { selected = model.demoPreselect }
+        }
     }
 
     private func chip(_ preset: Preset) -> some View {

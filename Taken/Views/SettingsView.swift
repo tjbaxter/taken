@@ -184,14 +184,30 @@ struct SettingsView: View {
 
     private var dayStartSection: some View {
         Section {
-            Picker(selection: Binding(get: { model.settings.dayStartHour }, set: { model.setDayStartHour($0) })) {
-                ForEach(0..<13, id: \.self) { hour in
-                    Text(Fmt.hour(hour)).tag(hour)
-                }
-            } label: {
+            HStack {
                 Text("DAY STARTS AT").hud(12, Palette.fg)
+                Spacer()
+                Menu {
+                    Picker("Day starts at", selection: Binding(get: { model.settings.dayStartHour },
+                                                               set: { model.setDayStartHour($0) })) {
+                        ForEach(0..<13, id: \.self) { hour in
+                            Text(Fmt.hour(hour)).tag(hour)
+                        }
+                    }
+                } label: {
+                    HStack(spacing: 8) {
+                        Text(Fmt.hour(model.settings.dayStartHour))
+                            .font(.monoFixed(15, .monoMedium))
+                            .foregroundStyle(Palette.signal)
+                        Image(systemName: "chevron.up.chevron.down")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(Palette.fgSubtle)
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .accessibilityLabel("Day starts at \(Fmt.hour(model.settings.dayStartHour))")
             }
-            .pickerStyle(.menu)
             .settingsRow()
 
             Text("A dose before this time counts for the day before, so a late night stays on the right day.")
