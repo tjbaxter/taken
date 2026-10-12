@@ -145,7 +145,8 @@ final class AppModel {
     }
 
     func didBecomeActive() {
-        reload()
+        // Always rebuild: the time zone or the day may have changed while the app was away.
+        apply(store.load())
         guard !isDemo else { return }
         let snapshot = state
         Task {

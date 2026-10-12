@@ -112,6 +112,11 @@ struct StateMark: View {
 
 struct Pip: View {
     let lit: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(lit: Bool) {
+        self.lit = lit
+    }
 
     var body: some View {
         ZStack {
@@ -122,16 +127,21 @@ struct Pip: View {
                 Circle()
                     .fill(Palette.signal)
                     .shadow(color: Palette.signal.opacity(0.6), radius: 4)
-                    .transition(.scale(scale: 0.4).combined(with: .opacity))
+                    .transition(reduceMotion ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
             }
         }
         .frame(width: 12, height: 12)
-        .animation(.spring(response: 0.28, dampingFraction: 0.6), value: lit)
+        .animation(reduceMotion ? .easeOut(duration: 0.18) : .spring(response: 0.28, dampingFraction: 0.6), value: lit)
     }
 }
 
 struct Disc: View {
     let lit: Bool
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+
+    init(lit: Bool) {
+        self.lit = lit
+    }
 
     var body: some View {
         ZStack {
@@ -147,10 +157,10 @@ struct Disc: View {
                         .stroke(Palette.bg, style: StrokeStyle(lineWidth: 2.4, lineCap: .square, lineJoin: .miter))
                         .frame(width: 15, height: 15)
                 }
-                .transition(.scale(scale: 0.5).combined(with: .opacity))
+                .transition(reduceMotion ? .opacity : .scale(scale: 0.5).combined(with: .opacity))
             }
         }
         .frame(width: 28, height: 28)
-        .animation(.spring(response: 0.28, dampingFraction: 0.58), value: lit)
+        .animation(reduceMotion ? .easeOut(duration: 0.18) : .spring(response: 0.28, dampingFraction: 0.58), value: lit)
     }
 }

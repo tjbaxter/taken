@@ -48,7 +48,9 @@ struct StatusPanel: View {
         .animation(.snappy(duration: 0.3), value: locked)
         .onAppear { snap = locked }
         .onChange(of: locked) { _, isLocked in
-            withAnimation(.spring(response: 0.32, dampingFraction: 0.62)) { snap = isLocked }
+            withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.32, dampingFraction: 0.62)) {
+                snap = isLocked
+            }
         }
         .onChange(of: lockInCount) { _, _ in runSweep() }
         .accessibilityElement(children: .ignore)

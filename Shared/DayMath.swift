@@ -54,7 +54,7 @@ struct DayClock: Sendable {
     let calendar: Calendar
     let dayStartHour: Int
 
-    init(dayStartHour: Int, timeZone: TimeZone = .current) {
+    init(dayStartHour: Int, timeZone: TimeZone = .autoupdatingCurrent) {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         calendar.locale = Locale(identifier: "en_US_POSIX")
