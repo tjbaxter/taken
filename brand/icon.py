@@ -6,7 +6,7 @@ grid (default 4x, so 4096 px for a 1024 icon) and box-filtered down, which
 gives exact, crisp anti-aliasing. Colours come from the Taken design tokens
 (SPEC.md section 4). Run from the repo root:
 
-    python3 brand/icon.py                      # final icon set into the asset catalog + brand/
+    python3 brand/icon.py                      # final icon set (asset catalog), brand/*.svg, site icons in docs/
     python3 brand/icon.py --concept reticle --out /tmp/x.png --variant default
     python3 brand/icon.py --concepts brand/concepts   # render every concept
 
@@ -629,7 +629,18 @@ def concept_reticle2(r):
     r.grain(0.9)
 
 
+def concept_glyph(r, k=1.62, stroke=34.0, gap=30.0):
+    """Favicon / small-size glyph: the capsule alone, scaled up, no brackets."""
+    r.background(lift=1.0)
+    cap, near, far = capsule_halves(512.0, 512.0, 45.0, 156.0 * k, 116.0 * k, gap)
+    r.fill(far, "fill_deep")
+    r.fill(lambda x, y: op_inner_stroke(far(x, y), stroke), "line")
+    m = r.fill(near, "lit")
+    r.glow(m, radius=60.0, strength=0.22)
+
+
 CONCEPTS = {
+    "glyph": concept_glyph,
     "split": concept_split,
     "split2": concept_split2,
     "split2dash": lambda r: concept_split2(r, dashed=True),
@@ -667,6 +678,138 @@ def write_asset_catalog(concept, ss=4):
         out[variant] = img
     save_png(out["default"], os.path.join(HERE, "icon-1024.png"))
     return out
+
+
+def _capsule_paths(hl, rad, gap, stroke):
+    """SVG path data in a frame where the capsule axis is +x, centred at 0,0."""
+    g = gap / 2.0
+    lit = f"M{-g:g} {-rad:g}H{-hl:g}A{rad:g} {rad:g} 0 0 0 {-hl:g} {rad:g}H{-g:g}Z"
+    shell = f"M{g:g} {-rad:g}H{hl:g}A{rad:g} {rad:g} 0 0 1 {hl:g} {rad:g}H{g:g}Z"
+    i = stroke / 2.0
+    ri = rad - i
+    outline = f"M{g + i:g} {-ri:g}H{hl:g}A{ri:g} {ri:g} 0 0 1 {hl:g} {ri:g}H{g + i:g}Z"
+    return lit, shell, outline
+
+
+def svg_mark(full=True):
+    """The icon as SVG. full=True: the whole 1024 icon (square, background, brackets).
+    full=False: the capsule glyph alone on a transparent background, tightly framed."""
+    hl, rad, gap, stroke = 156.0, 116.0, 18.0, 16.0
+    lit, shell, outline = _capsule_paths(hl, rad, gap, stroke)
+    capsule = (
+        f'<g transform="translate(512 512) rotate(-45)">'
+        f'<path d="{shell}" fill="#0F1012"/>'
+        f'<path d="{outline}" fill="none" stroke="#8A8A93" stroke-width="{stroke:g}"/>'
+        f'<path d="{lit}" fill="#FFB000"/>'
+        f"</g>"
+    )
+    if not full:
+        ext = hl * math.cos(math.radians(45)) + rad + 6
+        v = f"{512 - ext:.1f} {512 - ext:.1f} {2 * ext:.1f} {2 * ext:.1f}"
+        return (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="{v}" role="img" aria-label="Taken">'
+                f"{capsule}</svg>\n")
+    half, arm, t = 322.0, 104.0, 16.0
+    rects = []
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            ox, oy = 512 + sx * half, 512 + sy * half
+            hx0 = ox if sx < 0 else ox - arm
+            hy0 = oy if sy < 0 else oy - t
+            vx0 = ox if sx < 0 else ox - t
+            vy0 = oy if sy < 0 else oy - arm
+            rects.append(f'<rect x="{hx0:g}" y="{hy0:g}" width="{arm:g}" height="{t:g}" rx="3"/>')
+            rects.append(f'<rect x="{vx0:g}" y="{vy0:g}" width="{t:g}" height="{arm:g}" rx="3"/>')
+    tl, tt = 40.0, 12.0
+    ticks = [
+        (512 - tt / 2, 512 - half, tt, tl), (512 - tt / 2, 512 + half - tl, tt, tl),
+        (512 - half, 512 - tt / 2, tl, tt), (512 + half - tl, 512 - tt / 2, tl, tt),
+    ]
+    tick_svg = "".join(f'<rect x="{x:g}" y="{y:g}" width="{w:g}" height="{h:g}" rx="2"/>' for x, y, w, h in ticks)
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-label="Taken">'
+        '<defs><filter id="glow" x="-50%" y="-50%" width="200%" height="200%">'
+        '<feGaussianBlur stdDeviation="40"/></filter></defs>'
+        '<rect width="1024" height="1024" fill="#08090A"/>'
+        f'<g fill="#8A8A93" opacity="0.9">{"".join(rects)}</g>'
+        f'<g fill="#3A3A41">{tick_svg}</g>'
+        f'<g transform="translate(512 512) rotate(-45)" opacity="0.35" filter="url(#glow)">'
+        f'<path d="{lit}" fill="#FFB000"/></g>'
+        f"{capsule}</svg>\n"
+    )
+
+
+def svg_favicon():
+    """Rounded dark tile with the capsule glyph, legible in a 16 px browser tab."""
+    k, gap, stroke = 1.62, 30.0, 34.0
+    hl, rad = 156.0 * k, 116.0 * k
+    lit, shell, outline = _capsule_paths(hl, rad, gap, stroke)
+    return (
+        '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024">'
+        '<rect width="1024" height="1024" rx="228" fill="#08090A"/>'
+        f'<g transform="translate(512 512) rotate(-45)">'
+        f'<path d="{shell}" fill="#0F1012"/>'
+        f'<path d="{outline}" fill="none" stroke="#8A8A93" stroke-width="{stroke:g}"/>'
+        f'<path d="{lit}" fill="#FFB000"/></g></svg>\n'
+    )
+
+
+def og_card(out, icon_img):
+    """1200x630 link-preview card for the site."""
+    from PIL import ImageDraw, ImageFont
+    W, H = 1200, 630
+    img = Image.new("RGB", (W, H), tuple(int(c * 255) for c in BG))
+    d = ImageDraw.Draw(img)
+    sans = ImageFont.truetype(os.path.join(HERE, "fonts", "Geist-Medium.ttf"), 64)
+    mono = ImageFont.truetype(os.path.join(HERE, "fonts", "GeistMono-Medium.ttf"), 20)
+
+    def tracked(x, y, text, font, fill, track):
+        for ch in text:
+            d.text((x, y), ch, font=font, fill=fill)
+            x += d.textlength(ch, font=font) + track
+        return x
+
+    line = (34, 35, 38)
+    # frame + dashed rules, like the sites
+    d.rectangle([24, 24, W - 25, H - 25], outline=line, width=1)
+    for x in range(24, W - 24, 8):
+        d.line([(x, 112), (x + 3, 112)], fill=(52, 53, 58))
+        d.line([(x, H - 112), (x + 3, H - 112)], fill=(52, 53, 58))
+    sub = (124, 124, 133)
+    tracked(64, 62, "TAKEN", mono, (244, 244, 245), 4)
+    tracked(W - 64 - 330, 62, "PILL & SUPPLEMENT LOG", mono, sub, 2.6)
+    tile = icon_img.resize((300, 300), Image.LANCZOS)
+    img.paste(tile, (64, (H - 300) // 2), squircle_mask(300))
+    tx = 420
+    d.text((tx, 232), "Did I take it?", font=sans, fill=(244, 244, 245))
+    d.text((tx, 310), "Know for sure.", font=sans, fill=(161, 161, 170))
+    y = H - 84
+    x = tracked(64, y, "ONE TAP", mono, sub, 3)
+    x = tracked(x + 18, y, "/", mono, (82, 82, 91), 0)
+    x = tracked(x + 18, y, "NOTHING TO READ", mono, sub, 3)
+    x = tracked(x + 18, y, "/", mono, (82, 82, 91), 0)
+    tracked(x + 18, y, "NOTHING LEAVES YOUR PHONE", mono, sub, 3)
+    d.ellipse([W - 64 - 10, y + 6, W - 64, y + 16], fill=(255, 176, 0))
+    save_png(img, out)
+
+
+def write_web_assets(docs_dir):
+    """Favicons, touch icon and the link-preview card for the GitHub Pages site."""
+    os.makedirs(docs_dir, exist_ok=True)
+    with open(os.path.join(docs_dir, "favicon.svg"), "w") as f:
+        f.write(svg_favicon())
+    glyph = render("glyph", "default", 256, 4)
+    save_png(glyph.resize((32, 32), Image.LANCZOS), os.path.join(docs_dir, "favicon-32.png"))
+    full = render(FINAL, "default", 1024, 4)
+    save_png(full.resize((180, 180), Image.LANCZOS), os.path.join(docs_dir, "apple-touch-icon.png"))
+    save_png(full.resize((512, 512), Image.LANCZOS), os.path.join(docs_dir, "icon-512.png"))
+    og_card(os.path.join(docs_dir, "og.png"), full)
+
+
+def write_svgs():
+    with open(os.path.join(HERE, "mark.svg"), "w") as f:
+        f.write(svg_mark(full=True))
+    with open(os.path.join(HERE, "glyph.svg"), "w") as f:
+        f.write(svg_mark(full=False))
 
 
 def squircle_mask(size, n=5.0, ss=4):
@@ -716,6 +859,7 @@ def main():
     ap.add_argument("--size", type=int, default=1024)
     ap.add_argument("--ss", type=int, default=4)
     ap.add_argument("--concepts", help="render every concept (default variant) into this folder")
+    ap.add_argument("--web-only", action="store_true", help="only the SVG marks and the site icons")
     a = ap.parse_args()
     if a.sheet:
         names = a.names.split(",") if a.names else sorted(CONCEPTS)
@@ -732,8 +876,12 @@ def main():
         save_png(render(a.concept, a.variant, a.size, a.ss), a.out)
         print("wrote", a.out)
         return
-    write_asset_catalog(a.concept, a.ss)
-    print("wrote asset catalog icons for", a.concept)
+    if not a.web_only:
+        write_asset_catalog(a.concept, a.ss)
+        print("wrote asset catalog icons for", a.concept)
+    write_svgs()
+    write_web_assets(os.path.join(REPO, "docs"))
+    print("wrote brand/mark.svg, brand/glyph.svg and the site icons in docs/")
 
 
 if __name__ == "__main__":
