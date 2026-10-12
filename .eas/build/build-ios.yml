@@ -6,7 +6,7 @@ build:
   steps:
     - eas/checkout
     - run:
-        name: Generate the Xcode project into ios/
+        name: Generate the Xcode project (ios -> repo root)
         command: |
           set -euo pipefail
           sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app /Applications/Xcode-26*.app /Applications/Xcode.app 2>/dev/null | sort -V | tail -1)" || true
@@ -18,8 +18,11 @@ build:
               export PATH="/tmp/xcodegen/xcodegen/bin:$PATH"
             }
           fi
-          xcodegen generate --spec project.yml --project ios
-          ls ios
+          xcodegen generate --spec project.yml
+          # EAS looks for the native project in ios/; point it at the root, where XcodeGen put it
+          # (generating into ios/ would break SRCROOT-relative Info.plist and entitlements paths).
+          rm -rf ios && ln -sfn . ios
+          ls ios/Taken.xcodeproj
     - eas/resolve_apple_team_id_from_credentials:
         id: resolve_apple_team_id_from_credentials
     - eas/configure_ios_credentials

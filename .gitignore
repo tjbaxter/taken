@@ -14,4 +14,4 @@ screenshots/
 *.mobileprovision
 *.provisionprofile
 .env*
-/ios/
+/ios
