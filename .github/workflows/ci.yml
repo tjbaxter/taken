@@ -1,0 +1,118 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "brand/**"
+      - "**/*.md"
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Build and test
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode 26
+        run: scripts/select-xcode.sh
+
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Pick simulator
+        id: sim
+        run: |
+          udid="$(scripts/pick-simulator.sh "iPhone 17 Pro" "iPhone 17" "iPhone 16 Pro")"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices | grep "$udid"
+
+      - name: Build and run unit tests
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild test \
+            -project Taken.xcodeproj \
+            -scheme Taken \
+            -configuration Debug \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath build/DerivedData \
+            -resultBundlePath build/TakenTests.xcresult \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/xcodebuild-test.log | xcbeautify --renderer github-actions
+
+      - name: Upload test log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: test-log
+          path: |
+            build/xcodebuild-test.log
+            build/TakenTests.xcresult
+          retention-days: 7
+
+  screenshots:
+    name: Screenshots
+    runs-on: macos-26
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Select Xcode 26
+        run: scripts/select-xcode.sh
+
+      - name: Generate project
+        run: |
+          brew install xcodegen
+          xcodegen generate
+
+      - name: Pick simulator
+        id: sim
+        run: |
+          udid="$(scripts/pick-simulator.sh "iPhone 17 Pro Max" "iPhone 16 Pro Max")"
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices | grep "$udid"
+
+      - name: Build app for the simulator
+        run: |
+          set -o pipefail
+          mkdir -p build
+          xcodebuild build \
+            -project Taken.xcodeproj \
+            -scheme Taken \
+            -configuration Debug \
+            -destination "id=${{ steps.sim.outputs.udid }}" \
+            -derivedDataPath build/DerivedData \
+            CODE_SIGNING_ALLOWED=NO \
+            2>&1 | tee build/xcodebuild-build.log | xcbeautify --renderer github-actions
+
+      - name: Capture screenshots
+        run: scripts/screenshots.sh "${{ steps.sim.outputs.udid }}" build/DerivedData/Build/Products/Debug-iphonesimulator/Taken.app screenshots
+
+      - name: Upload screenshots
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshots
+          path: screenshots/*.png
+          if-no-files-found: error
+          retention-days: 30
+
+      - name: Upload build log
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: build-log
+          path: build/xcodebuild-build.log
+          retention-days: 7
