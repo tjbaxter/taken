@@ -76,7 +76,7 @@ function island(ctx, W, P, I) {
   ctx.fillStyle = "rgba(12,16,28,0.95)"; ctx.beginPath(); ctx.arc(cx, cy, 2 * P, 0, Math.PI * 2); ctx.fill();
 }
 // The status bar's middle line, in points, read off the capture: the rows the "9:41" glyphs cover at top left.
-function statusMid(img, P) {
+function statusMid(img) {
   const k = img.width / 440; // capture px per point
   const x0 = Math.round(20 * k), x1 = Math.round(150 * k), y1 = Math.round(64 * k);
   const c = document.createElement("canvas"); c.width = x1 - x0; c.height = y1;
@@ -116,28 +116,26 @@ async function drawLock(ctx, W, H, P, L) {
   ctx.fillStyle = ink; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
   ctx.font = `600 ${21 * P}px ${SYS}`; ctx.fillText(L.date, W / 2, 124 * P);
   ctx.save(); ctx.font = `700 ${106 * P}px ${SYS}`; ctx.letterSpacing = `${-3 * P}px`; ctx.fillText(L.time, W / 2, 226 * P); ctx.restore();
-  // widgets: a circular gauge and a rectangular list, centred under the clock
-  const cs = 72, rw = 170, gap = 14, wy = 252;
+  // the app's Lock Screen widgets (TakenWidgets/StackWidget.swift), as iOS draws them: monochrome, vibrant.
+  // accessoryCircular = a capacity gauge with "4/6" inside; accessoryRectangular = "TAKEN 4/6" over three rows.
+  const cs = 74, rw = 168, gap = 18, wy = 250, vib = "rgba(255,255,255,0.9)";
   const wx = (W / P - (cs + gap + rw)) / 2;
-  const gcx = (wx + cs / 2) * P, gcy = (wy + cs / 2) * P;
-  ctx.fillStyle = "rgba(255,255,255,0.13)"; ctx.beginPath(); ctx.arc(gcx, gcy, cs / 2 * P, 0, Math.PI * 2); ctx.fill();
-  ctx.lineCap = "round"; ctx.lineWidth = 5.2 * P;
-  const rG = (cs / 2 - 8.5) * P, a0 = Math.PI * 0.75, span = Math.PI * 1.5, frac = L.done / L.due;
-  ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.beginPath(); ctx.arc(gcx, gcy, rG, a0, a0 + span); ctx.stroke();
-  ctx.strokeStyle = ink; ctx.beginPath(); ctx.arc(gcx, gcy, rG, a0, a0 + span * frac); ctx.stroke();
-  ctx.fillStyle = ink; ctx.font = `600 ${19 * P}px ${MONO}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
-  ctx.fillText(`${L.done}/${L.due}`, gcx, gcy + 0.5 * P);
-  ctx.font = `500 ${8.5 * P}px ${MONO}`; ctx.save(); ctx.letterSpacing = `${1.2 * P}px`; ctx.fillStyle = "rgba(255,255,255,0.75)";
-  ctx.fillText("TAKEN", gcx + 0.6 * P, gcy + 22 * P); ctx.restore();
-  const rx0 = (wx + cs + gap) * P;
+  const gcx = (wx + cs / 2) * P, gcy = (wy + cs / 2) * P, rG = (cs / 2 - 4.5) * P;
+  ctx.lineCap = "round"; ctx.lineWidth = 6 * P;
+  ctx.strokeStyle = "rgba(255,255,255,0.26)"; ctx.beginPath(); ctx.arc(gcx, gcy, rG, 0, Math.PI * 2); ctx.stroke();
+  ctx.strokeStyle = vib; ctx.beginPath(); ctx.arc(gcx, gcy, rG, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * (L.gauge.done / L.gauge.due)); ctx.stroke();
+  ctx.fillStyle = vib; ctx.font = `600 ${15 * P}px ${MONO}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(`${L.gauge.done}/${L.gauge.due}`, gcx, gcy + 0.5 * P);
+  const rx0 = (wx + cs + gap) * P, rx1 = rx0 + rw * P;
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.font = `600 ${15 * P}px ${MONO}`;
+  ctx.fillText(`TAKEN ${L.gauge.done}/${L.gauge.due}`, rx0, (wy + 15) * P);
   L.rows.forEach((row, i) => {
-    const y = (wy + 15 + i * 21.5) * P, on = !!row.at;
-    if (on) { ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(rx0 + 6 * P, y, 4.6 * P, 0, Math.PI * 2); ctx.fill(); }
-    else { ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.62)"; ctx.lineWidth = 1.4 * P; ctx.setLineDash([2.1 * P, 2.1 * P]); ctx.beginPath(); ctx.arc(rx0 + 6 * P, y, 4.3 * P, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
-    ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.font = `${on ? 600 : 500} ${15 * P}px ${MONO}`;
-    ctx.fillStyle = on ? ink : "rgba(255,255,255,0.62)";
-    ctx.save(); ctx.letterSpacing = `${0.8 * P}px`; ctx.fillText(row.code, rx0 + 18 * P, y + 0.5 * P); ctx.restore();
-    if (on) { ctx.textAlign = "right"; ctx.font = `500 ${15 * P}px ${MONO}`; ctx.fillText(row.at, rx0 + rw * P - 2 * P, y + 0.5 * P); }
+    const y = (wy + 35 + i * 18.5) * P;
+    ctx.fillStyle = vib;
+    if (row.done) { ctx.beginPath(); ctx.arc(rx0 + 4.5 * P, y - 4.6 * P, 4 * P, 0, Math.PI * 2); ctx.fill(); }
+    else { ctx.save(); ctx.strokeStyle = vib; ctx.lineWidth = 1.2 * P; ctx.beginPath(); ctx.arc(rx0 + 4.5 * P, y - 4.6 * P, 3.5 * P, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+    ctx.font = `500 ${14 * P}px ${MONO}`; ctx.textAlign = "left"; ctx.fillText(row.code, rx0 + 14 * P, y);
+    ctx.textAlign = "right"; ctx.fillText(row.value, rx1, y);
   });
   // the nudge: one notification, ours
   const nx = 13 * P, nw = W - 26 * P, nh = 74 * P, ny = L.notifY * P, nr = 23 * P;
@@ -184,7 +182,7 @@ async function composeScreen(spec) {
     const k = W / img.width, h = img.height * k;
     s.drawImage(img, 0, 0, W, h);
     if (h < H - 1) { s.fillStyle = "#08090a"; s.fillRect(0, h, W, H - h); }
-    if (!(spec.island && spec.island.mid != null)) { const m = statusMid(img, P); if (m != null) { I.mid = m; midSrc = "capture"; } }
+    if (!(spec.island && spec.island.mid != null)) { const m = statusMid(img); if (m != null) { I.mid = m; midSrc = "capture"; } }
   }
   island(s, W, P, I);
   return { islandMid: Math.round(I.mid * 10) / 10, islandFrom: midSrc };

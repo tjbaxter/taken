@@ -61,6 +61,9 @@ jobs:
             if [ -n "$CI_RUN" ]; then
               gh run download "$CI_RUN" -R "$GITHUB_REPOSITORY" -n screenshots -D "$raw"
               src="ci.yml run $CI_RUN ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$CI_RUN)"
+              # the day the captures were taken, so the drawn Lock Screen shows the same date as the app
+              day=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN" --jq '.run_started_at' | cut -c1-10)
+              echo "DEMO_DATE=$day" >> "$GITHUB_ENV"
             fi
           fi
           if [ -z "$src" ]; then

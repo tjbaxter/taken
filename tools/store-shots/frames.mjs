@@ -13,17 +13,17 @@ const LAYOUT = {
   top: 168,
   headSize: 150,
   headTrack: -0.045,
-  subSize: 58,
+  subSize: 60,
   gap: 34,
   headMax: 1220,
   subMax: 1060,
   screenW: 990,
   phoneTop: 700,
   // a dark titanium body: the studio softboxes draw its edges against the black
-  finish: "#4a4b4f",
+  finish: "#38393d",
   rough: 0.28,
   envi: 1.25,
-  glow: { a: 0.1, r: 0.5, stretch: 1.55 },
+  glow: { a: 0.15, r: 0.92, stretch: 1.25 },
   hud: { color: "rgba(161,161,170,0.30)", weight: 3, inset: 56, arm: 46 },
 };
 
@@ -33,24 +33,29 @@ const POSE = {
   hero: { ry: 0.24, rx: 0.06, rz: 0.05 },
   right: { ry: -0.42, rx: 0.07, rz: -0.1 },
   laidBack: { ry: -0.12, rx: -0.42, rz: 0.03 },
-  rollLeft: { ry: 0.18, rx: 0.05, rz: 0.19 },
+  rollLeft: { ry: 0.18, rx: 0.05, rz: 0.17 },
   rollRight: { ry: -0.22, rx: 0.06, rz: -0.2 },
   upright: { ry: 0.14, rx: 0.02, rz: 0.0 },
 };
 
 const cap = (name) => ({ kind: "capture", name });
 
-// The drawn Lock Screen: the evening nudge, with the widgets agreeing with it (one taken this morning, two pending).
+// The drawn Lock Screen: the 21:00 nudge over the app's own Lock Screen widgets, on the demo day ci.yml captures
+// (Shared/DemoData.swift: VD3, FIN, FSH x2, CRE, MAG due; four doses in by morning, so FSH and MAG are pending).
+// generate.mjs swaps in the date ci.yml took the captures on, so the Lock Screen agrees with the app's top bar.
 const LOCK = {
   kind: "lock",
   date: "Monday 12 October",
   time: "21:00",
-  done: 1,
-  due: 3,
-  rows: [{ code: "VD3", at: "07:42" }, { code: "FSH" }, { code: "FIN" }],
+  gauge: { done: 4, due: 6 },
+  rows: [
+    { code: "VD3", value: "07:42", done: true },
+    { code: "FIN", value: "07:42", done: true },
+    { code: "FSH", value: "1/2", done: false },
+  ],
   title: "Taken",
-  body: "2 pending: FSH, FIN",
-  notifY: 676,
+  body: "2 pending: FSH, MAG",
+  notifY: 616,
 };
 
 export const FRAMES = [
@@ -90,6 +95,8 @@ export const FRAMES = [
     subline: "Forgot to log? Fix any day in a tap.",
     ...POSE.rollLeft,
     phoneTop: 660,
+    screenW: 950,
+    cxShift: 24,
     screen: cap("day"),
   },
   {
@@ -98,8 +105,8 @@ export const FRAMES = [
     headline: "Nudges only when it *matters.*",
     subline: "Already done? Silence.",
     ...POSE.rollRight,
-    phoneTop: 660,
-    screenW: 840,
+    phoneTop: 640,
+    screenW: 930,
     screen: LOCK,
   },
   {

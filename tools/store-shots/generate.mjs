@@ -22,6 +22,10 @@ const OUT = process.env.OUT;
 if (!RAW || !OUT) throw new Error("set RAW (raw screens dir) and OUT (2x output dir)");
 const ONLY = process.env.ONLY || "";
 const MAP = JSON.parse(process.env.SCREEN_MAP || "{}");
+// DEMO_DATE=YYYY-MM-DD, the day ci.yml took the captures: the drawn Lock Screen shows it, as the app's top bar does
+const DEMO_DATE = /^\d{4}-\d{2}-\d{2}$/.test(process.env.DEMO_DATE || "") ? process.env.DEMO_DATE : "";
+const longDate = (iso) =>
+  new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).replace(/,/g, "");
 const pw = process.env.PLAYWRIGHT ? pathToFileURL(process.env.PLAYWRIGHT).href : "playwright";
 const { chromium } = await import(pw);
 const { FRAMES, specFor } = await import(pathToFileURL(join(HERE, "frames.mjs")).href);
@@ -88,7 +92,10 @@ try {
       const url = `/raw/${encodeURIComponent(spec.screen.name)}.png`;
       served.set(url, file);
       spec.screen = { ...spec.screen, src: url, file: relative(RAW, file) };
-    } else if (spec.screen.kind === "lock") spec.screen = { ...spec.screen, icon: "/icon.png" };
+    } else if (spec.screen.kind === "lock") {
+      spec.screen = { ...spec.screen, icon: "/icon.png" };
+      if (DEMO_DATE) spec.screen.date = longDate(DEMO_DATE);
+    }
     const ctx = await browser.newContext({ viewport: { width: spec.w, height: spec.h }, deviceScaleFactor: 2 });
     const page = await ctx.newPage();
     page.on("console", (m) => m.type() === "error" && console.error(`page ${f.file}:`, m.text()));
