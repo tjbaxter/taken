@@ -1,0 +1,16 @@
+# generated
+*.xcodeproj/
+*.xcworkspace/
+build/
+DerivedData/
+screenshots/
+*.ipa
+*.xcarchive
+.DS_Store
+# secrets: never commit
+*.p8
+*.p12
+*.cer
+*.mobileprovision
+*.provisionprofile
+.env*
