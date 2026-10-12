@@ -69,8 +69,8 @@ PALETTES = {
         "lit_hi": np.array([1.0, 1.0, 1.0], np.float32),
         "line": np.array([0.62, 0.62, 0.62], np.float32),
         "line_dim": np.array([0.30, 0.30, 0.30], np.float32),
-        "fill": np.array([0.16, 0.16, 0.16], np.float32),
-        "fill_deep": np.array([0.10, 0.10, 0.10], np.float32),
+        "fill": None,       # unlit areas stay empty so only the outline takes the tint
+        "fill_deep": None,
         "fg": np.array([1.0, 1.0, 1.0], np.float32),
         "cut": None,
     },
@@ -87,7 +87,7 @@ def sd_circle(x, y, cx, cy, r):
 def sd_segment(x, y, ax, ay, bx, by):
     pax, pay = x - ax, y - ay
     bax, bay = bx - ax, by - ay
-    h = np.clip((pax * bax + pay * bay) / (bax * bax + bay * bay), 0.0, 1.0)
+    h = np.clip((pax * bax + pay * bay) / max(bax * bax + bay * bay, 1e-9), 0.0, 1.0)
     return np.hypot(pax - bax * h, pay - bay * h)
 
 
@@ -314,11 +314,336 @@ def concept_split(r, angle_deg=45.0, half_len=150.0, rad=112.0, gap=16.0, stroke
     r.grain(0.9)
 
 
+def capsule_halves(cx, cy, angle_deg, half_len, rad, gap):
+    """SDFs for a capsule cut across its waist: (whole, lower-left half, upper-right half)."""
+    a = math.radians(angle_deg)
+    ux, uy = math.cos(a), -math.sin(a)
+    ax, ay = cx - ux * half_len, cy - uy * half_len
+    bx, by = cx + ux * half_len, cy + uy * half_len
+
+    def cap(x, y):
+        return sd_capsule(x, y, ax, ay, bx, by, rad)
+
+    def near(x, y):
+        return op_intersect(cap(x, y), sd_halfplane(x, y, cx, cy, ux, uy) + gap / 2.0)
+
+    def far(x, y):
+        return op_intersect(cap(x, y), -sd_halfplane(x, y, cx, cy, ux, uy) + gap / 2.0)
+
+    return cap, near, far
+
+
+def concept_reticle(r):
+    """A lit capsule at the centre of a 24-hour tick dial; one amber tick marks the time it was taken."""
+    r.background(lift=0.9)
+    cx = cy = 512.0
+    n = 24
+    lit_index = 8  # 07:42 rounds to the 08 hour tick on a 24 h dial, 00 at the top
+
+    def ticks(major, lit):
+        def fn(x, y):
+            ds = []
+            for i in range(n):
+                is_major = i % 6 == 0
+                if lit and i != lit_index:
+                    continue
+                if not lit and (is_major != major or i == lit_index):
+                    continue
+                th = math.radians(i * 360.0 / n)
+                ro = 372.0
+                ri = 316.0 if is_major else 336.0
+                if lit:
+                    ri = 300.0
+                rm = (ro + ri) / 2.0
+                px, py = cx + math.sin(th) * rm, cy - math.cos(th) * rm
+                w = 16.0 if (is_major or lit) else 12.0
+                ds.append(sd_box(x, y, px, py, w / 2.0, (ro - ri) / 2.0, 3.0, angle=-th))
+            return op_union(*ds)
+        return fn
+
+    r.fill(ticks(False, False), "line_dim")
+    r.fill(ticks(True, False), "line")
+    lm = r.fill(ticks(False, True), "lit")
+    cap, near, far = capsule_halves(cx, cy, 45.0, 118.0, 92.0, 14.0)
+    r.fill(far, "fill")
+    r.fill(lambda x, y: op_inner_stroke(far(x, y), 14.0), "line")
+    m = r.fill(near, "lit")
+    r.glow(np.maximum(m, lm), radius=40.0, strength=0.26)
+    r.grain(0.9)
+
+
+def concept_engraved(r):
+    """A solid amber capsule with a check cut clean through it, inside viewfinder brackets."""
+    r.background(lift=0.9)
+    viewfinder(r, half=318.0, arm=92.0, t=18.0, role="line", opacity=0.85)
+    cx = cy = 512.0
+    a = math.radians(45.0)
+    ux, uy = math.cos(a), -math.sin(a)
+    hl, rad = 150.0, 132.0
+    ax, ay = cx - ux * hl, cy - uy * hl
+    bx, by = cx + ux * hl, cy + uy * hl
+    # check mark centred on the capsule
+    p1 = (cx - 92.0, cy + 6.0)
+    p2 = (cx - 26.0, cy + 72.0)
+    p3 = (cx + 104.0, cy - 58.0)
+
+    def check(x, y):
+        return op_union(sd_capsule(x, y, *p1, *p2, 21.0), sd_capsule(x, y, *p2, *p3, 21.0))
+
+    def body(x, y):
+        return op_subtract(sd_capsule(x, y, ax, ay, bx, by, rad), check(x, y))
+
+    m = r.fill(body, "lit")
+    r.glow(m, radius=46.0, strength=0.24)
+    r.grain(0.9)
+
+
+def concept_monogram(r):
+    """A 'T': the crossbar is a half-lit capsule, the stem a tick ruler (a timeline)."""
+    r.background(lift=0.9)
+    cx = 512.0
+    bar_y = 348.0
+    hl, rad, gap = 186.0, 70.0, 16.0
+
+    def cap(x, y):
+        return sd_capsule(x, y, cx - hl, bar_y, cx + hl, bar_y, rad)
+
+    def left(x, y):
+        return op_intersect(cap(x, y), (x - cx) + gap / 2.0)
+
+    def right(x, y):
+        return op_intersect(cap(x, y), -(x - cx) + gap / 2.0)
+
+    r.fill(right, "fill")
+    r.fill(lambda x, y: op_inner_stroke(right(x, y), 15.0), "line")
+    m = r.fill(left, "lit")
+    top, bottom = bar_y + rad + 38.0, 808.0
+
+    def stem(x, y):
+        return sd_box(x, y, cx, (top + bottom) / 2.0, 9.0, (bottom - top) / 2.0, 3.0)
+
+    def rungs(major):
+        def fn(x, y):
+            ds = []
+            k = 0
+            yy = top + 18.0
+            while yy < bottom - 4.0:
+                is_major = k % 4 == 0
+                if is_major == major:
+                    w = 96.0 if is_major else 54.0
+                    ds.append(sd_box(x, y, cx, yy, w / 2.0, 7.0, 2.5))
+                yy += 38.0
+                k += 1
+            return op_union(*ds)
+        return fn
+
+    r.fill(stem, "line")
+    r.fill(rungs(False), "line_dim")
+    r.fill(rungs(True), "line")
+    r.glow(m, radius=40.0, strength=0.26)
+    r.grain(0.9)
+
+
+def concept_grid(r):
+    """Five weeks of days as a lit grid: the history view as a mark. Today outlined."""
+    r.background(lift=0.9)
+    n, cell, gap = 5, 92.0, 22.0
+    total = n * cell + (n - 1) * gap
+    x0 = 512.0 - total / 2.0 + cell / 2.0
+    # 0 = dim, 1 = half, 2 = lit, 3 = today (outlined)
+    pattern = [
+        [2, 2, 2, 1, 2],
+        [2, 2, 2, 2, 2],
+        [2, 0, 2, 2, 2],
+        [2, 2, 2, 2, 2],
+        [2, 2, 2, 2, 3],
+    ]
+
+    def cells(kind):
+        def fn(x, y):
+            ds = []
+            for j in range(n):
+                for i in range(n):
+                    if pattern[j][i] == kind:
+                        ds.append(sd_box(x, y, x0 + i * (cell + gap), x0 + j * (cell + gap), cell / 2.0, cell / 2.0, 14.0))
+            return op_union(*ds) if ds else np.full_like(x + y, 1e6)
+        return fn
+
+    r.fill(cells(0), "fill")
+    r.fill(lambda x, y: op_inner_stroke(cells(0)(x, y), 10.0), "line_dim")
+    r.fill(cells(1), "lit", opacity=0.42)
+    m = r.fill(cells(2), "lit")
+    r.fill(lambda x, y: op_inner_stroke(cells(3)(x, y), 12.0), "lit")
+    r.glow(m, radius=34.0, strength=0.18)
+    r.grain(0.9)
+
+
+def concept_checkpills(r):
+    """A check mark built from two capsules, each with its waist seam, in viewfinder brackets."""
+    r.background(lift=0.9)
+    viewfinder(r, half=318.0, arm=92.0, t=18.0, role="line", opacity=0.85)
+    rad, gap = 58.0, 14.0
+    v = (446.0, 640.0)
+    e1 = (318.0, 512.0)
+    e2 = (716.0, 370.0)
+
+    def seamed(p, q):
+        mx, my = (p[0] + q[0]) / 2.0, (p[1] + q[1]) / 2.0
+        L = math.hypot(q[0] - p[0], q[1] - p[1])
+        ux, uy = (q[0] - p[0]) / L, (q[1] - p[1]) / L
+
+        def fn(x, y):
+            cap = sd_capsule(x, y, *p, *q, rad)
+            seam = np.abs(sd_halfplane(x, y, mx, my, ux, uy)) - gap / 2.0
+            return op_subtract(cap, seam)
+        return fn
+
+    s1, s2 = seamed(v, e1), seamed(v, e2)
+    m = r.fill(lambda x, y: op_union(s1(x, y), s2(x, y)), "lit")
+    r.glow(m, radius=44.0, strength=0.24)
+    r.grain(0.9)
+
+
+def half_capsule_outline_points(cx, cy, angle_deg, half_len, rad, gap, inset, step=2.0):
+    """Points along the centre line of an inner stroke around the far (unlit) half of a
+    capsule: cut edge, side, round cap, side. Returns a list of (x, y) and the total length."""
+    a = math.radians(angle_deg)
+    ux, uy = math.cos(a), -math.sin(a)
+    nx, ny = -uy, ux  # perpendicular
+    rr = rad - inset  # stroke centre radius
+    g = gap / 2.0 + inset
+    pts = []
+
+    def add_line(p, q):
+        L = math.hypot(q[0] - p[0], q[1] - p[1])
+        k = max(2, int(L / step))
+        for i in range(k):
+            t = i / k
+            pts.append((p[0] + (q[0] - p[0]) * t, p[1] + (q[1] - p[1]) * t))
+
+    # cap centre of the far half
+    ccx, ccy = cx + ux * half_len, cy + uy * half_len
+    p0 = (cx + ux * g + nx * rr, cy + uy * g + ny * rr)
+    p1 = (cx + ux * g - nx * rr, cy + uy * g - ny * rr)
+    q1 = (ccx - nx * rr, ccy - ny * rr)
+    q0 = (ccx + nx * rr, ccy + ny * rr)
+    add_line(p0, p1)          # cut edge
+    add_line(p1, q1)          # side
+    # cap arc from -n to +n through +u
+    k = max(8, int(math.pi * rr / step))
+    for i in range(k):
+        t = math.pi * i / k
+        dx = -nx * math.cos(t) + ux * math.sin(t)
+        dy = -ny * math.cos(t) + uy * math.sin(t)
+        pts.append((ccx + dx * rr, ccy + dy * rr))
+    add_line(q0, p0)          # other side, back to start
+    return pts
+
+
+def dashes_along(pts, dash, period, phase=0.0, closed=True):
+    """Split a dense polyline into dash polylines by arc length."""
+    if closed:
+        pts = pts + [pts[0]]
+    out, cur, s = [], [], -phase
+    for i in range(len(pts) - 1):
+        p, q = pts[i], pts[i + 1]
+        L = math.hypot(q[0] - p[0], q[1] - p[1])
+        on = (s % period) < dash
+        if on:
+            cur.append(p)
+        elif cur:
+            cur.append(p)
+            out.append(cur)
+            cur = []
+        s += L
+    if cur:
+        out.append(cur)
+    return out
+
+
+def concept_split2(r, dashed=False, core=0.0):
+    """Refined split capsule: bigger mark, finer brackets, the unlit half reads as PENDING."""
+    r.background(lift=1.0)
+    viewfinder(r, half=322.0, arm=104.0, t=16.0, role="line", opacity=0.9)
+    edge_ticks(r, half=322.0, length=40.0, t=12.0, role="line_dim")
+    cx = cy = 512.0
+    hl, rad, gap, stroke = 156.0, 116.0, 18.0, 16.0
+    cap, near, far = capsule_halves(cx, cy, 45.0, hl, rad, gap)
+    r.fill(far, "fill_deep")
+    if dashed:
+        pts = half_capsule_outline_points(cx, cy, 45.0, hl, rad, gap, stroke / 2.0)
+        segs = dashes_along(pts, dash=34.0, period=56.0, phase=-6.0)
+
+        def dash_fn(x, y):
+            ds = []
+            for seg in segs:
+                sub = seg[:: max(1, len(seg) // 6)] + [seg[-1]]
+                for i in range(len(sub) - 1):
+                    ds.append(sd_capsule(x, y, *sub[i], *sub[i + 1], stroke / 2.0))
+            return op_union(*ds)
+        r.fill(dash_fn, "line")
+    else:
+        r.fill(lambda x, y: op_inner_stroke(far(x, y), stroke), "line")
+    m = r.fill(near, "lit")
+    if core > 0 and r.variant != "tinted":
+        # phosphor core: a faint hotter centre that falls off toward the edges of the lit half
+        inner = gaussian_blur(r.cov(lambda x, y: near(x, y) + 44.0), 38.0 * r.size / 1024.0)
+        r.over(r.pal["lit_hi"], np.clip(inner, 0, 1) * m * core)
+    r.glow(m, radius=50.0, strength=0.30)
+    r.grain(0.9)
+
+
+def concept_reticle2(r):
+    """Capsule inside a bold 12-hour tick dial; the lit tick sits at 8, beside the lit half."""
+    r.background(lift=1.0)
+    cx = cy = 512.0
+    lit_hour = 8
+
+    def ticks(kind):
+        def fn(x, y):
+            ds = []
+            for i in range(12):
+                major = i % 3 == 0
+                lit = i == lit_hour
+                k = "lit" if lit else ("major" if major else "minor")
+                if k != kind:
+                    continue
+                th = math.radians(i * 30.0)
+                ro = 374.0
+                ri = 318.0 if (major or lit) else 338.0
+                rm = (ro + ri) / 2.0
+                px, py = cx + math.sin(th) * rm, cy - math.cos(th) * rm
+                w = 18.0 if (major or lit) else 14.0
+                ds.append(sd_box(x, y, px, py, w / 2.0, (ro - ri) / 2.0, 3.0, angle=-th))
+            return op_union(*ds)
+        return fn
+
+    r.fill(ticks("minor"), "line_dim")
+    r.fill(ticks("major"), "line")
+    lm = r.fill(ticks("lit"), "lit")
+    cap, near, far = capsule_halves(cx, cy, 45.0, 138.0, 104.0, 16.0)
+    r.fill(far, "fill_deep")
+    r.fill(lambda x, y: op_inner_stroke(far(x, y), 15.0), "line")
+    m = r.fill(near, "lit")
+    r.glow(np.maximum(m, lm), radius=46.0, strength=0.28)
+    r.grain(0.9)
+
+
 CONCEPTS = {
     "split": concept_split,
+    "split2": concept_split2,
+    "split2dash": lambda r: concept_split2(r, dashed=True),
+    "split2core": lambda r: concept_split2(r, core=0.55),
+    "taken": lambda r: concept_split2(r, core=0.3),
+    "reticle2": concept_reticle2,
+    "reticle": concept_reticle,
+    "engraved": concept_engraved,
+    "monogram": concept_monogram,
+    "grid": concept_grid,
+    "checkpills": concept_checkpills,
 }
 
-FINAL = "split"
+FINAL = "taken"  # the shipped icon: split2 with a faint phosphor core
 
 
 def render(concept, variant="default", size=1024, ss=4, **kw):
@@ -344,22 +669,64 @@ def write_asset_catalog(concept, ss=4):
     return out
 
 
+def squircle_mask(size, n=5.0, ss=4):
+    """iOS-like continuous-corner mask (superellipse approximation) for previews."""
+    s = size * ss
+    c = (np.arange(s, dtype=np.float32) + 0.5) / s * 2.0 - 1.0
+    v = np.abs(c[None, :]) ** n + np.abs(c[:, None]) ** n
+    m = (v <= 1.0).astype(np.float32).reshape(size, ss, size, ss).mean(axis=(1, 3))
+    return Image.fromarray(np.round(m * 255).astype(np.uint8), "L")
+
+
+def contact_sheet(names, out, ss=2):
+    """Each concept large, then home-screen 180 px and 60 px, masked, on a dark and a light wall."""
+    tile_w, pad = 620, 28
+    W = pad + len(names) * (tile_w + pad)
+    H = 900
+    sheet = Image.new("RGB", (W, H), (20, 21, 24))
+    try:
+        from PIL import ImageDraw, ImageFont
+        font = ImageFont.truetype(os.path.join(HERE, "fonts", "GeistMono-Medium.ttf"), 22)
+        draw = ImageDraw.Draw(sheet)
+    except Exception:
+        draw, font = None, None
+    for k, name in enumerate(names):
+        img = render(name, "default", 1024, ss)
+        x = pad + k * (tile_w + pad)
+        big = img.resize((560, 560), Image.LANCZOS)
+        sheet.paste(big, (x + 30, 60), squircle_mask(560))
+        if draw:
+            draw.text((x + 30, 22), name.upper(), fill=(161, 161, 170), font=font)
+        # a mid-dark wallpaper strip with home-screen and spotlight sizes
+        sheet.paste(Image.new("RGB", (tile_w, 250), (46, 50, 58)), (x, 640))
+        for sz, ox in ((180, 40), (120, 260), (60, 420), (40, 520)):
+            small = img.resize((sz, sz), Image.LANCZOS)
+            sheet.paste(small, (x + ox, 640 + (250 - sz) // 2), squircle_mask(sz))
+    sheet.save(out)
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
+    ap.add_argument("--sheet", help="write a contact sheet of every concept to this PNG")
+    ap.add_argument("--names", help="comma separated concepts for --sheet")
     ap.add_argument("--concept", default=FINAL, choices=sorted(CONCEPTS))
     ap.add_argument("--variant", default="default", choices=sorted(PALETTES))
     ap.add_argument("--out")
     ap.add_argument("--size", type=int, default=1024)
     ap.add_argument("--ss", type=int, default=4)
-    ap.add_argument("--concepts", help="render every concept (all variants) into this folder")
+    ap.add_argument("--concepts", help="render every concept (default variant) into this folder")
     a = ap.parse_args()
+    if a.sheet:
+        names = a.names.split(",") if a.names else sorted(CONCEPTS)
+        print("wrote", contact_sheet(names, a.sheet, ss=a.ss))
+        return
     if a.concepts:
-        for name in sorted(CONCEPTS):
-            for variant in ("default", "dark", "tinted"):
-                img = render(name, variant, a.size, a.ss)
-                suffix = "" if variant == "default" else "-" + variant
-                save_png(img, os.path.join(a.concepts, f"{name}{suffix}.png"))
-                print("wrote", name, variant)
+        names = a.names.split(",") if a.names else sorted(CONCEPTS)
+        for name in names:
+            img = render(name, "default", a.size, a.ss)
+            save_png(img, os.path.join(a.concepts, f"{name}.png"))
+            print("wrote", name)
         return
     if a.out:
         save_png(render(a.concept, a.variant, a.size, a.ss), a.out)
