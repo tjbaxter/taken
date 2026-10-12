@@ -1,0 +1,408 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<title>Taken store frame</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Geist:wght@400;500;600;700&family=Geist+Mono:wght@400;500;600&family=Inter:wght@400;500;600;700&display=block" rel="stylesheet" />
+<style>
+  html, body { margin: 0; padding: 0; overflow: hidden; background: #08090a; }
+  #stage { position: relative; overflow: hidden; }
+  #bg, #gl { position: absolute; left: 0; top: 0; }
+  #cap { position: absolute; left: 0; right: 0; z-index: 2; text-align: center; }
+  #cap h1 { margin: 0 auto; font-family: "Geist", sans-serif; font-weight: 600; line-height: 1.04; text-wrap: balance; }
+  #cap p { margin: 0 auto; font-family: "Geist", sans-serif; font-weight: 400; line-height: 1.3; text-wrap: balance; }
+  #cap .acc { color: var(--acc); }
+</style>
+<script type="importmap">
+{ "imports": { "three": "https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.js" } }
+</script>
+</head>
+<body>
+<div id="stage"><canvas id="bg"></canvas><div id="cap"><h1 id="h"></h1><p id="s"></p></div></div>
+<script type="module">
+// Taken App Store frames, in the manner of Flair's listing and the PestLine AI set (tools/store-screens in the
+// PestLine repo, which this is ported from): a near-black canvas, a short caption on top, the app's real
+// simulator screen on a studio-lit dark titanium iPhone, each frame at its own angle, often running off the
+// bottom edge. generate.mjs drives it with FRAME.draw(spec), one spec per frame from frames.mjs.
+//
+// The raw screens are iOS Simulator captures (1320 x 2868) that already carry the real status bar and home
+// indicator, so this page draws neither on them: it adds only the Dynamic Island, which a simulator capture
+// leaves out. The one screen it draws itself is the Lock Screen (the reminder and the Lock Screen widgets).
+import * as THREE from "three";
+
+const SYS = `"Inter", system-ui, sans-serif`; // iOS system text on the drawn Lock Screen
+const MONO = `"Geist Mono", ui-monospace, monospace`; // Taken's own type inside its widgets
+const SIGNAL = "#FFB000";
+
+function loadImg(src) {
+  return new Promise((res, rej) => { const i = new Image(); i.onload = () => res(i); i.onerror = () => rej(new Error(`img ${src}`)); i.src = src; });
+}
+function rr(ctx, x, y, w, h, r) { ctx.beginPath(); ctx.roundRect(x, y, w, h, r); }
+
+// ═══════════════════════════ status glyphs (drawn Lock Screen only) ═══════════════════════════
+function glyphSignal(ctx, x, y, P, col, bars = 4) {
+  ctx.fillStyle = col;
+  for (let i = 0; i < bars; i++) { const h = (3.6 + i * 2.5) * P; rr(ctx, x + i * 4.7 * P, y - h, 3.1 * P, h, 0.9 * P); ctx.fill(); }
+}
+function glyphWifi(ctx, cx, cy, P, col) {
+  ctx.save(); ctx.fillStyle = col; ctx.translate(cx, cy);
+  const sector = (r0, r1) => { ctx.beginPath(); ctx.arc(0, 0, r1 * P, -Math.PI * 0.76, -Math.PI * 0.24); ctx.arc(0, 0, r0 * P, -Math.PI * 0.24, -Math.PI * 0.76, true); ctx.closePath(); ctx.fill(); };
+  sector(8.6, 11.4); sector(4.6, 7.3);
+  ctx.beginPath(); ctx.moveTo(0, 0); ctx.arc(0, 0, 3.4 * P, -Math.PI * 0.76, -Math.PI * 0.24); ctx.closePath(); ctx.fill();
+  ctx.restore();
+}
+function glyphBattery(ctx, x, y, P, col) {
+  ctx.save();
+  ctx.globalAlpha = 0.38; ctx.strokeStyle = col; ctx.fillStyle = col; ctx.lineWidth = 1.05 * P;
+  rr(ctx, x, y, 25 * P, 12 * P, 3.9 * P); ctx.stroke();
+  rr(ctx, x + 26.3 * P, y + 4 * P, 1.5 * P, 4 * P, 0.8 * P); ctx.fill();
+  ctx.globalAlpha = 1; rr(ctx, x + 2 * P, y + 2 * P, 21 * P, 8 * P, 2.3 * P); ctx.fill();
+  ctx.restore();
+}
+function statusRight(ctx, W, P, col, mid) {
+  const rx = W / P;
+  glyphSignal(ctx, (rx - 116) * P, (mid + 6) * P, P, col);
+  glyphWifi(ctx, (rx - 85) * P, (mid + 7.5) * P, P, col);
+  glyphBattery(ctx, (rx - 69) * P, (mid - 6) * P, P, col);
+}
+// The Dynamic Island (iPhone 16/17 Pro Max: ~125 x 37 pt), centred on the status bar's own middle line.
+function island(ctx, W, P, I) {
+  const w = I.w * P, h = I.h * P, y = (I.mid - I.h / 2) * P;
+  ctx.fillStyle = "#000"; rr(ctx, (W - w) / 2, y, w, h, h / 2); ctx.fill();
+  const cx = W / 2 + (I.w / 2 - I.h / 2) * P, cy = y + h / 2;
+  ctx.fillStyle = "rgba(34,44,72,0.5)"; ctx.beginPath(); ctx.arc(cx, cy, 4.6 * P, 0, Math.PI * 2); ctx.fill();
+  ctx.fillStyle = "rgba(12,16,28,0.95)"; ctx.beginPath(); ctx.arc(cx, cy, 2 * P, 0, Math.PI * 2); ctx.fill();
+}
+// The status bar's middle line, in points, read off the capture: the rows the "9:41" glyphs cover at top left.
+function statusMid(img, P) {
+  const k = img.width / 440; // capture px per point
+  const x0 = Math.round(20 * k), x1 = Math.round(150 * k), y1 = Math.round(64 * k);
+  const c = document.createElement("canvas"); c.width = x1 - x0; c.height = y1;
+  const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(img, x0, 0, x1 - x0, y1, 0, 0, x1 - x0, y1);
+  const d = g.getImageData(0, 0, c.width, c.height).data;
+  const lum = (i) => 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2];
+  const bgL = lum(0);
+  let top = -1, bot = -1;
+  for (let y = Math.round(4 * k); y < y1; y++) {
+    let hit = 0;
+    for (let x = 0; x < c.width; x++) if (Math.abs(lum((y * c.width + x) * 4) - bgL) > 90) hit++;
+    if (hit >= 2) { if (top < 0) top = y; bot = y; }
+  }
+  if (top < 0 || bot - top < 6 * k || bot - top > 20 * k) return null;
+  return (top + bot) / 2 / k;
+}
+
+// ═══════════════════════════ the Lock Screen (drawn) ═══════════════════════════
+// SPEC 3.5 and 3.6: the evening nudge ("2 pending: FSH, FIN") and the Lock Screen widgets, which iOS renders
+// monochrome (vibrant) whatever the app's colours, so they are white here.
+async function drawLock(ctx, W, H, P, L) {
+  const g = ctx.createLinearGradient(0, 0, 0, H);
+  g.addColorStop(0, "#1a1b1f"); g.addColorStop(0.42, "#0d0e10"); g.addColorStop(1, "#060607");
+  ctx.fillStyle = g; ctx.fillRect(0, 0, W, H);
+  ctx.save(); ctx.translate(W * 0.5, H * 1.04); ctx.scale(1.25, 1);
+  const glow = ctx.createRadialGradient(0, 0, 0, 0, 0, H * 0.58);
+  glow.addColorStop(0, "rgba(255,176,0,0.30)"); glow.addColorStop(0.32, "rgba(255,150,0,0.10)"); glow.addColorStop(1, "rgba(255,140,0,0)");
+  ctx.fillStyle = glow; ctx.fillRect(-W, -H * 1.1, W * 2, H * 1.2); ctx.restore();
+  const ink = "rgba(255,255,255,0.96)";
+  statusRight(ctx, W, P, ink, L.mid);
+  // padlock
+  ctx.save(); ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = 2.2 * P;
+  const lx = W / 2, ly = 66 * P;
+  rr(ctx, lx - 8 * P, ly, 16 * P, 12 * P, 2.5 * P); ctx.fill();
+  ctx.beginPath(); ctx.arc(lx, ly - 0.5 * P, 5.2 * P, Math.PI, 0); ctx.stroke(); ctx.restore();
+  // date and time
+  ctx.fillStyle = ink; ctx.textAlign = "center"; ctx.textBaseline = "alphabetic";
+  ctx.font = `600 ${21 * P}px ${SYS}`; ctx.fillText(L.date, W / 2, 124 * P);
+  ctx.save(); ctx.font = `700 ${106 * P}px ${SYS}`; ctx.letterSpacing = `${-3 * P}px`; ctx.fillText(L.time, W / 2, 226 * P); ctx.restore();
+  // widgets: a circular gauge and a rectangular list, centred under the clock
+  const cs = 72, rw = 170, gap = 14, wy = 252;
+  const wx = (W / P - (cs + gap + rw)) / 2;
+  const gcx = (wx + cs / 2) * P, gcy = (wy + cs / 2) * P;
+  ctx.fillStyle = "rgba(255,255,255,0.13)"; ctx.beginPath(); ctx.arc(gcx, gcy, cs / 2 * P, 0, Math.PI * 2); ctx.fill();
+  ctx.lineCap = "round"; ctx.lineWidth = 5.2 * P;
+  const rG = (cs / 2 - 8.5) * P, a0 = Math.PI * 0.75, span = Math.PI * 1.5, frac = L.done / L.due;
+  ctx.strokeStyle = "rgba(255,255,255,0.3)"; ctx.beginPath(); ctx.arc(gcx, gcy, rG, a0, a0 + span); ctx.stroke();
+  ctx.strokeStyle = ink; ctx.beginPath(); ctx.arc(gcx, gcy, rG, a0, a0 + span * frac); ctx.stroke();
+  ctx.fillStyle = ink; ctx.font = `600 ${19 * P}px ${MONO}`; ctx.textAlign = "center"; ctx.textBaseline = "middle";
+  ctx.fillText(`${L.done}/${L.due}`, gcx, gcy + 0.5 * P);
+  ctx.font = `500 ${8.5 * P}px ${MONO}`; ctx.save(); ctx.letterSpacing = `${1.2 * P}px`; ctx.fillStyle = "rgba(255,255,255,0.75)";
+  ctx.fillText("TAKEN", gcx + 0.6 * P, gcy + 22 * P); ctx.restore();
+  const rx0 = (wx + cs + gap) * P;
+  L.rows.forEach((row, i) => {
+    const y = (wy + 15 + i * 21.5) * P, on = !!row.at;
+    if (on) { ctx.fillStyle = ink; ctx.beginPath(); ctx.arc(rx0 + 6 * P, y, 4.6 * P, 0, Math.PI * 2); ctx.fill(); }
+    else { ctx.save(); ctx.strokeStyle = "rgba(255,255,255,0.62)"; ctx.lineWidth = 1.4 * P; ctx.setLineDash([2.1 * P, 2.1 * P]); ctx.beginPath(); ctx.arc(rx0 + 6 * P, y, 4.3 * P, 0, Math.PI * 2); ctx.stroke(); ctx.restore(); }
+    ctx.textAlign = "left"; ctx.textBaseline = "middle"; ctx.font = `${on ? 600 : 500} ${15 * P}px ${MONO}`;
+    ctx.fillStyle = on ? ink : "rgba(255,255,255,0.62)";
+    ctx.save(); ctx.letterSpacing = `${0.8 * P}px`; ctx.fillText(row.code, rx0 + 18 * P, y + 0.5 * P); ctx.restore();
+    if (on) { ctx.textAlign = "right"; ctx.font = `500 ${15 * P}px ${MONO}`; ctx.fillText(row.at, rx0 + rw * P - 2 * P, y + 0.5 * P); }
+  });
+  // the nudge: one notification, ours
+  const nx = 13 * P, nw = W - 26 * P, nh = 74 * P, ny = L.notifY * P, nr = 23 * P;
+  ctx.save(); ctx.shadowColor = "rgba(0,0,0,0.35)"; ctx.shadowBlur = 26 * P; ctx.shadowOffsetY = 6 * P;
+  ctx.fillStyle = "rgba(58,58,62,0.62)"; rr(ctx, nx, ny, nw, nh, nr); ctx.fill(); ctx.restore();
+  const sheen = ctx.createLinearGradient(0, ny, 0, ny + nh);
+  sheen.addColorStop(0, "rgba(255,255,255,0.07)"); sheen.addColorStop(1, "rgba(255,255,255,0.01)");
+  ctx.fillStyle = sheen; rr(ctx, nx, ny, nw, nh, nr); ctx.fill();
+  ctx.save(); ctx.lineWidth = 0.7 * P; ctx.strokeStyle = "rgba(255,255,255,0.12)"; rr(ctx, nx + 0.35 * P, ny + 0.35 * P, nw - 0.7 * P, nh - 0.7 * P, nr); ctx.stroke(); ctx.restore();
+  const icon = await loadImg(L.icon);
+  const is = 38 * P, ix = nx + 14 * P, iy = ny + (nh - is) / 2;
+  ctx.save(); rr(ctx, ix, iy, is, is, 9 * P); ctx.clip(); ctx.drawImage(icon, ix, iy, is, is); ctx.restore();
+  ctx.save(); ctx.lineWidth = 0.6 * P; ctx.strokeStyle = "rgba(255,255,255,0.14)"; rr(ctx, ix, iy, is, is, 9 * P); ctx.stroke(); ctx.restore();
+  const tx = ix + is + 11 * P;
+  ctx.textAlign = "left"; ctx.textBaseline = "alphabetic"; ctx.fillStyle = ink;
+  ctx.font = `600 ${15.5 * P}px ${SYS}`; ctx.fillText(L.title, tx, ny + 32 * P);
+  ctx.font = `400 ${15.5 * P}px ${SYS}`; ctx.fillStyle = "rgba(255,255,255,0.9)"; ctx.fillText(L.body, tx, ny + 53 * P);
+  ctx.textAlign = "right"; ctx.fillStyle = "rgba(255,255,255,0.5)"; ctx.font = `400 ${13 * P}px ${SYS}`;
+  ctx.fillText("now", nx + nw - 16 * P, ny + 31 * P);
+  // flashlight and camera
+  for (const [cx, kind] of [[62, "torch"], [W / P - 62, "cam"]]) {
+    ctx.save(); ctx.fillStyle = "rgba(255,255,255,0.1)"; ctx.beginPath(); ctx.arc(cx * P, (H / P - 86) * P, 25 * P, 0, Math.PI * 2); ctx.fill();
+    ctx.strokeStyle = ink; ctx.fillStyle = ink; ctx.lineWidth = 2 * P; ctx.lineJoin = "round"; const cy = (H / P - 86) * P, X = cx * P;
+    if (kind === "torch") { ctx.beginPath(); ctx.moveTo(X - 5 * P, cy - 9 * P); ctx.lineTo(X + 5 * P, cy - 9 * P); ctx.lineTo(X + 5 * P, cy - 5 * P); ctx.lineTo(X + 2.5 * P, cy - 1 * P); ctx.lineTo(X + 2.5 * P, cy + 10 * P); ctx.lineTo(X - 2.5 * P, cy + 10 * P); ctx.lineTo(X - 2.5 * P, cy - 1 * P); ctx.lineTo(X - 5 * P, cy - 5 * P); ctx.closePath(); ctx.stroke(); }
+    else { rr(ctx, X - 11 * P, cy - 7 * P, 22 * P, 16 * P, 3.5 * P); ctx.stroke(); ctx.beginPath(); ctx.arc(X, cy + 1 * P, 4.3 * P, 0, Math.PI * 2); ctx.stroke(); rr(ctx, X - 4 * P, cy - 10 * P, 8 * P, 3.5 * P, 1 * P); ctx.fill(); }
+    ctx.restore();
+  }
+  ctx.fillStyle = "rgba(255,255,255,0.92)"; rr(ctx, (W - 146 * P) / 2, H - 13 * P, 146 * P, 5 * P, 2.5 * P); ctx.fill();
+}
+
+// ═══════════════════════════ screen composition ═══════════════════════════
+const DEV = { W: 1320, H: 2868, P: 3 }; // iPhone 6.9": 440 x 956 pt at 3x
+const screen = document.createElement("canvas");
+async function composeScreen(spec) {
+  const { W, H, P } = DEV;
+  screen.width = W; screen.height = H;
+  const s = screen.getContext("2d");
+  const sc = spec.screen, I = { w: 125, h: 37, mid: 30.5, ...(spec.island || {}) };
+  let midSrc = "default";
+  if (sc.kind === "lock") await drawLock(s, W, H, P, { ...sc, mid: I.mid });
+  else {
+    const img = await loadImg(sc.src);
+    s.fillStyle = "#000"; s.fillRect(0, 0, W, H); // a capture with masked (alpha) corners or island sits on black
+    const k = W / img.width, h = img.height * k;
+    s.drawImage(img, 0, 0, W, h);
+    if (h < H - 1) { s.fillStyle = "#08090a"; s.fillRect(0, h, W, H - h); }
+    if (!(spec.island && spec.island.mid != null)) { const m = statusMid(img, P); if (m != null) { I.mid = m; midSrc = "capture"; } }
+  }
+  island(s, W, P, I);
+  return { islandMid: Math.round(I.mid * 10) / 10, islandFrom: midSrc };
+}
+
+// ═══════════════════════════ the device (mm) ═══════════════════════════
+function roundedRectShape(w, h, r) {
+  const s = new THREE.Shape(), x = -w / 2, y = -h / 2;
+  s.moveTo(x + r, y); s.lineTo(x + w - r, y); s.quadraticCurveTo(x + w, y, x + w, y + r);
+  s.lineTo(x + w, y + h - r); s.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  s.lineTo(x + r, y + h); s.quadraticCurveTo(x, y + h, x, y + h - r);
+  s.lineTo(x, y + r); s.quadraticCurveTo(x, y, x + r, y);
+  return s;
+}
+function planeUV(geo, w, h) {
+  const p = geo.attributes.position, uv = geo.attributes.uv;
+  for (let i = 0; i < p.count; i++) uv.setXY(i, p.getX(i) / w + 0.5, p.getY(i) / h + 0.5);
+  uv.needsUpdate = true; return geo;
+}
+// a 6.9" Pro Max: 163.4 x 78.0 x 8.75 mm, a 1320 x 2868 display
+const M = { W: 78.0, H: 163.4, D: 8.75, R: 12.4, BEV: 1.3, SCR_W: 72.9, SCR_R: 10.2 };
+const SCR_H = M.SCR_W * (DEV.H / DEV.W);
+
+const stage = document.getElementById("stage"), cap = document.getElementById("cap"), bgEl = document.getElementById("bg");
+const hEl = document.getElementById("h"), sEl = document.getElementById("s");
+let renderer, scene, camera, device, tex, scr, metal, CW = 0, CH = 0;
+
+function studio() {
+  const s = new THREE.Scene(); s.background = new THREE.Color(0x26272a);
+  const box = (w, h, x, y, z, k) => {
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ color: new THREE.Color(k, k, k), side: THREE.DoubleSide }));
+    m.position.set(x, y, z); m.lookAt(0, 0, 0); s.add(m);
+  };
+  const gradBox = (w, h, x, y, z, stops) => {
+    const c = document.createElement("canvas"); c.width = 4; c.height = 256;
+    const g = c.getContext("2d"), max = Math.max(...stops.map((q) => q[1]));
+    const gr = g.createLinearGradient(0, 0, 0, 256);
+    for (const [t, k] of stops) { const v = Math.round((k / max) * 255); gr.addColorStop(t, `rgb(${v},${v},${v})`); }
+    g.fillStyle = gr; g.fillRect(0, 0, 4, 256);
+    const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.NoColorSpace;
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w, h), new THREE.MeshBasicMaterial({ map: t, color: new THREE.Color(max, max, max), side: THREE.DoubleSide }));
+    m.position.set(x, y, z); m.lookAt(0, y, 0); s.add(m);
+  };
+  box(8, 2.2, 0, 5, 1, 6);
+  box(1.6, 9, -6, 0.5, 2.5, 9);
+  box(1.2, 9, 6, 0.5, -1.5, 6);
+  box(4, 3, 0, 1, 6, 1.4);
+  box(10, 10, 0, -6, 0, 0.15);
+  box(3.2, 10, -5.5, 0.5, -5.5, 3.2);
+  gradBox(3, 4.2, 5.5, 0.3, -5.5, [[0, 0.06], [0.3, 0.5], [0.5, 3.4], [0.72, 1.2], [1, 0.25]]);
+  box(9, 1.6, 0, 6, -4, 2.0);
+  box(1.4, 9, 6.5, 0.5, 3.5, 5);
+  return s;
+}
+
+function build(spec) {
+  if (renderer) return;
+  renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, preserveDrawingBuffer: true });
+  renderer.setPixelRatio(window.devicePixelRatio || 1);
+  renderer.outputColorSpace = THREE.SRGBColorSpace;
+  renderer.toneMapping = THREE.ACESFilmicToneMapping;
+  renderer.setClearColor(0x000000, 0);
+  renderer.domElement.id = "gl"; stage.appendChild(renderer.domElement);
+  scene = new THREE.Scene();
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  scene.environment = pmrem.fromScene(studio(), 0.015).texture;
+  const key = new THREE.DirectionalLight(0xffffff, 1.4); key.position.set(-120, 200, 260); scene.add(key);
+  const rim = new THREE.DirectionalLight(0xffffff, 2.2); rim.position.set(260, 60, -80); scene.add(rim);
+  scene.add(new THREE.AmbientLight(0xffffff, 0.25));
+  camera = new THREE.PerspectiveCamera(20, 1, 280, 1120);
+  camera.position.set(0, 0, 560);
+  device = new THREE.Group(); scene.add(device);
+  metal = new THREE.MeshPhysicalMaterial({ color: new THREE.Color("#46474a"), metalness: 1, roughness: 0.3, clearcoat: 0.3, clearcoatRoughness: 0.3 });
+  const glassBlack = new THREE.MeshPhysicalMaterial({ color: 0x040404, roughness: 0.08, metalness: 0, clearcoat: 1, clearcoatRoughness: 0.03 });
+  const bodyGeo = new THREE.ExtrudeGeometry(roundedRectShape(M.W - M.BEV * 2, M.H - M.BEV * 2, M.R - M.BEV), {
+    depth: M.D - M.BEV * 2, bevelEnabled: true, bevelThickness: M.BEV, bevelSize: M.BEV, bevelSegments: 10, curveSegments: 120,
+  });
+  bodyGeo.translate(0, 0, -(M.D - M.BEV * 2) / 2);
+  device.add(new THREE.Mesh(bodyGeo, metal));
+  const inset = 1.3;
+  const front = new THREE.Mesh(new THREE.ShapeGeometry(roundedRectShape(M.W - inset, M.H - inset, M.R - inset / 2), 120), glassBlack);
+  front.position.z = M.D / 2 + 0.02; device.add(front);
+  tex = new THREE.CanvasTexture(screen);
+  tex.colorSpace = THREE.SRGBColorSpace; tex.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  tex.generateMipmaps = true; tex.minFilter = THREE.LinearMipmapLinearFilter;
+  scr = new THREE.Mesh(planeUV(new THREE.ShapeGeometry(roundedRectShape(M.SCR_W, SCR_H, M.SCR_R), 120), M.SCR_W, SCR_H), new THREE.MeshBasicMaterial({ map: tex, toneMapped: false }));
+  scr.position.z = M.D / 2 + 0.05; device.add(scr);
+  const cover = new THREE.Mesh(new THREE.ShapeGeometry(roundedRectShape(M.W - inset, M.H - inset, M.R - inset / 2), 120),
+    new THREE.MeshPhysicalMaterial({ color: 0xffffff, metalness: 0, roughness: 0.04, transparent: true, opacity: spec.glass ?? 0.035, clearcoat: 1, clearcoatRoughness: 0.02, envMapIntensity: 1.6 }));
+  cover.position.z = M.D / 2 + 0.09; device.add(cover);
+  const button = (len, side, yc, protrude = 0.55, mat = metal) => {
+    const m = new THREE.Mesh(new THREE.CapsuleGeometry(1.05, len, 8, 24), mat);
+    m.scale.set(protrude, 1, 1); m.position.set(side * (M.W / 2 - 0.35), yc, 0); device.add(m);
+  };
+  button(6.0, -1, 50); button(10.5, -1, 34.5); button(10.5, -1, 19.5); button(15.5, 1, 31);
+  const camCtl = new THREE.Mesh(new THREE.CapsuleGeometry(1.25, 9.5, 8, 24), glassBlack);
+  camCtl.scale.set(0.35, 1, 1); camCtl.position.set(M.W / 2 - 0.1, -22, 0); device.add(camCtl);
+}
+
+const v3 = new THREE.Vector3();
+function projected() {
+  device.updateMatrixWorld(true); camera.updateMatrixWorld(); camera.updateProjectionMatrix();
+  const pts = [], meshes = []; device.traverse((o) => o.isMesh && meshes.push(o));
+  for (const o of meshes) {
+    const p = o.geometry.attributes.position;
+    for (let i = 0; i < p.count; i++) { v3.fromBufferAttribute(p, i).applyMatrix4(o.matrixWorld).project(camera); pts.push([(v3.x + 1) / 2 * CW, (1 - v3.y) / 2 * CH]); }
+  }
+  return pts;
+}
+function bbox(pts, maxY = Infinity) {
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  for (const [x, y] of pts) { if (y > maxY) continue; x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  return { x0, y0, x1, y1, w: x1 - x0, h: y1 - y0, cx: (x0 + x1) / 2 };
+}
+function screenWidthPx() {
+  device.updateMatrixWorld(true); camera.updateMatrixWorld(); camera.updateProjectionMatrix();
+  const a = new THREE.Vector3(-M.SCR_W / 2, 0, 0).applyMatrix4(scr.matrixWorld).project(camera);
+  const b = new THREE.Vector3(M.SCR_W / 2, 0, 0).applyMatrix4(scr.matrixWorld).project(camera);
+  return Math.hypot((a.x - b.x) / 2 * CW, (a.y - b.y) / 2 * CH);
+}
+// where a screen point (pt) lands on the canvas, for the layout report
+function screenPoint(xPt, yPt) {
+  const v = new THREE.Vector3((xPt / 440 - 0.5) * M.SCR_W, (0.5 - yPt / 956) * SCR_H, 0).applyMatrix4(scr.matrixWorld).project(camera);
+  return [Math.round((v.x + 1) / 2 * CW), Math.round((1 - v.y) / 2 * CH)];
+}
+function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
+// *word* lights one word in the signal colour
+function markup(t) { return esc(t).replace(/\*([^*]+)\*/g, '<span class="acc">$1</span>'); }
+
+// the canvas behind the phone: the ground colour, a faint signal glow behind the device, viewfinder brackets
+function backdrop(spec, b) {
+  const dpr = window.devicePixelRatio || 1;
+  bgEl.width = Math.round(CW * dpr); bgEl.height = Math.round(CH * dpr);
+  bgEl.style.width = `${CW}px`; bgEl.style.height = `${CH}px`;
+  const g = bgEl.getContext("2d", { willReadFrequently: true });
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.fillStyle = spec.bg; g.fillRect(0, 0, CW, CH);
+  const G = spec.glow;
+  if (G && G.a > 0) {
+    const cx = b.cx + (G.dx || 0), cy = (Math.max(b.y0, 0) + Math.min(b.y1, CH)) / 2 + (G.dy || 0);
+    g.save(); g.translate(cx, cy); g.scale(1, G.stretch ?? 1.5);
+    const r = G.r * CW, gr = g.createRadialGradient(0, 0, 0, 0, 0, r);
+    gr.addColorStop(0, `rgba(255,176,0,${G.a})`); gr.addColorStop(0.4, `rgba(255,160,0,${G.a * 0.42})`);
+    gr.addColorStop(0.75, `rgba(255,150,0,${G.a * 0.1})`); gr.addColorStop(1, "rgba(255,150,0,0)");
+    g.fillStyle = gr; g.fillRect(-CW * 2, -CH, CW * 4, CH * 2); g.restore();
+    // dither, so the faint falloff never bands on 8 bits
+    g.setTransform(1, 0, 0, 1, 0, 0);
+    const id = g.getImageData(0, 0, bgEl.width, bgEl.height), d = id.data;
+    for (let i = 0; i < d.length; i += 4) { const n = (Math.random() - 0.5) * 2.2; d[i] += n; d[i + 1] += n; d[i + 2] += n; }
+    g.putImageData(id, 0, 0); g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  }
+  const H = spec.hud;
+  if (H) {
+    g.strokeStyle = H.color; g.lineWidth = H.weight; g.lineCap = "butt";
+    const m = H.inset, L = H.arm, corners = [[m, m, 1, 1], [CW - m, m, -1, 1]];
+    if (H.bottom) corners.push([m, CH - m, 1, -1], [CW - m, CH - m, -1, -1]);
+    for (const [x, y, sx, sy] of corners) { g.beginPath(); g.moveTo(x, y + sy * L); g.lineTo(x, y); g.lineTo(x + sx * L, y); g.stroke(); }
+    if (H.ticks) { // the icon's mid ticks, top edge only
+      g.strokeStyle = H.tickColor || H.color; g.beginPath(); g.moveTo(CW / 2, m - 2); g.lineTo(CW / 2, m + H.tick); g.stroke();
+    }
+  }
+}
+
+async function fontsReady() {
+  await Promise.all(["400 20px Geist", "600 20px Geist", "700 20px Geist", "400 20px 'Geist Mono'", "500 20px 'Geist Mono'", "600 20px 'Geist Mono'",
+    "400 20px Inter", "600 20px Inter", "700 20px Inter"].map((f) => document.fonts.load(f, "AZaz09:/")));
+}
+
+async function draw(spec) {
+  CW = spec.w; CH = spec.h;
+  stage.style.width = `${CW}px`; stage.style.height = `${CH}px`; stage.style.background = spec.bg;
+  document.documentElement.style.background = document.body.style.background = spec.bg;
+  await fontsReady();
+  const scrInfo = await composeScreen(spec);
+  build(spec);
+  renderer.toneMappingExposure = spec.exposure ?? 1.0;
+  scene.environmentIntensity = spec.envi ?? 1.0;
+  metal.color.set(spec.finish ?? "#46474a"); metal.roughness = spec.rough ?? 0.3;
+  renderer.setSize(CW, CH); camera.aspect = CW / CH;
+  // caption
+  cap.style.setProperty("--acc", spec.acc || "inherit");
+  const lines = spec.headLines || [spec.headline];
+  hEl.innerHTML = lines.map(markup).join("<br>");
+  sEl.innerHTML = spec.subline ? markup(spec.subline) : ""; sEl.style.display = spec.subline ? "" : "none";
+  hEl.style.color = spec.headColor; sEl.style.color = spec.subColor;
+  hEl.style.letterSpacing = `${spec.headTrack ?? -0.04}em`; sEl.style.letterSpacing = `${spec.subTrack ?? -0.01}em`;
+  cap.style.top = `${spec.top}px`;
+  hEl.style.fontSize = `${spec.headSize}px`; hEl.style.maxWidth = `${spec.headMax}px`;
+  sEl.style.fontSize = `${spec.subSize}px`; sEl.style.maxWidth = `${spec.subMax}px`; sEl.style.marginTop = `${spec.gap}px`;
+  await document.fonts.ready;
+  tex.needsUpdate = true;
+  // pose, then fit: the screen spans screenW px and the device's top edge sits at phoneTop
+  device.rotation.set(spec.rx, spec.ry, spec.rz);
+  camera.clearViewOffset(); camera.zoom = 1; camera.updateProjectionMatrix();
+  camera.zoom = spec.screenW / screenWidthPx(); camera.updateProjectionMatrix();
+  const b0 = bbox(projected());
+  const dy = spec.phoneTop - b0.y0;
+  const vis = bbox(projected().map(([x, y]) => [x, y + dy]), CH);
+  const dx = CW / 2 + (spec.cxShift || 0) - vis.cx;
+  camera.setViewOffset(CW, CH, -dx, -dy, CW, CH); camera.updateProjectionMatrix();
+  const b = bbox(projected());
+  backdrop(spec, b);
+  renderer.render(scene, camera);
+  const hBox = hEl.getBoundingClientRect(), sBox = sEl.getBoundingClientRect();
+  const capBottom = spec.subline ? sBox.bottom : hBox.bottom;
+  return {
+    ...scrInfo,
+    screenW: Math.round(screenWidthPx()),
+    phone: { x0: Math.round(b.x0), x1: Math.round(b.x1), y0: Math.round(b.y0), y1: Math.round(b.y1) },
+    capBottom: Math.round(capBottom), clearance: Math.round(b.y0 - capBottom),
+    hLines: Math.round(hBox.height / (spec.headSize * 1.04)), sLines: spec.subline ? Math.round(sBox.height / (spec.subSize * 1.3)) : 0,
+    screenTopLeft: screenPoint(0, 0), screenBottomVisible: screenPoint(220, 956)[1] <= CH,
+    fontOk: document.fonts.check(`600 ${spec.headSize}px Geist`) && document.fonts.check(`500 20px "Geist Mono"`) && document.fonts.check(`700 20px Inter`),
+    gl: renderer.getContext().getParameter(renderer.getContext().VERSION),
+  };
+}
+window.FRAME = { draw };
+window.READY = true;
+</script>
+</body>
+</html>

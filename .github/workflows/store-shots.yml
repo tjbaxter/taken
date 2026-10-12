@@ -1,0 +1,138 @@
+# Taken's App Store screenshots (iPhone 6.9", 1320 x 2868): the app's own simulator captures from ci.yml, each
+# set on a studio-lit 3D iPhone under a one-line caption (tools/store-shots). One dispatch re-renders the whole
+# set whenever the app's UI changes; the result is the "store-shots" artifact.
+name: Store shots
+
+on:
+  workflow_dispatch:
+    inputs:
+      ci_run:
+        description: ci.yml run id to take the "screenshots" artifact from (blank = newest successful ci.yml run on main that has one)
+        required: false
+        default: ""
+      only:
+        description: Render only frames whose file starts with this, e.g. 03 (blank = all six)
+        required: false
+        default: ""
+      screen_map:
+        description: 'JSON map from state to file name when the capture names differ, e.g. {"day":"day-sheet.png"}'
+        required: false
+        default: ""
+      placeholder:
+        description: Use store/placeholder even when a ci.yml screenshots artifact exists
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: store-shots
+  cancel-in-progress: false
+
+jobs:
+  render:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Raw screens (ci.yml screenshots artifact, else store/placeholder)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CI_RUN: ${{ inputs.ci_run }}
+          USE_PLACEHOLDER: ${{ inputs.placeholder }}
+        run: |
+          set -euo pipefail
+          raw="$RUNNER_TEMP/raw"; mkdir -p "$raw"
+          src=""
+          if [ "$USE_PLACEHOLDER" != "true" ]; then
+            if [ -z "$CI_RUN" ]; then
+              ids=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 30 \
+                    --json databaseId --jq '.[].databaseId' 2>/dev/null || true)
+              for id in $ids; do
+                n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" \
+                      --jq '[.artifacts[] | select(.name == "screenshots" and (.expired | not))] | length' || echo 0)
+                if [ "$n" != "0" ]; then CI_RUN="$id"; break; fi
+              done
+            fi
+            if [ -n "$CI_RUN" ]; then
+              gh run download "$CI_RUN" -R "$GITHUB_REPOSITORY" -n screenshots -D "$raw"
+              src="ci.yml run $CI_RUN ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$CI_RUN)"
+            fi
+          fi
+          if [ -z "$src" ]; then
+            cp store/placeholder/*.png "$raw/"
+            src="PLACEHOLDER screens (store/placeholder): not the app, never ship these"
+          fi
+          {
+            echo "### Raw screens"
+            echo "$src"
+            echo '```'
+            (cd "$raw" && find . -type f | sort)
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Playwright, Chromium and Pillow
+        run: |
+          set -euo pipefail
+          npm i --prefix "$RUNNER_TEMP/pw" --no-audit --no-fund playwright@1.49.1
+          "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
+          python -m pip install --quiet pillow==11.0.0
+
+      - name: Render the frames at 2x
+        env:
+          RAW: ${{ runner.temp }}/raw
+          OUT: ${{ runner.temp }}/x2
+          PLAYWRIGHT: ${{ runner.temp }}/pw/node_modules/playwright/index.mjs
+          ONLY: ${{ inputs.only }}
+          SCREEN_MAP: ${{ inputs.screen_map }}
+        run: node tools/store-shots/generate.mjs
+
+      - name: Downsample to 1320 x 2868 RGB (Lanczos) and make the contact sheet
+        run: python tools/store-shots/finish.py "$RUNNER_TEMP/x2" store-shots
+
+      - name: Verify every frame is 1320 x 2868 RGB with no alpha
+        env:
+          ONLY: ${{ inputs.only }}
+        run: |
+          python - <<'PY'
+          import os, sys
+          from pathlib import Path
+          from PIL import Image
+          frames = sorted(Path("store-shots").glob("*.png"))
+          bad = []
+          for p in frames:
+              im = Image.open(p)
+              print(f"{p.name}: {im.size[0]}x{im.size[1]} {im.mode}")
+              if im.size != (1320, 2868) or im.mode != "RGB" or "transparency" in im.info:
+                  bad.append(p.name)
+          if not os.environ.get("ONLY") and len(frames) != 6:
+              sys.exit(f"want 6 frames, have {len(frames)}")
+          if bad:
+              sys.exit(f"wrong size or mode: {bad}")
+          PY
+          cp "$RUNNER_TEMP/x2/report.json" store-shots/report.json
+          {
+            echo "### Frames"
+            echo '```'
+            python -c "import json; [print(r['file'], r['key'], r['screen'], 'clearance', r['clearance'], 'island', r['islandMid'], r['islandFrom']) for r in json.load(open('store-shots/report.json'))]"
+            echo '```'
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: store-shots
+          path: store-shots/
+          if-no-files-found: error
+          retention-days: 30
