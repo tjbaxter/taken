@@ -33,7 +33,7 @@ const LAYOUT = {
 const POSE = {
   hero: { ry: 0.24, rx: 0.06, rz: 0.05 },
   right: { ry: -0.42, rx: 0.07, rz: -0.1 },
-  laidBack: { ry: -0.06, rx: -0.42, rz: 0.03 },
+  laidBack: { ry: -0.08, rx: -0.42, rz: 0.03 },
   rollLeft: { ry: 0.16, rx: 0.05, rz: 0.13 },
   rollRight: { ry: -0.22, rx: 0.06, rz: -0.17 },
   upright: { ry: 0.14, rx: 0.02, rz: 0.0 },
@@ -85,8 +85,8 @@ export const FRAMES = [
     headline: "Your stack in *four* taps.",
     subline: "Quick-pick chips. No typing, no sign-up.",
     ...POSE.laidBack,
-    phoneTop: 750,
-    screenW: 1180,
+    phoneTop: 690,
+    screenW: 1090,
     screen: cap("add"),
   },
   {
