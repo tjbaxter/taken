@@ -84,8 +84,8 @@ export const FRAMES = [
     headline: "Your stack in *four* taps.",
     subline: "Quick-pick chips. No typing, no sign-up.",
     ...POSE.laidBack,
-    phoneTop: 700,
-    screenW: 1040,
+    phoneTop: 690,
+    screenW: 1090,
     screen: cap("add"),
   },
   {

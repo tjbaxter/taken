@@ -75,10 +75,42 @@ function island(ctx, W, P, I) {
   ctx.fillStyle = "rgba(34,44,72,0.5)"; ctx.beginPath(); ctx.arc(cx, cy, 4.6 * P, 0, Math.PI * 2); ctx.fill();
   ctx.fillStyle = "rgba(12,16,28,0.95)"; ctx.beginPath(); ctx.arc(cx, cy, 2 * P, 0, Math.PI * 2); ctx.fill();
 }
+// Whether the capture already carries the Dynamic Island (recent simulators draw it black into the capture).
+function captureHasIsland(img) {
+  const k = img.width / 440;
+  const c = document.createElement("canvas"); c.width = img.width; c.height = Math.round(60 * k);
+  const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(img, 0, 0);
+  const at = (xPt, yPt) => g.getImageData(Math.round(xPt * k), Math.round(yPt * k), 1, 1).data;
+  const lum = (d) => 0.2126 * d[0] + 0.7152 * d[1] + 0.0722 * d[2];
+  const mid = [at(220, 30), at(200, 32), at(240, 32)].map(lum), side = lum(at(140, 32));
+  return mid.every((l) => l <= 2 && l < side - 2);
+}
+// A capture taken with the battery override left at "charged" shows a green charging battery; repaint it as
+// the plain full battery, inside the glyph's own box, so the status bar stays monochrome. No-op otherwise.
+function plainBattery(ctx, P) {
+  const W = ctx.canvas.width, x0 = Math.round(W * 0.72), h = Math.round(56 * P);
+  const id = ctx.getImageData(x0, 0, W - x0, h), d = id.data, w = W - x0;
+  let gx0 = Infinity, gx1 = -1, gy0 = Infinity, gy1 = -1;
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const i = (y * w + x) * 4, r = d[i], gr = d[i + 1], b = d[i + 2];
+    if (gr > r + 40 && gr > b + 40) { gx0 = Math.min(gx0, x); gx1 = Math.max(gx1, x); gy0 = Math.min(gy0, y); gy1 = Math.max(gy1, y); }
+  }
+  if (gx1 < 0 || gx1 - gx0 < 8 * P) return false;
+  const fx = x0 + gx0, fy = gy0, fw = gx1 - gx0 + 1, fh = gy1 - gy0 + 1, pad = 1.35 * P, sw = 1 * P;
+  const bx = fx - pad - sw, by = fy - pad - sw, bw = fw + 2 * (pad + sw), bh = fh + 2 * (pad + sw);
+  const under = ctx.getImageData(Math.round(bx - 4 * P), Math.round(by + bh / 2), 1, 1).data;
+  ctx.fillStyle = `rgb(${under[0]},${under[1]},${under[2]})`;
+  ctx.fillRect(bx - 1.5 * P, by - 1.5 * P, bw + 6 * P, bh + 3 * P);
+  ctx.save(); ctx.globalAlpha = 0.4; ctx.strokeStyle = "#fff"; ctx.fillStyle = "#fff"; ctx.lineWidth = sw;
+  rr(ctx, bx + sw / 2, by + sw / 2, bw - sw, bh - sw, bh * 0.3); ctx.stroke();
+  rr(ctx, bx + bw + 1 * P, by + bh * 0.33, 1.5 * P, bh * 0.34, 0.8 * P); ctx.fill(); ctx.restore();
+  ctx.fillStyle = "#fff"; rr(ctx, fx, fy, fw, fh, fh * 0.28); ctx.fill();
+  return true;
+}
 // The status bar's middle line, in points, read off the capture: the rows the "9:41" glyphs cover at top left.
 function statusMid(img) {
   const k = img.width / 440; // capture px per point
-  const x0 = Math.round(20 * k), x1 = Math.round(150 * k), y1 = Math.round(64 * k);
+  const x0 = Math.round(20 * k), x1 = Math.round(150 * k), y1 = Math.round(56 * k);
   const c = document.createElement("canvas"); c.width = x1 - x0; c.height = y1;
   const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(img, x0, 0, x1 - x0, y1, 0, 0, x1 - x0, y1);
   const d = g.getImageData(0, 0, c.width, c.height).data;
@@ -173,8 +205,9 @@ async function composeScreen(spec) {
   const { W, H, P } = DEV;
   screen.width = W; screen.height = H;
   const s = screen.getContext("2d");
-  const sc = spec.screen, I = { w: 125, h: 37, mid: 30.5, ...(spec.island || {}) };
-  let midSrc = "default";
+  // iPhone 17 Pro Max simulator: the island is 125.3 x 36.7 pt, 14 pt from the top
+  const sc = spec.screen, I = { w: 125.3, h: 36.7, mid: 32.3, ...(spec.island || {}) };
+  let islandFrom = "drawn", battery = false;
   if (sc.kind === "lock") await drawLock(s, W, H, P, { ...sc, mid: I.mid });
   else {
     const img = await loadImg(sc.src);
@@ -182,10 +215,12 @@ async function composeScreen(spec) {
     const k = W / img.width, h = img.height * k;
     s.drawImage(img, 0, 0, W, h);
     if (h < H - 1) { s.fillStyle = "#08090a"; s.fillRect(0, h, W, H - h); }
-    if (!(spec.island && spec.island.mid != null)) { const m = statusMid(img); if (m != null) { I.mid = m; midSrc = "capture"; } }
+    battery = plainBattery(s, P);
+    if (captureHasIsland(img)) islandFrom = "capture";
+    else if (!(spec.island && spec.island.mid != null)) { const m = statusMid(img); if (m != null) I.mid = m; }
   }
-  island(s, W, P, I);
-  return { islandMid: Math.round(I.mid * 10) / 10, islandFrom: midSrc };
+  if (islandFrom === "drawn") island(s, W, P, I);
+  return { islandMid: Math.round(I.mid * 10) / 10, islandFrom, batteryRepainted: battery };
 }
 
 // ═══════════════════════════ the device (mm) ═══════════════════════════
@@ -308,6 +343,13 @@ function screenPoint(xPt, yPt) {
   const v = new THREE.Vector3((xPt / 440 - 0.5) * M.SCR_W, (0.5 - yPt / 956) * SCR_H, 0).applyMatrix4(scr.matrixWorld).project(camera);
   return [Math.round((v.x + 1) / 2 * CW), Math.round((1 - v.y) / 2 * CH)];
 }
+// how far down the screen (pt, on its centre line) the canvas still shows: 956 = the whole screen
+function visibleTo() {
+  let lo = 0, hi = 956;
+  if (screenPoint(220, 956)[1] <= CH) return 956;
+  while (hi - lo > 1) { const m = (lo + hi) / 2; if (screenPoint(220, m)[1] <= CH) lo = m; else hi = m; }
+  return Math.round(lo);
+}
 function esc(t) { return t.replace(/&/g, "&amp;").replace(/</g, "&lt;"); }
 // *word* lights one word in the signal colour
 function markup(t) { return esc(t).replace(/\*([^*]+)\*/g, '<span class="acc">$1</span>'); }
@@ -394,7 +436,7 @@ async function draw(spec) {
     phone: { x0: Math.round(seen.x0), x1: Math.round(seen.x1), y0: Math.round(b.y0), y1: Math.round(b.y1) },
     capBottom: Math.round(capBottom), clearance: Math.round(b.y0 - capBottom),
     hLines: Math.round(hBox.height / (spec.headSize * 1.04)), sLines: spec.subline ? Math.round(sBox.height / (spec.subSize * 1.3)) : 0,
-    screenTopLeft: screenPoint(0, 0), screenBottomVisible: screenPoint(220, 956)[1] <= CH,
+    screenTopLeft: screenPoint(0, 0), screenVisibleTo: visibleTo(),
     fontOk: document.fonts.check(`600 ${spec.headSize}px Geist`) && document.fonts.check(`500 20px "Geist Mono"`) && document.fonts.check(`700 20px Inter`),
     gl: renderer.getContext().getParameter(renderer.getContext().VERSION),
   };

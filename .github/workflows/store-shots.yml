@@ -132,7 +132,7 @@ jobs:
           {
             echo "### Frames"
             echo '```'
-            python -c "import json; [print(r['file'], r['key'], r['screen'], 'clearance', r['clearance'], 'island', r['islandMid'], r['islandFrom']) for r in json.load(open('store-shots/report.json'))]"
+            python -c "import json; [print(r['file'], r['key'], r['screen'], 'clearance', r['clearance'], 'island', r['islandFrom'], 'battery repainted' if r['batteryRepainted'] else '', 'screen shown to', r['screenVisibleTo'], 'pt') for r in json.load(open('store-shots/report.json'))]"
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
