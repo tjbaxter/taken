@@ -356,6 +356,7 @@ button { font: inherit; color: inherit; }
 .card__t { margin: 18px 0 8px; font-size: 21px; font-weight: 500; line-height: 1.2; letter-spacing: -0.02em; }
 .card__v { margin: 0; color: var(--fg-muted); font-size: 15px; line-height: 1.6; }
 .card__v q { quotes: "\201C" "\201D"; color: var(--fg); }
+.card__v strong { color: var(--fg); font-weight: 500; }
 .glyph { display: block; height: 64px; margin-top: 22px; color: var(--fg-subtle); }
 
 /* ---------- History ---------- */
@@ -384,11 +385,12 @@ button { font: inherit; color: inherit; }
 @media (max-width: 520px) { .list li { grid-template-columns: 1fr; gap: 6px; } }
 
 /* ---------- Support ---------- */
-.support { display: grid; gap: 40px; margin-top: clamp(32px, 4vw, 48px); }
+.support { display: grid; gap: 40px; margin-top: clamp(32px, 4vw, 48px); align-items: start; }
 @media (min-width: 900px) { .support { grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr); gap: 64px; } }
 .contact { border: 1px solid var(--line); background: var(--bg-raised); padding: 26px 24px; }
 .contact__t { margin: 16px 0 8px; font-size: 21px; font-weight: 500; letter-spacing: -0.02em; line-height: 1.25; }
 .contact__v { margin: 0 0 22px; color: var(--fg-muted); font-size: 15px; }
+.contact .btn { margin: 0 0 20px; }
 .contact__link { font-family: var(--mono); font-size: 14px; color: var(--fg); border-bottom: 1px solid var(--signal-line); word-break: break-word; }
 @media (hover: hover) { .contact__link:hover { border-bottom-color: var(--signal); } }
 .faq { border-top: 1px dashed var(--line); }
