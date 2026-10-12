@@ -35,7 +35,7 @@ const POSE = {
   right: { ry: -0.42, rx: 0.07, rz: -0.1 },
   laidBack: { ry: -0.06, rx: -0.42, rz: 0.03 },
   rollLeft: { ry: 0.16, rx: 0.05, rz: 0.13 },
-  rollRight: { ry: -0.22, rx: 0.06, rz: -0.2 },
+  rollRight: { ry: -0.22, rx: 0.06, rz: -0.17 },
   upright: { ry: 0.14, rx: 0.02, rz: 0.0 },
 };
 
@@ -85,7 +85,7 @@ export const FRAMES = [
     headline: "Your stack in *four* taps.",
     subline: "Quick-pick chips. No typing, no sign-up.",
     ...POSE.laidBack,
-    phoneTop: 730,
+    phoneTop: 750,
     screenW: 1180,
     screen: cap("add"),
   },
@@ -105,8 +105,8 @@ export const FRAMES = [
     headline: "Nudges only when it *matters.*",
     subline: "Already done? Silence.",
     ...POSE.rollRight,
-    phoneTop: 640,
-    screenW: 880,
+    phoneTop: 660,
+    screenW: 920,
     screen: LOCK,
   },
   {
