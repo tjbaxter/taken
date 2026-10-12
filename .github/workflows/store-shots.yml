@@ -102,10 +102,13 @@ jobs:
           SCREEN_MAP: ${{ inputs.screen_map }}
         run: node tools/store-shots/generate.mjs
 
+      # the steps below run even when a layout check above fails, so the frames can still be looked at
       - name: Downsample to 1320 x 2868 RGB (Lanczos) and make the contact sheet
+        if: ${{ !cancelled() }}
         run: python tools/store-shots/finish.py "$RUNNER_TEMP/x2" store-shots
 
       - name: Verify every frame is 1320 x 2868 RGB with no alpha
+        if: ${{ !cancelled() }}
         env:
           ONLY: ${{ inputs.only }}
         run: |
@@ -134,6 +137,7 @@ jobs:
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
       - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
         with:
           name: store-shots
           path: store-shots/

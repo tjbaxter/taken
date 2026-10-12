@@ -16,7 +16,7 @@ const LAYOUT = {
   subSize: 60,
   gap: 34,
   headMax: 1220,
-  subMax: 1060,
+  subMax: 1180,
   screenW: 990,
   phoneTop: 700,
   // a dark titanium body: the studio softboxes draw its edges against the black
@@ -95,8 +95,7 @@ export const FRAMES = [
     subline: "Forgot to log? Fix any day in a tap.",
     ...POSE.rollLeft,
     phoneTop: 660,
-    screenW: 950,
-    cxShift: 24,
+    screenW: 930,
     screen: cap("day"),
   },
   {
@@ -106,7 +105,7 @@ export const FRAMES = [
     subline: "Already done? Silence.",
     ...POSE.rollRight,
     phoneTop: 640,
-    screenW: 930,
+    screenW: 880,
     screen: LOCK,
   },
   {

@@ -105,6 +105,7 @@ try {
     const info = await page.evaluate((sp) => window.FRAME.draw(sp), spec);
     if (!info.fontOk) { console.error(`${f.file}: Geist, Geist Mono or Inter did not load`); failed = true; }
     if (info.clearance < 40) { console.error(`${f.file}: the phone comes within ${info.clearance}px of the caption`); failed = true; }
+    if (info.phone.x0 < 0 || info.phone.x1 > spec.w) { console.error(`${f.file}: the phone runs off the side (${info.phone.x0} to ${info.phone.x1})`); failed = true; }
     await page.screenshot({ path: join(OUT, f.file), clip: { x: 0, y: 0, width: spec.w, height: spec.h }, type: "png" });
     report.push({ file: f.file, key: f.key, screen: spec.screen.kind === "capture" ? spec.screen.file : spec.screen.kind, ...info });
     await ctx.close();
