@@ -1,0 +1,6 @@
+{
+  "name": "taken",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Native SwiftUI app. This file exists only so EAS Build can sign and ship it; there are no JavaScript dependencies."
+}

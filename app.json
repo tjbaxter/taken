@@ -1,0 +1,55 @@
+{
+  "expo": {
+    "name": "Taken",
+    "slug": "taken",
+    "owner": "pestline-ai",
+    "version": "1.0.0",
+    "platforms": [
+      "ios"
+    ],
+    "ios": {
+      "bundleIdentifier": "com.tombaxter.taken",
+      "appleTeamId": "F7YRP3B2U8",
+      "supportsTablet": false,
+      "config": {
+        "usesNonExemptEncryption": false
+      },
+      "entitlements": {
+        "com.apple.security.application-groups": [
+          "group.com.tombaxter.taken"
+        ]
+      }
+    },
+    "extra": {
+      "eas": {
+        "build": {
+          "experimental": {
+            "ios": {
+              "appExtensions": [
+                {
+                  "targetName": "TakenWidgets",
+                  "bundleIdentifier": "com.tombaxter.taken.widgets",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.tombaxter.taken"
+                    ]
+                  }
+                },
+                {
+                  "targetName": "TakenWidgets",
+                  "bundleIdentifier": "com.tombaxter.taken.widgets",
+                  "entitlements": {
+                    "com.apple.security.application-groups": [
+                      "group.com.tombaxter.taken"
+                    ]
+                  }
+                }
+              ]
+            }
+          }
+        },
+        "projectId": "b774a2d9-ba4f-4e0e-a31c-9020798f228b"
+      }
+    }
+  }
+}

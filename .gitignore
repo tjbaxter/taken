@@ -1,7 +1,7 @@
 # generated
 *.xcodeproj/
 *.xcworkspace/
-build/
+/build/
 DerivedData/
 screenshots/
 *.ipa
@@ -14,3 +14,4 @@ screenshots/
 *.mobileprovision
 *.provisionprofile
 .env*
+/ios/
