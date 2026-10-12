@@ -1,7 +1,8 @@
 // Taken's App Store set (iPhone 6.9", 1320 x 2868): six frames, one message each, in Tom's voice. Copy rules: no
 // em or en dashes, never the word "free", no exclamation marks, at most one word lit in the signal colour
-// (*word*). Every frame names the app's own simulator capture it shows (ci.yml runs the app with
-// -demo -screen <state>); the Lock Screen is the one screen the composer draws (SPEC 3.5 and 3.6).
+// (*word*). Every frame names the app's own simulator capture it shows (ci.yml, scripts/screenshots.sh runs the app
+// with -demo -screen <today|today-done|add|settings|day|log>); the Lock Screen is the one screen the composer
+// draws (SPEC 3.5 and 3.6).
 
 const LAYOUT = {
   w: 1320,
@@ -109,6 +110,7 @@ export const FRAMES = [
     screen: LOCK,
   },
   {
+    // the log: five weeks lit, the streak, and the app's own footer, LOCAL ONLY / NO ACCOUNTS / NO ADS / NO TRACKING
     file: "06.png",
     key: "private",
     headline: "*Nothing* leaves your phone.",
@@ -116,7 +118,7 @@ export const FRAMES = [
     ...POSE.upright,
     phoneTop: 680,
     screenW: 900,
-    screen: cap("settings"),
+    screen: cap("log"),
   },
 ];
 

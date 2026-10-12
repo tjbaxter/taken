@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       ci_run:
-        description: ci.yml run id to take the "screenshots" artifact from (blank = newest successful ci.yml run on main that has one)
+        description: ci.yml run id(s) to take the "screenshots" artifact from; with several, a missing or blank capture falls back to the next (blank = newest successful ci.yml run on main that has one)
         required: false
         default: ""
       only:
@@ -49,25 +49,33 @@ jobs:
           raw="$RUNNER_TEMP/raw"; mkdir -p "$raw"
           src=""
           if [ "$USE_PLACEHOLDER" != "true" ]; then
-            if [ -z "$CI_RUN" ]; then
-              ids=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 30 \
+            ids=$(echo "$CI_RUN" | tr ',' ' ')
+            if [ -z "${ids// /}" ]; then
+              ok=$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 30 \
                     --json databaseId --jq '.[].databaseId' 2>/dev/null || true)
-              for id in $ids; do
+              for id in $ok; do
                 n=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id/artifacts" \
                       --jq '[.artifacts[] | select(.name == "screenshots" and (.expired | not))] | length' || echo 0)
-                if [ "$n" != "0" ]; then CI_RUN="$id"; break; fi
+                if [ "$n" != "0" ]; then ids="$id"; break; fi
               done
             fi
-            if [ -n "$CI_RUN" ]; then
-              gh run download "$CI_RUN" -R "$GITHUB_REPOSITORY" -n screenshots -D "$raw"
-              src="ci.yml run $CI_RUN ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$CI_RUN)"
-              # the day the captures were taken, so the drawn Lock Screen shows the same date as the app
-              day=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$CI_RUN" --jq '.run_started_at' | cut -c1-10)
-              echo "DEMO_DATE=$day" >> "$GITHUB_ENV"
-            fi
+            # one folder per run, in the order given: a state takes the first run's capture, and the next
+            # run's when that one is missing or blank (generate.mjs)
+            i=0
+            for id in $ids; do
+              i=$((i + 1))
+              gh run download "$id" -R "$GITHUB_REPOSITORY" -n screenshots -D "$raw/$i-$id"
+              if [ "$i" = 1 ]; then
+                # the day the captures were taken, so the drawn Lock Screen shows the same date as the app
+                day=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '.run_started_at' | cut -c1-10)
+                echo "DEMO_DATE=$day" >> "$GITHUB_ENV"
+              fi
+              src="$src ci.yml run $id ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id)"
+            done
           fi
           if [ -z "$src" ]; then
-            cp store/placeholder/*.png "$raw/"
+            mkdir -p "$raw/1-placeholder"
+            cp store/placeholder/*.png "$raw/1-placeholder/"
             src="PLACEHOLDER screens (store/placeholder): not the app, never ship these"
           fi
           {

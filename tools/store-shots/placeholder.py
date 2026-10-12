@@ -4,7 +4,7 @@ status bar and home indicator included, as a simulator capture has them). They e
 be built and tuned before ci.yml produces the app's own captures; store-shots.yml falls back to them and says
 so. Never ship a frame made from them.
 
-  python3 tools/store-shots/placeholder.py   # writes store/placeholder/{today,today-done,add,day,settings}.png
+  python3 tools/store-shots/placeholder.py   # writes store/placeholder/{today,today-done,add,day,settings,log}.png
 """
 from pathlib import Path
 
@@ -329,9 +329,26 @@ def settings():
     return s.im
 
 
+def log():
+    """TODAY scrolled to its log: five weeks, the streak, the footer, the TAKE ALL dock."""
+    s = Screen()
+    s.status_bar()
+    s.text(22, 92, "TAKEN", MONO_M(14), FG, 0.3)
+    s.text(386, 92, "MON 12 OCT", MONO(12), SUBTLE, 0.16, "r")
+    s.gear(410, 87.5)
+    s.line(0, 112, 440, 112, LINE, 1)
+    row(s, 120, "MAG", "Magnesium", "DAILY")
+    history(s, 260)
+    s.text(22, 690, "LOCAL ONLY / NO ACCOUNTS / NO ADS / NO TRACKING", MONO(11), FAINT, 0.12)
+    s.rect(20, 860, 420, 916, 6, fill=BTN)
+    s.text(220, 894, "TAKE ALL (2)", MONO_S(15), BTN_FG, 0.2, "m")
+    s.home()
+    return s.im
+
+
 def main():
     OUT.mkdir(parents=True, exist_ok=True)
-    for name, im in (("today", today()), ("today-done", today(True)), ("add", add()), ("day", day()), ("settings", settings())):
+    for name, im in (("today", today()), ("today-done", today(True)), ("add", add()), ("day", day()), ("settings", settings()), ("log", log())):
         assert im.size == (1320, 2868) and im.mode == "RGB"
         im.save(OUT / f"{name}.png", optimize=True)
         print(OUT / f"{name}.png")

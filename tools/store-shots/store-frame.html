@@ -441,7 +441,17 @@ async function draw(spec) {
     gl: renderer.getContext().getParameter(renderer.getContext().VERSION),
   };
 }
-window.FRAME = { draw };
+// A capture with nothing below the status bar (a screen that failed to draw) is blank: the caller falls back.
+async function isBlank(src) {
+  const img = await loadImg(src);
+  const c = document.createElement("canvas"); c.width = 110; c.height = 239;
+  const g = c.getContext("2d", { willReadFrequently: true }); g.drawImage(img, 0, 0, 110, 239);
+  const d = g.getImageData(0, 20, 110, 219).data;
+  let n = 0, s = 0, s2 = 0;
+  for (let i = 0; i < d.length; i += 4) { const l = 0.2126 * d[i] + 0.7152 * d[i + 1] + 0.0722 * d[i + 2]; n++; s += l; s2 += l * l; }
+  return Math.sqrt(Math.max(0, s2 / n - (s / n) ** 2)) < 1.5;
+}
+window.FRAME = { draw, isBlank };
 window.READY = true;
 </script>
 </body>
