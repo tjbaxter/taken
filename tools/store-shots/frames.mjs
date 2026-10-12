@@ -33,8 +33,8 @@ const LAYOUT = {
 const POSE = {
   hero: { ry: 0.24, rx: 0.06, rz: 0.05 },
   right: { ry: -0.42, rx: 0.07, rz: -0.1 },
-  laidBack: { ry: -0.12, rx: -0.42, rz: 0.03 },
-  rollLeft: { ry: 0.18, rx: 0.05, rz: 0.17 },
+  laidBack: { ry: -0.06, rx: -0.42, rz: 0.03 },
+  rollLeft: { ry: 0.16, rx: 0.05, rz: 0.13 },
   rollRight: { ry: -0.22, rx: 0.06, rz: -0.2 },
   upright: { ry: 0.14, rx: 0.02, rz: 0.0 },
 };
@@ -85,8 +85,8 @@ export const FRAMES = [
     headline: "Your stack in *four* taps.",
     subline: "Quick-pick chips. No typing, no sign-up.",
     ...POSE.laidBack,
-    phoneTop: 690,
-    screenW: 1090,
+    phoneTop: 730,
+    screenW: 1180,
     screen: cap("add"),
   },
   {
@@ -95,8 +95,8 @@ export const FRAMES = [
     headline: "Every day, on *record.*",
     subline: "Forgot to log? Fix any day in a tap.",
     ...POSE.rollLeft,
-    phoneTop: 660,
-    screenW: 930,
+    phoneTop: 680,
+    screenW: 1000,
     screen: cap("day"),
   },
   {
