@@ -4,6 +4,14 @@ struct RootView: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
+        if model.isDemo && model.launchScreen == "widgets" {
+            WidgetGallery()
+        } else {
+            main
+        }
+    }
+
+    private var main: some View {
         TodayView()
             .sheet(item: sheetBinding) { route in
                 sheetContent(route)

@@ -137,9 +137,13 @@ private struct DayItemRow: View {
                     .foregroundStyle(Palette.fg)
                     .lineLimit(1)
                 Text(subtitle).hud(10, subtitleColor, tracking: 0.12)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
             }
+            .layoutPriority(0)
             Spacer(minLength: 8)
             actions
+                .layoutPriority(1)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 8)
@@ -167,6 +171,7 @@ private struct DayItemRow: View {
                     Text(Fmt.clock(dose.takenAt, clock))
                         .font(.monoFixed(13, .monoMedium))
                         .foregroundStyle(Palette.signal)
+                        .fixedSize()
                     Image(systemName: "xmark")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(Palette.fgSubtle)
@@ -187,6 +192,7 @@ private struct DayItemRow: View {
                     .font(.monoFixed(11, .monoSemibold))
                     .tracking(11 * 0.1)
                     .foregroundStyle(Palette.fg)
+                    .fixedSize()
                     .padding(.horizontal, 10)
                     .frame(height: 32)
                     .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.lineStrong, lineWidth: 1))

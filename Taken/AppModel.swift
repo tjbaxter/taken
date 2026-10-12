@@ -92,7 +92,7 @@ final class AppModel {
         let demoNow = DemoData.referenceNow()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("taken-demo-\(UUID().uuidString).json")
         let store = TakenStore(fileURL: url, postsChangeNotifications: false)
-        let seeded = screen == "add"
+        let seeded = screen == "add" || screen == "empty"
             ? StackState(settings: StackSettings(reminderEnabled: true))
             : DemoData.state(now: demoNow, allTaken: screen == "today-done")
         try? store.replace(with: seeded)

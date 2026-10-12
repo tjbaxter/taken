@@ -48,23 +48,21 @@ struct DayCell: View {
     let cell: HistoryCell
 
     var body: some View {
-        ZStack {
+        ZStack(alignment: .topLeading) {
             background
-            VStack(spacing: 3) {
-                Text("\(cell.day.dayOfMonth)")
-                    .font(.monoFixed(11, cell.status == .complete ? .monoSemibold : .monoMedium))
-                    .foregroundStyle(numberColor)
-                if cell.status == .missed || cell.status == .nothingDue {
-                    Rectangle().fill(Palette.tick).frame(width: 7, height: 1)
-                }
-            }
+            mark
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+            Text("\(cell.day.dayOfMonth)")
+                .font(.monoFixed(9, .monoMedium))
+                .foregroundStyle(numberColor)
+                .padding(.leading, 5)
+                .padding(.top, 4)
         }
         .aspectRatio(1, contentMode: .fit)
         .overlay {
             if cell.isToday {
                 RoundedRectangle(cornerRadius: 3)
-                    .strokeBorder(cell.status == .complete ? Palette.fg : Palette.fgMuted, lineWidth: 1.5)
-                    .padding(-3)
+                    .strokeBorder(Palette.fg, lineWidth: 1.5)
             }
         }
         .frame(maxWidth: .infinity)
@@ -75,25 +73,48 @@ struct DayCell: View {
         switch cell.status {
         case .complete:
             RoundedRectangle(cornerRadius: 3)
-                .fill(Palette.signal)
-                .shadow(color: Palette.signal.opacity(0.35), radius: 6)
-        case .partial:
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Palette.signal.opacity(0.18))
+                .fill(Palette.signalWash)
                 .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.signalEdge, lineWidth: 1))
-        case .missed, .nothingDue:
+        case .partial, .missed, .nothingDue:
             RoundedRectangle(cornerRadius: 3)
-                .fill(Palette.bgInset)
+                .fill(Palette.bgRaised)
+                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.line, lineWidth: 1))
         case .future:
             RoundedRectangle(cornerRadius: 3)
                 .strokeBorder(Palette.lineDash, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         }
     }
 
-    private var numberColor: Color {
+    /// Lit check when everything due was taken, a half-lit dash for some, a dim tick for none.
+    @ViewBuilder
+    private var mark: some View {
         switch cell.status {
-        case .complete: return Palette.buttonText
-        case .partial: return Palette.fg
+        case .complete:
+            CheckShape()
+                .stroke(Palette.signal, style: StrokeStyle(lineWidth: 2.2, lineCap: .square, lineJoin: .miter))
+                .frame(width: 18, height: 18)
+                .shadow(color: Palette.signal.opacity(0.75), radius: 5)
+                .offset(y: 3)
+        case .partial:
+            Rectangle()
+                .fill(Palette.signal.opacity(0.7))
+                .frame(width: 11, height: 2)
+                .offset(y: 3)
+        case .missed, .nothingDue:
+            Rectangle()
+                .fill(Palette.tick)
+                .frame(width: 6, height: 1.5)
+                .offset(y: 3)
+        case .future:
+            EmptyView()
+        }
+    }
+
+    private var numberColor: Color {
+        if cell.isToday { return Palette.fg }
+        switch cell.status {
+        case .complete: return Palette.signal.opacity(0.85)
+        case .partial: return Palette.fgSubtle
         case .missed, .nothingDue: return Palette.fgFaint
         case .future: return Palette.fgFaint.opacity(0.6)
         }

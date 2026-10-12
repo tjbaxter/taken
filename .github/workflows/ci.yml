@@ -99,7 +99,7 @@ jobs:
             2>&1 | tee build/xcodebuild-build.log | xcbeautify --renderer github-actions
 
       - name: Capture screenshots
-        run: scripts/screenshots.sh "${{ steps.sim.outputs.udid }}" build/DerivedData/Build/Products/Debug-iphonesimulator/Taken.app screenshots
+        run: scripts/screenshots.sh "${{ steps.sim.outputs.udid }}" build/DerivedData/Build/Products/Debug-iphonesimulator/Taken.app screenshots build/screenshot-diagnostics
 
       - name: Upload screenshots
         uses: actions/upload-artifact@v7
@@ -108,6 +108,15 @@ jobs:
           path: screenshots/*.png
           if-no-files-found: error
           retention-days: 30
+
+      - name: Upload screenshot diagnostics
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: screenshot-diagnostics
+          path: build/screenshot-diagnostics
+          if-no-files-found: ignore
+          retention-days: 7
 
       - name: Upload build log
         if: failure()
