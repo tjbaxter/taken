@@ -37,5 +37,8 @@ Tom used 1.0 on his iPhone. Verbatim highlights:
 - Privacy: transcription and task extraction happen on the iPhone; the privacy label stays "Data Not Collected". Add NSMicrophoneUsageDescription and NSSpeechRecognitionUsageDescription with plain wording.
 - Pro: voice to-dos need Pro (paywall bullet "VOICE TO-DOS"); the first voice note works without Pro so people feel it.
 
-### Day starts at
-- Explain it in its own row: "Doses before this time count for the day before." Keep the default 04:00 and allow 00:00 to 12:00. (Tom said he would pick 08:00; that would push a 07:30 dose onto yesterday, so the row's explanation matters.)
+### Wake-up time (replaces "Day starts at"; Tom 2026-10-13: "this is confusing, fix this, people are allowed to change the day they wake up, don't say don't")
+- The setting is "Wake-up time" (default 07:00, any time of day, mono time picker). One plain helper line: "Doses count for the day you wake up into."
+- Code owns the day boundary: rollover = wake-up time minus 4 hours, clamped to 00:00 through 12:00 (wake 08:00 -> 04:00; wake 05:00 -> 01:00; wake 14:00 -> 10:00; wake 02:00 -> 00:00). Users never see or set the rollover. Migrate an existing dayStartHour setting to wake-up = dayStart + 4 h so nobody's history moves.
+- Wake-up time also sets sensible defaults: backfill time on a past day = wake-up time + 1 h; the nudge default = wake-up time + 13 h if the user never chose one.
+- Never tell the user not to pick a time; there is no wrong answer.
