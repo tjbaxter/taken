@@ -100,7 +100,7 @@ How to see Taken Pro in the sandbox:
 2. Tap the Vitamin D3 row. It lights up with the current time, and about 1.5 seconds later the Taken Pro sheet slides up: yearly selected with 7 DAYS ON US, then monthly and lifetime, prices from the App Store, the renewal terms under the button, and Restore, Redeem code, Terms of Use and Privacy links.
 3. Close it with the X to see locked mode. TODAY still shows the stack, the log and the history grid, with a bar under the status panel reading START 7 DAYS ON US. A row, TAKE ALL, the bar or ADD opens the sheet again; the day sheet and CSV export keep working.
 4. Tap START 7 DAYS ON US and confirm with the sandbox account. The sheet locks in, closes, and the dose that opened it is logged.
-5. Restore: tap the gear, then RESTORE PURCHASES under PRO (or Restore on the sheet). REDEEM CODE and MANAGE SUBSCRIPTION are in the same section, under the current plan (for example TRIAL \u00b7 ENDS 20 OCT).
+5. Restore: tap the gear and scroll to PRO, then RESTORE PURCHASES (or Restore on the sheet). REDEEM CODE and MANAGE SUBSCRIPTION are in the same section, under the current plan (for example TRIAL \u00b7 ENDS 20 OCT).
 
 Founding members: everyone whose first download was Taken 1.0 (build 7 or earlier) keeps Pro for life at no cost. The app reads this from AppTransaction.originalAppVersion, in the production environment only. In the sandbox and TestFlight originalAppVersion is always 1.0, so review devices see the paywall as a new customer does.
 

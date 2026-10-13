@@ -22,11 +22,11 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             List {
-                proSection
                 stackSection
                 reminderSection
                 dayStartSection
                 hapticsSection
+                proSection
                 dataSection
                 aboutSection
             }
@@ -175,7 +175,7 @@ struct SettingsView: View {
                     .settingsRow()
             }
         } header: {
-            SettingsHeader(index: "01", title: "PRO") { EmptyView() }
+            SettingsHeader(index: "05", title: "PRO") { EmptyView() }
         }
     }
 
@@ -244,7 +244,7 @@ struct SettingsView: View {
                 .settingsRow()
             }
         } header: {
-            SettingsHeader(index: "02", title: "STACK") {
+            SettingsHeader(index: "01", title: "STACK") {
                 if model.activeItems.count > 1 {
                     Button {
                         withAnimation { editMode = editMode.isEditing ? .inactive : .active }
@@ -296,7 +296,7 @@ struct SettingsView: View {
                 .settingsRow()
             }
         } header: {
-            SettingsHeader(index: "03", title: "REMINDER") { EmptyView() }
+            SettingsHeader(index: "02", title: "REMINDER") { EmptyView() }
         }
     }
 
@@ -333,7 +333,7 @@ struct SettingsView: View {
                 .foregroundStyle(Palette.fgSubtle)
                 .settingsRow()
         } header: {
-            SettingsHeader(index: "04", title: "DAY") { EmptyView() }
+            SettingsHeader(index: "03", title: "DAY") { EmptyView() }
         }
     }
 
@@ -344,7 +344,7 @@ struct SettingsView: View {
             }
             .settingsRow()
         } header: {
-            SettingsHeader(index: "05", title: "FEEL") { EmptyView() }
+            SettingsHeader(index: "04", title: "FEEL") { EmptyView() }
         }
     }
 

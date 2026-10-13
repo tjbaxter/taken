@@ -102,6 +102,8 @@ enum ProCopy {
 
     static let headline = "Keep your record."
     static let subline = "Every dose, logged to the minute. Widgets, Lock Screen, Siri."
+    /// The subline as the paywall sets it: one thought per line.
+    static let sublineLines = "Every dose, logged to the minute.\nWidgets, Lock Screen, Siri."
     static let features = ["ONE TAP LOGGING + TAKE ALL", "HOME, LOCK SCREEN + CONTROL CENTER", "FULL HISTORY + CSV EXPORT"]
 
     /// What Siri, Shortcuts and a nudge say when logging needs Pro.

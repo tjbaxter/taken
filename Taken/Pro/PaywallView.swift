@@ -39,19 +39,22 @@ struct PaywallView: View {
 
     var body: some View {
         GeometryReader { geo in
-            let compact = geo.size.height < 760
+            // Every plan above the button on a 6.9 inch iPhone; smaller ones drop the ruler and tighten up.
+            let compact = geo.size.height < 820
             VStack(spacing: 0) {
-                closeBar
+                topBar
                 ScrollView {
                     VStack(alignment: .leading, spacing: 0) {
                         header(compact: compact)
                         features
-                            .padding(.top, compact ? 20 : 26)
-                        SectionHeader(index: "01", title: "PLAN")
+                            .padding(.top, compact ? 16 : 22)
+                        planHeader
+                            .padding(.top, compact ? 18 : 22)
+                            .padding(.bottom, 12)
                         plans
                     }
                     .padding(.horizontal, 20)
-                    .padding(.bottom, 18)
+                    .padding(.bottom, 14)
                 }
                 .scrollIndicators(.hidden)
                 .scrollBounceBehavior(.basedOnSize)
@@ -67,7 +70,7 @@ struct PaywallView: View {
         }
         .onAppear {
             withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.7).delay(0.12)) {
-                bracket = 20
+                bracket = 18
             }
         }
         .onChange(of: pro.status) { _, _ in
@@ -79,8 +82,21 @@ struct PaywallView: View {
 
     // MARK: Top
 
-    private var closeBar: some View {
-        HStack {
+    /// TODAY's wordmark with PRO lit, and the way out.
+    private var topBar: some View {
+        HStack(spacing: 10) {
+            CapsuleGlyph()
+                .frame(width: 20, height: 20)
+                .shadow(color: Palette.signal.opacity(0.5), radius: 6)
+            HStack(spacing: 9) {
+                Text("TAKEN").foregroundStyle(Palette.fg)
+                Text("PRO").foregroundStyle(Palette.signal)
+            }
+            .font(.monoFixed(15, .monoSemibold))
+            .tracking(15 * 0.3)
+            .accessibilityElement(children: .combine)
+            .accessibilityLabel("Taken Pro")
+            .accessibilityAddTraits(.isHeader)
             Spacer()
             Button {
                 model.closePaywall()
@@ -93,50 +109,52 @@ struct PaywallView: View {
             }
             .accessibilityLabel("Close")
         }
-        .padding(.horizontal, 8)
-        .padding(.top, 6)
+        .padding(.leading, 20)
+        .padding(.trailing, 8)
+        .frame(height: 56)
     }
 
     private func header(compact: Bool) -> some View {
         let today = model.today
         return VStack(alignment: .leading, spacing: 0) {
-            mark(size: compact ? 40 : 50)
-            HStack(spacing: 8) {
-                Lamp(on: true)
-                Text(unlocked ? "PRO ACTIVE" : "TAKEN PRO")
-                    .hud(12, Palette.signal, face: .monoSemibold, tracking: 0.26)
-                    .contentTransition(.opacity)
-            }
-            .padding(.top, compact ? 16 : 22)
             Text(ProCopy.headline)
                 .font(.sans(compact ? 30 : 34, .sansSemibold, relativeTo: .largeTitle))
                 .tracking(-0.6)
                 .foregroundStyle(Palette.fg)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 10)
-            Text(ProCopy.subline)
-                .font(.sans(16, relativeTo: .body))
+            Text(ProCopy.sublineLines)
+                .font(.sans(compact ? 15 : 16, relativeTo: .body))
                 .foregroundStyle(Palette.fgMuted)
-                .lineSpacing(2)
+                .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
-            VStack(alignment: .leading, spacing: 8) {
-                HStack(spacing: 8) {
-                    Text("TODAY").hud(10, Palette.fgSubtle, tracking: 0.14)
-                    Text(loggedLabel(today)).hud(10, today.allDoses.isEmpty ? Palette.fgFaint : Palette.signal, tracking: 0.12)
+            if !compact {
+                VStack(alignment: .leading, spacing: 8) {
+                    HStack(spacing: 8) {
+                        Text("TODAY").hud(10, Palette.fgSubtle, tracking: 0.14)
+                        Text(loggedLabel(today))
+                            .hud(10, today.allDoses.isEmpty ? Palette.fgFaint : Palette.signal, tracking: 0.12)
+                    }
+                    // The record so far, on the ruler TODAY uses: every dose at its minute.
+                    DayRuler(dayStart: model.clock.start(of: today.day), dayEnd: model.clock.end(of: today.day),
+                             doses: today.allDoses.map(\.takenAt), now: model.now, dayStartHour: model.clock.dayStartHour)
                 }
-                // The record so far, on the same ruler TODAY uses: every dose at its minute.
-                DayRuler(dayStart: model.clock.start(of: today.day), dayEnd: model.clock.end(of: today.day),
-                         doses: today.allDoses.map(\.takenAt), now: model.now, dayStartHour: model.clock.dayStartHour)
+                .padding(.top, 20)
+                .accessibilityHidden(true)
             }
-            .padding(.top, compact ? 16 : 22)
-            .accessibilityHidden(true)
         }
         .padding(.horizontal, 20)
         .padding(.top, compact ? 18 : 22)
-        .padding(.bottom, 16)
+        .padding(.bottom, compact ? 18 : 16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(unlocked ? Palette.signalWash.opacity(0.35) : Palette.bgRaised.opacity(0.6))
+        .background {
+            ZStack(alignment: .topLeading) {
+                (unlocked ? Palette.signalWash.opacity(0.35) : Palette.bgRaised.opacity(0.6))
+                // A faint signal glow behind the headline.
+                RadialGradient(colors: [Palette.signal.opacity(unlocked ? 0.16 : 0.08), Palette.signal.opacity(0)],
+                               center: .topLeading, startRadius: 0, endRadius: 260)
+            }
+        }
         .overlay {
             CornerBrackets(length: unlocked ? 30 : bracket)
                 .stroke(unlocked ? Palette.signal : Palette.fgSubtle, style: StrokeStyle(lineWidth: 1.5, lineCap: .square))
@@ -146,29 +164,13 @@ struct PaywallView: View {
         .overlay(alignment: .top) { scanline }
         .clipped()
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("Taken Pro. \(ProCopy.headline) \(ProCopy.subline)")
-        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel("\(ProCopy.headline) \(ProCopy.subline)")
     }
 
     private func loggedLabel(_ today: DaySummary) -> String {
         let count = today.allDoses.count
         if count == 0 { return "NOTHING LOGGED YET" }
         return count == 1 ? "1 DOSE LOGGED" : "\(count) DOSES LOGGED"
-    }
-
-    /// The capsule mark over a faint signal glow.
-    private func mark(size: CGFloat) -> some View {
-        ZStack {
-            Circle()
-                .fill(RadialGradient(colors: [Palette.signal.opacity(0.26), Palette.signal.opacity(0)],
-                                     center: .center, startRadius: 0, endRadius: size * 1.1))
-                .frame(width: size * 2.4, height: size * 2.4)
-            CapsuleGlyph()
-                .frame(width: size, height: size)
-                .shadow(color: Palette.signal.opacity(0.5), radius: 10)
-        }
-        .frame(width: size, height: size)
-        .accessibilityHidden(true)
     }
 
     @ViewBuilder
@@ -187,7 +189,7 @@ struct PaywallView: View {
     }
 
     private var features: some View {
-        VStack(alignment: .leading, spacing: 13) {
+        VStack(alignment: .leading, spacing: 11) {
             ForEach(ProCopy.features, id: \.self) { line in
                 HStack(spacing: 12) {
                     Rectangle()
@@ -207,13 +209,25 @@ struct PaywallView: View {
 
     // MARK: Plans
 
+    private var planHeader: some View {
+        HStack(spacing: 10) {
+            Text("[01]").hud(11, Palette.fgFaint, tracking: 0.06)
+            Text("PLAN").hud(11, Palette.fgMuted, tracking: 0.16)
+            DashedRule().frame(maxWidth: .infinity)
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+    }
+
     private var plans: some View {
         VStack(spacing: 10) {
             ForEach(ProPlan.allCases) { plan in
                 planCard(plan)
             }
         }
-        .padding(.trailing, 0)
+        // Room for the brackets on the chosen plan.
+        .padding(.horizontal, 3)
+        .padding(.vertical, 3)
     }
 
     private func planCard(_ plan: ProPlan) -> some View {
@@ -244,10 +258,20 @@ struct PaywallView: View {
                 priceBlock(offer, isOn: isOn)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 14)
-            .frame(minHeight: 66)
+            .padding(.vertical, 12)
+            .frame(minHeight: 58)
             .background(isOn ? Palette.signalWash : Palette.bgRaised, in: RoundedRectangle(cornerRadius: 4))
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(isOn ? Palette.signalEdge : Palette.line, lineWidth: 1))
+            .overlay {
+                // The viewfinder locks onto the chosen plan.
+                if isOn {
+                    CornerBrackets(length: 9)
+                        .stroke(Palette.signal, style: StrokeStyle(lineWidth: 1.5, lineCap: .square))
+                        .shadow(color: Palette.signal.opacity(0.6), radius: 4)
+                        .padding(-3)
+                        .transition(.opacity.combined(with: .scale(scale: 1.04)))
+                }
+            }
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -331,7 +355,7 @@ struct PaywallView: View {
                 cta
                 Text(termsLine)
                     .font(.sans(12.5, relativeTo: .footnote))
-                    .foregroundStyle(Palette.fgSubtle)
+                    .foregroundStyle(Palette.fgMuted)
                     .lineSpacing(1.5)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)

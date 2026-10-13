@@ -108,7 +108,7 @@ Comma separated with no spaces, and no word that already appears in the name or 
 Taken Pro is here. Log your first dose, then start with 7 days on us and pick yearly, monthly or lifetime. Everyone who downloaded Taken 1.0 keeps Pro for life, at no cost. Still no ads, no account and no tracking, and your log stays on your iPhone.
 ```
 
-## App Review notes (2767 / 4000 characters)
+## App Review notes (2775 / 4000 characters)
 
 ```
 No login or account is needed. Taken stores everything on the device and makes no network requests of its own. Version 1.1 adds Taken Pro, sold with StoreKit 2: a yearly subscription with a one-week introductory offer, a monthly subscription, and a lifetime purchase.
@@ -118,7 +118,7 @@ How to see Taken Pro in the sandbox:
 2. Tap the Vitamin D3 row. It lights up with the current time, and about 1.5 seconds later the Taken Pro sheet slides up: yearly selected with 7 DAYS ON US, then monthly and lifetime, prices from the App Store, the renewal terms under the button, and Restore, Redeem code, Terms of Use and Privacy links.
 3. Close it with the X to see locked mode. TODAY still shows the stack, the log and the history grid, with a bar under the status panel reading START 7 DAYS ON US. A row, TAKE ALL, the bar or ADD opens the sheet again; the day sheet and CSV export keep working.
 4. Tap START 7 DAYS ON US and confirm with the sandbox account. The sheet locks in, closes, and the dose that opened it is logged.
-5. Restore: tap the gear, then RESTORE PURCHASES under PRO (or Restore on the sheet). REDEEM CODE and MANAGE SUBSCRIPTION are in the same section, under the current plan (for example TRIAL · ENDS 20 OCT).
+5. Restore: tap the gear and scroll to PRO, then RESTORE PURCHASES (or Restore on the sheet). REDEEM CODE and MANAGE SUBSCRIPTION are in the same section, under the current plan (for example TRIAL · ENDS 20 OCT).
 
 Founding members: everyone whose first download was Taken 1.0 (build 7 or earlier) keeps Pro for life at no cost. The app reads this from AppTransaction.originalAppVersion, in the production environment only. In the sandbox and TestFlight originalAppVersion is always 1.0, so review devices see the paywall as a new customer does.
 
@@ -157,7 +157,7 @@ Created in App Store Connect; the ids are fixed (PRO.md). The app reads every pr
 | description | 2602 | 4000 |
 | keywords | 97 | 100 |
 | whats_new | 249 | 4000 |
-| review_notes | 2767 | 4000 |
+| review_notes | 2775 | 4000 |
 
 ## Screenshots
 
