@@ -39,6 +39,8 @@ final class ProStore {
     private(set) var legacyLog: Bool
     /// The one automatic paywall after the first dose has been shown.
     private(set) var introShown: Bool
+    /// A dose was ever logged (the ledger's `firstDoseAt`): the first session is over, even after the log is erased.
+    private(set) var hasLoggedBefore: Bool
     private(set) var offers: [ProPlan: PlanOffer] = [:]
     private(set) var offersPhase: OffersPhase = .idle
     /// Whether this Apple Account can still have the introductory offer. Nil until StoreKit says.
@@ -54,20 +56,27 @@ final class ProStore {
     @ObservationIgnored private var updates: Task<Void, Never>?
     @ObservationIgnored private var refreshing: Task<Bool, Never>?
     @ObservationIgnored private var waiters: [CheckedContinuation<Void, Never>] = []
+    /// Which wait for StoreKit the running timeout belongs to, so an older one never ends a newer wait early.
+    @ObservationIgnored private var settleGeneration = 0
 
     /// The live store. `hasLogged` is whether the log already holds doses, recorded the first time this version runs.
     init(ledger: ProLedgerStore, hasLogged: Bool) {
-        let record = ledger.loadOrCreate { ProLedger(firstSeenAt: Date(), legacyLog: hasLogged) }
+        let now = Date()
+        let record = ledger.loadOrCreate {
+            ProLedger(firstSeenAt: now, legacyLog: hasLogged, firstDoseAt: hasLogged ? now : nil)
+        }
         self.isDemo = false
         self.ledger = ledger
         self.status = record.status
         self.settled = false
         self.legacyLog = record.legacyLog
         self.introShown = record.introShownAt != nil
+        self.hasLoggedBefore = record.firstDoseAt != nil
     }
 
-    /// `-demo`: no StoreKit at all. Screenshots show Pro, or a locked log with the plans as StoreKit shapes them.
-    init(demoLocked: Bool, now: Date) {
+    /// `-demo`: no StoreKit at all. Screenshots show Pro, or a locked log with the plans as StoreKit shapes them
+    /// (`offers` leaves one out for the capture of a plan the App Store did not return).
+    init(demoLocked: Bool, now: Date, offers: [ProPlan: PlanOffer] = DemoOffers.all) {
         self.isDemo = true
         self.ledger = ProLedgerStore(fileURL: FileManager.default.temporaryDirectory
             .appendingPathComponent("taken-demo-pro-\(UUID().uuidString).json"))
@@ -79,7 +88,8 @@ final class ProStore {
         self.settled = true
         self.legacyLog = false
         self.introShown = true
-        self.offers = DemoOffers.all
+        self.hasLoggedBefore = false
+        self.offers = offers
         self.offersPhase = .ready
         self.introEligible = true
     }
@@ -104,10 +114,39 @@ final class ProStore {
             await self?.refresh()
             await self?.loadOffers()
         }
-        // Never keep the app waiting on StoreKit: after a few seconds the cached answer stands.
+        armSettleTimeout()
+    }
+
+    /// Back in the foreground: renewals, refunds and purchases made elsewhere land here (PRO.md). A plan set to renew
+    /// whose cache ran out while Taken was away waits for the App Store, at most a few seconds, instead of showing a
+    /// lock to someone who has just been charged.
+    func foreground() async {
+        guard !isDemo else { return }
+        if let status, status.lapsedRenewal(at: Date()) {
+            settled = false
+            armSettleTimeout()
+        }
+        await refresh()
+    }
+
+    /// While Taken is open across the end of a plan's period: the App Store is asked once the period ends, then every
+    /// minute while a renewal is on its way (Transaction.updates usually brings it first).
+    func checkRenewalIfDue(now: Date) {
+        guard !isDemo, refreshing == nil, let status, status.isPro, let end = status.expiresAt, end <= now else { return }
+        if status.checkedAt >= end {
+            guard status.awaitingRenewal(at: now), now.timeIntervalSince(status.checkedAt) >= 60 else { return }
+        }
+        Task { await refresh() }
+    }
+
+    /// Never keep the app waiting on StoreKit: after a few seconds the cached answer stands.
+    private func armSettleTimeout() {
+        settleGeneration += 1
+        let generation = settleGeneration
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
-            self?.markSettled()
+            guard let self, self.settleGeneration == generation else { return }
+            self.markSettled()
         }
     }
 
@@ -150,9 +189,9 @@ final class ProStore {
         let now = Date()
         let fresh = Entitlement.evaluate(purchases: facts, app: app, now: now)
         let previous = status
-        // Without the app transaction (offline, not signed in), finding no purchase proves nothing: a founding
-        // member would read as locked. Keep what was known until StoreKit can tell.
-        let next: ProStatus? = (app != nil || fresh.isPro) ? fresh : previous
+        // A no that proves nothing (no app transaction, or one that fails verification) never takes away founding
+        // membership or a 1.0 log's pending state (Entitlement.next).
+        let next = Entitlement.next(previous: previous, fresh: fresh, app: app)
         status = next
         if let next {
             ledger.update { ledger in ledger?.status = next }
@@ -272,7 +311,8 @@ final class ProStore {
         }
     }
 
-    /// Restore purchases: syncs with the App Store (it may ask for the Apple Account password), then asks again.
+    /// Restore purchases: syncs with the App Store (it may ask for the Apple Account password), then asks again. An app
+    /// transaction that is missing or fails verification is fetched fresh as well, so a founding member is recognised.
     func restore() async -> RestoreOutcome {
         guard !isDemo else { return .nothing }
         do {
@@ -280,6 +320,10 @@ final class ProStore {
         } catch {
             if let storeError = error as? StoreKitError, case .userCancelled = storeError { return .cancelled }
             return .failed(Self.message(for: error))
+        }
+        // The customer asked, so Apple's sign-in prompt is expected here.
+        if await Self.appTransactionFact()?.verified != true {
+            _ = try? await AppTransaction.refresh()
         }
         await refresh()
         return isActive(at: Date()) ? .restored : .nothing
@@ -303,6 +347,14 @@ final class ProStore {
     }
 
     // MARK: Ledger
+
+    /// A dose is in the log: the first session is over for good (`ProLedger.firstDoseAt`).
+    func noteLogged() {
+        guard !hasLoggedBefore else { return }
+        hasLoggedBefore = true
+        guard !isDemo else { return }
+        ledger.noteFirstDose(at: Date())
+    }
 
     func markIntroShown() {
         guard !introShown else { return }
@@ -347,6 +399,7 @@ extension PurchaseFact {
            case .verified(let renewal) = status.renewalInfo {
             fact.willRenew = renewal.willAutoRenew
             fact.graceUntil = renewal.gracePeriodExpirationDate
+            fact.inBillingRetry = renewal.isInBillingRetry
         }
         return fact
     }

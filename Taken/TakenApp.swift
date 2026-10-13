@@ -57,8 +57,9 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
                 if let day { await Reminders.explainStale(day: day) }
                 return
             }
-            // Logging needs Taken Pro: nothing is written, and Taken offers this TAKE ALL when it next opens.
-            guard ProGate.access(ledger: ProLedgerStore.shared.load(), state: state, now: now).allowsLogging else {
+            // Logging needs Taken Pro: nothing is written, and Taken offers this TAKE ALL when it next opens. This runs
+            // in the app, so a renewing plan whose cache ran out is checked with the App Store first.
+            guard await ProGate.mayLog(state: state, now: now) else {
                 ProLedgerStore.shared.recordPending(.takeAll, at: now)
                 await Reminders.explainLocked()
                 return
@@ -67,6 +68,7 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
                 state.takeAllPending(now: now, clock: DayClock(dayStartHour: state.settings.dayStartHour))
             }
             if let result {
+                if !result.value.isEmpty { ProLedgerStore.shared.noteFirstDose(at: now) }
                 await Sync.afterWrite(result.state)
             }
         } else if action == UNNotificationDefaultActionIdentifier || action == Reminders.openActionID, let day {

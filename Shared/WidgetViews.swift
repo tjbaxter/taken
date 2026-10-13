@@ -241,6 +241,7 @@ private struct StatusLine: View {
     }
 }
 
+/// A finished day: LOCKED 21:12. Without Pro the widget's lock is Taken Pro's, so the finished day reads DONE 21:12.
 private struct LockedLine: View {
     let snapshot: WidgetSnapshot
 
@@ -249,7 +250,8 @@ private struct LockedLine: View {
     }
 
     var body: some View {
-        StatusLine(text: snapshot.lastDose.map { "LOCKED \(Fmt.clock($0, snapshot.clock))" } ?? "LOCKED")
+        let word = snapshot.locked ? "DONE" : "LOCKED"
+        StatusLine(text: snapshot.lastDose.map { "\(word) \(Fmt.clock($0, snapshot.clock))" } ?? word)
     }
 }
 

@@ -37,8 +37,9 @@ struct StackProvider: TimelineProvider {
         if let ready = current.nextReady, ready > now, ready < rollover {
             entries.append(StackEntry(date: ready, snapshot: Self.snapshot(state: state, ledger: ledger, at: ready)))
         }
-        // Cached Pro that runs out before the day does: the widget turns read-only at that moment.
-        if !current.locked, let end = ledger?.status?.expiresAt, end > now, end < rollover {
+        // Cached Pro that runs out before the day does: the widget turns read-only at that moment. A plan set to renew
+        // runs past its period end by the renewal margin (ProStatus.activeUntil), so a renewal never locks it.
+        if !current.locked, let end = ledger?.status?.activeUntil, end > now, end < rollover {
             entries.append(StackEntry(date: end, snapshot: Self.snapshot(state: state, ledger: ledger, at: end)))
         }
         entries.append(StackEntry(date: rollover, snapshot: Self.snapshot(state: state, ledger: ledger, at: rollover)))
@@ -70,14 +71,19 @@ struct StackWidget: Widget {
 
 struct StackWidgetView: View {
     @Environment(\.widgetFamily) private var family
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
     let entry: StackEntry
 
     init(entry: StackEntry) {
         self.entry = entry
     }
 
-    /// The look chosen in the app, read from the App Group store with the stack.
-    private var theme: Theme { entry.snapshot.theme.theme }
+    /// The look chosen in the app, read from the App Group store with the stack. Where the system removes the canvas
+    /// and draws the widget on black (StandBy, CarPlay), a light look switches to its dark-canvas text.
+    private var theme: Theme {
+        let look = entry.snapshot.theme.theme
+        return showsBackground ? look : look.withoutBackground
+    }
 
     var body: some View {
         content

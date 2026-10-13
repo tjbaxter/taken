@@ -125,7 +125,8 @@ struct DayCell: View {
     private var numberColor: Color {
         if cell.isToday { return theme.fg }
         switch cell.status {
-        case .complete: return theme.signalInk.opacity(0.85)
+        // Full strength: on the signal wash the readable signal is AA in every look, a faded one is not (Blush).
+        case .complete: return theme.signalInk
         case .partial: return theme.fgSubtle
         case .missed, .nothingDue: return theme.fgFaint
         case .future: return theme.fgFaint.opacity(0.6)

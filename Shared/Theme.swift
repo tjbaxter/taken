@@ -227,6 +227,24 @@ struct Theme: Hashable, Sendable {
     var lockScreenPlate: Color { isLight ? Color(hex: tokens.fg, opacity: 0.9) : Color.white.opacity(0.06) }
     var lockScreenInk: Color { Color.white }
 
+    /// The look for a widget whose canvas the system removes (StandBy, CarPlay), where it is drawn on black. The dark
+    /// looks are unchanged. A light look keeps its signal, shapes and brackets on Signal's dark-canvas text roles, with
+    /// its lit colour as the readable signal there, so it stays legible and still reads as itself.
+    var withoutBackground: Theme {
+        guard isLight else { return self }
+        var dark = Theme.signal.tokens
+        dark.signal = tokens.signal
+        dark.signalInk = tokens.signal
+        dark.signalEdge = tokens.signalEdge
+        dark.onSignal = tokens.onSignal
+        // The lamp on the pale button takes the deeper shade, as Phosphor's and Ice's do.
+        dark.buttonLamp = tokens.signalInk
+        return Theme(id: id, isLight: false, tokens: dark, radius: radius, brackets: brackets, glowStrength: glowStrength)
+    }
+
+    /// The black StandBy and CarPlay draw a widget on once its canvas is removed (the widget gallery's stand-in).
+    static let removedBackground = Color(hex: 0x000000)
+
     /// LaunchBackground in the asset catalog. A light look fades in from it, so a cold launch never cuts to white.
     static let launchCanvas = Color(hex: 0x08090A)
 }

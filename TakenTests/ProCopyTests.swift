@@ -134,14 +134,43 @@ final class ProCopyTests: XCTestCase {
                        "PRO MONTHLY \u{00B7} BILLING ISSUE")
         XCTAssertEqual(line(.notPro(checkedAt: now)), "NOT ACTIVE")
         XCTAssertEqual(line(nil), "NOT ACTIVE")
-        XCTAssertEqual(line(ProStatus(isPro: true, reason: .monthly, checkedAt: now, expiresAt: at(2026, 10, 12, 9))),
-                       "NOT ACTIVE", "an expired cache is not Pro")
+        XCTAssertEqual(line(ProStatus(isPro: true, reason: .monthly, checkedAt: now, expiresAt: at(2026, 10, 12, 9),
+                                      willRenew: false)),
+                       "NOT ACTIVE", "an ended plan is not Pro")
+        XCTAssertEqual(line(ProStatus(isPro: true, reason: .monthly, checkedAt: now, expiresAt: at(2026, 10, 12, 9),
+                                      willRenew: true)),
+                       "PRO MONTHLY \u{00B7} RENEWING", "the period ended and the renewal has not shown yet")
+        XCTAssertEqual(line(ProStatus(isPro: true, reason: .trial, checkedAt: now, expiresAt: at(2026, 10, 13, 8),
+                                      willRenew: true)),
+                       "TRIAL \u{00B7} RENEWING")
+        XCTAssertEqual(line(ProStatus(isPro: true, reason: .yearly, checkedAt: now, expiresAt: at(2026, 10, 1, 9),
+                                      willRenew: true)),
+                       "NOT ACTIVE", "a renewal that never came, once the margin is over")
+    }
+
+    func testThePaywallSellsOnlyWhatProUnlocks() {
+        // The log, the history grid, the day sheet and CSV export stay open without Pro: no bullet may sell them.
+        XCTAssertEqual(ProCopy.features.count, 3)
+        for line in ProCopy.features {
+            XCTAssertNil(line.range(of: "HISTORY"), line)
+            XCTAssertNil(line.range(of: "CSV"), line)
+            XCTAssertNil(line.range(of: "EXPORT"), line)
+        }
+        XCTAssertTrue(ProCopy.features.contains { $0.contains("NUDGE") }, "the nudge is a Pro feature, so the paywall says so")
+    }
+
+    func testRestoreLinesAreTrueForEveryone() {
+        // Said to someone who never bought and to a subscriber whose plan ended: neither has anything active.
+        XCTAssertEqual(ProCopy.nothingToRestore, "No active Taken Pro on this Apple Account.")
+        XCTAssertNil(ProCopy.nothingToRestore.range(of: "yet"))
+        XCTAssertEqual(ProCopy.restored, "Restored. Taken Pro is on.")
     }
 
     func testEveryLineKeepsTheCopyRules() {
         let now = at(2026, 10, 13, 9)
         var lines: [String] = [ProCopy.headline, ProCopy.subline, ProCopy.lockedDialog, ProCopy.renewalTerms,
-                               ProCopy.lifetimeTerms] + ProCopy.features
+                               ProCopy.lifetimeTerms, ProCopy.nudgeLocked, ProCopy.restored, ProCopy.nothingToRestore,
+                               ProCopy.renewingNextToProForGood] + ProCopy.features
         let offers = [yearly(intro: onUsWeek), yearly(), monthly, lifetime]
         for offer in offers {
             for eligible in [true, false] {

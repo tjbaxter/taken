@@ -30,11 +30,61 @@ final class ProGateTests: XCTestCase {
     }
 
     func testCachedProHoldsUntilItExpires() {
-        var expired = pro
-        expired.expiresAt = at(2026, 10, 13, 8)
-        XCTAssertEqual(access(expired), .locked)
+        // A renewing plan whose period ended an hour ago: the renewal is on its way, and only the app can see it.
+        var renewing = pro
+        renewing.expiresAt = at(2026, 10, 13, 8)
+        XCTAssertEqual(access(renewing), .pro, "a payer is never locked out at a renewal")
+        XCTAssertEqual(ProGate.access(ledger: ProLedger(status: renewing, firstSeenAt: now, legacyLog: false),
+                                      state: loggedState, now: now), .pro, "widgets, the control, Siri and the nudge too")
+        var lapsed = renewing
+        lapsed.expiresAt = now.addingTimeInterval(-ProStatus.renewalMargin - 60)
+        XCTAssertEqual(access(lapsed), .locked, "the margin is capped")
+        XCTAssertEqual(access(lapsed, settled: false), .checking, "the app asks StoreKit before it shows the lock")
+
+        var cancelled = renewing
+        cancelled.willRenew = false
+        XCTAssertEqual(access(cancelled), .locked, "a plan set not to renew ends on time")
+        var billing = renewing
+        billing.billingIssue = true
+        XCTAssertEqual(access(billing), .locked, "a billing grace period ends on time")
         XCTAssertEqual(access(ProStatus(isPro: true, reason: .lifetime, checkedAt: at(2020, 1, 1, 0))), .pro,
                        "lifetime and founding never expire")
+    }
+
+    private var loggedState: StackState {
+        let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
+        var state = StackState(items: [vd3])
+        state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 8), timeZone: london)
+        return state
+    }
+
+    func testTheFirstSessionEndsWithTheFirstDoseEver() {
+        // Erasing the log or deleting items after the first dose never opens logging again without Pro.
+        let created = at(2026, 10, 1, 8)
+        let erased = StackState(items: [makeItem("Vitamin D3", "VD3", created: created)])
+        var ledger = ProLedger(status: notPro, firstSeenAt: created, legacyLog: false)
+        XCTAssertEqual(ProGate.access(ledger: ledger, state: erased, now: now), .firstSession, "nothing logged yet")
+        ledger.firstDoseAt = at(2026, 10, 2, 8)
+        XCTAssertEqual(ProGate.access(ledger: ledger, state: erased, now: now), .locked, "the log was erased afterwards")
+        XCTAssertEqual(ProGate.access(ledger: ledger, state: StackState(), now: now), .locked, "every item deleted")
+        XCTAssertTrue(ProGate.hasLogged(state: StackState(), ledger: ledger))
+        XCTAssertTrue(ProGate.hasLogged(state: loggedState, ledger: nil))
+        XCTAssertFalse(ProGate.hasLogged(state: erased, ledger: nil))
+        ledger.status = pro
+        XCTAssertEqual(ProGate.access(ledger: ledger, state: erased, now: now), .pro)
+    }
+
+    func testTheFirstDoseIsRecordedOnceInTheLedger() throws {
+        let store = ProLedgerStore(fileURL: temporaryStoreURL().deletingLastPathComponent().appendingPathComponent("pro.json"))
+        store.noteFirstDose(at: now)
+        XCTAssertNil(store.load(), "never creates the ledger: until the app runs, the log counts as one from 1.0")
+        _ = store.loadOrCreate { ProLedger(firstSeenAt: now, legacyLog: false) }
+        store.noteFirstDose(at: now)
+        XCTAssertEqual(store.load()?.firstDoseAt, now)
+        store.noteFirstDose(at: at(2026, 10, 20, 9))
+        XCTAssertEqual(store.load()?.firstDoseAt, now, "the first one stays")
+        let legacy = ProLedger(firstSeenAt: now, legacyLog: true, firstDoseAt: now)
+        XCTAssertEqual(try ProLedgerStore.decode(ProLedgerStore.encode(legacy)), legacy, "round trip")
     }
 
     func testTheAppWaitsForStoreKitBeforeLocking() {
@@ -76,6 +126,8 @@ final class ProGateTests: XCTestCase {
         var cancelled = pro
         cancelled.willRenew = false
         XCTAssertEqual(ProGate.nudgeWindow(access: .pro, status: cancelled), .until(at(2027, 10, 13, 9)))
+        XCTAssertEqual(ProGate.nudgeWindow(access: .pro, status: cancelled), .until(cancelled.activeUntil!),
+                       "nudges stop when cached Pro does")
         XCTAssertEqual(ProGate.nudgeWindow(access: .pro, status: ProStatus(isPro: true, reason: .lifetime, checkedAt: now)), .open)
     }
 
@@ -124,6 +176,8 @@ final class ProGateTests: XCTestCase {
         XCTAssertEqual(ledger.status?.billingIssue, false)
         XCTAssertFalse(ledger.legacyLog)
         XCTAssertNil(ledger.pending)
+        XCTAssertNil(ledger.firstDoseAt, "a ledger from before the first dose was recorded")
+        XCTAssertEqual(ledger.status?.renewingSubscription, false)
         let unknown = #"{"firstSeenAt":1791000000,"status":{"isPro":false,"reason":"someday","checkedAt":1791000000}}"#
         XCTAssertEqual(try ProLedgerStore.decode(Data(unknown.utf8)).status?.reason, ProReason.none,
                        "a reason from a later version reads as none")

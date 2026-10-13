@@ -165,13 +165,40 @@ final class ThemeTests: XCTestCase {
                 XCTAssertGreaterThanOrEqual(contrast(ink, t.bgRaised), 4.5, "\(name) \(label) on a panel")
             }
             XCTAssertGreaterThanOrEqual(contrast(t.fg, wash), 4.5, "\(name) fg on the signal wash")
-            XCTAssertGreaterThanOrEqual(contrast(t.signalInk, wash), 4.5, "\(name) lit text on a lit chip or plan")
+            XCTAssertGreaterThanOrEqual(contrast(t.fgMuted, wash), 4.5,
+                                        "\(name) the chosen plan's units and about $1.67 / month on the wash")
+            XCTAssertGreaterThanOrEqual(contrast(t.signalInk, wash), 4.5,
+                                        "\(name) lit text on a lit chip or plan, and a fully taken day's number in the log")
             XCTAssertGreaterThanOrEqual(contrast(t.buttonText, t.button), 4.5, "\(name) the primary button")
             XCTAssertGreaterThanOrEqual(contrast(t.buttonText, t.signalInk), 4.5, "\(name) the paywall button once Pro is on")
             XCTAssertGreaterThanOrEqual(contrast(t.onSignal, t.signal), 3, "\(name) the check on a lit disc")
             XCTAssertGreaterThanOrEqual(contrast(t.signal, t.bg), 3, "\(name) a lit segment against the canvas")
             XCTAssertGreaterThan(contrast(t.fgFaint, t.bg), 2, "\(name) dashed rings and index marks still show")
         }
+    }
+
+    func testWidgetsStayReadableWhereTheSystemRemovesTheCanvas() {
+        // StandBy and CarPlay draw the small widget on black without its canvas. The dark looks need no change; Blush
+        // switches to dark-canvas text and keeps its rose.
+        let black: UInt32 = 0x000000
+        for theme in Theme.all {
+            let shown = theme.withoutBackground
+            let t = shown.tokens
+            let name = theme.label
+            XCTAssertFalse(shown.isLight, "\(name) draws light on black")
+            XCTAssertEqual(shown.id, theme.id)
+            XCTAssertEqual(shown.radius, theme.radius, "\(name) keeps its shapes")
+            XCTAssertEqual(t.signal, theme.tokens.signal, "\(name) keeps its signal")
+            for (label, ink) in [("fg", t.fg), ("fgMuted", t.fgMuted), ("fgSubtle", t.fgSubtle), ("signalInk", t.signalInk)] {
+                XCTAssertGreaterThanOrEqual(contrast(ink, black), 4.5, "\(name) \(label) on black")
+            }
+            XCTAssertGreaterThanOrEqual(contrast(t.signal, black), 3, "\(name) a lit segment on black")
+            XCTAssertGreaterThan(luminance(t.signal), luminance(t.bgInset), "\(name) lit segments outshine unlit ones")
+            XCTAssertGreaterThanOrEqual(contrast(t.buttonText, t.button), 4.5, "\(name) TAKE ALL")
+            XCTAssertGreaterThanOrEqual(contrast(t.onSignal, t.signal), 3, "\(name) the check on a lit disc")
+        }
+        XCTAssertEqual(Theme.signal.withoutBackground, Theme.signal, "the dark looks are unchanged")
+        XCTAssertNotEqual(Theme.blush.withoutBackground.tokens.fg, Theme.blush.tokens.fg, "Blush's ink would vanish on black")
     }
 
     // MARK: WCAG 2 contrast

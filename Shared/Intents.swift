@@ -15,7 +15,7 @@ struct TakeAllIntent: AppIntent {
         let store = TakenStore.shared
         // Logging needs Taken Pro (PRO.md). Without it nothing is written; the tap is kept and Taken offers it
         // with the paywall when it next opens.
-        guard ProGate.access(ledger: ProLedgerStore.shared.load(), state: store.load(), now: now).allowsLogging else {
+        guard await ProGate.mayLog(state: store.load(), now: now) else {
             ProLedgerStore.shared.recordPending(.takeAll, at: now)
             await Sync.reloadSurfaces()
             return .result(dialog: "\(ProCopy.lockedDialog)")
@@ -25,6 +25,7 @@ struct TakeAllIntent: AppIntent {
                 let clock = DayClock(dayStartHour: state.settings.dayStartHour)
                 return state.takeAllPending(now: now, clock: clock)
             }
+            if !result.value.isEmpty { ProLedgerStore.shared.noteFirstDose(at: now) }
             await Sync.afterWrite(result.state)
             let names = result.value.compactMap { dose in result.state.item(dose.itemId)?.name }
             if names.isEmpty {
@@ -69,7 +70,7 @@ struct LogItemIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let now = Date()
         let itemID = item.id
-        guard ProGate.access(ledger: ProLedgerStore.shared.load(), state: TakenStore.shared.load(), now: now).allowsLogging else {
+        guard await ProGate.mayLog(state: TakenStore.shared.load(), now: now) else {
             ProLedgerStore.shared.recordPending(.log(itemID), at: now)
             await Sync.reloadSurfaces()
             return .result(dialog: "\(ProCopy.lockedDialog)")
@@ -84,6 +85,7 @@ struct LogItemIntent: AppIntent {
                 }
                 return .result(dialog: "That item is no longer in your stack.")
             }
+            ProLedgerStore.shared.noteFirstDose(at: now)
             await Sync.afterWrite(result.state)
             return .result(dialog: "Logged \(logged.name) at \(Fmt.spoken(dose.takenAt)).")
         } catch {
@@ -111,13 +113,14 @@ struct LogNextDoseIntent: AppIntent {
         guard let id = UUID(uuidString: itemID) else { return .result() }
         let now = Date()
         // A widget drawn before Pro ran out: log nothing and redraw it read-only, where a tap opens the paywall.
-        guard ProGate.access(ledger: ProLedgerStore.shared.load(), state: TakenStore.shared.load(), now: now).allowsLogging else {
+        guard await ProGate.mayLog(state: TakenStore.shared.load(), now: now) else {
             await Sync.reloadSurfaces()
             return .result()
         }
         if let result = try? TakenStore.shared.update({ state in
             state.logNextDoseIfPending(itemId: id, now: now, clock: DayClock(dayStartHour: state.settings.dayStartHour))
         }) {
+            if result.value != nil { ProLedgerStore.shared.noteFirstDose(at: now) }
             await Sync.afterWrite(result.state)
         }
         return .result()

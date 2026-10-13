@@ -8,6 +8,8 @@ struct StatusPanel: View {
     let clock: DayClock
     let lockInCount: Int
     let streak: Int
+    /// Locked mode (no Taken Pro): the lock is Pro's, so a finished day reads DONE TODAY rather than LOCKED IN.
+    let proLocked: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.theme) private var theme
@@ -15,12 +17,13 @@ struct StatusPanel: View {
     @State private var sweeping = false
     @State private var snap = false
 
-    init(summary: DaySummary, now: Date, clock: DayClock, lockInCount: Int, streak: Int) {
+    init(summary: DaySummary, now: Date, clock: DayClock, lockInCount: Int, streak: Int, proLocked: Bool = false) {
         self.summary = summary
         self.now = now
         self.clock = clock
         self.lockInCount = lockInCount
         self.streak = streak
+        self.proLocked = proLocked
     }
 
     private var locked: Bool { summary.allTaken }
@@ -61,7 +64,8 @@ struct StatusPanel: View {
     private var topLine: some View {
         HStack(spacing: 8) {
             Lamp(on: locked)
-            Text(locked ? "LOCKED IN" : "TAKEN TODAY").hud(11, locked ? theme.signalInk : theme.fgSubtle)
+            Text(locked ? (proLocked ? "DONE TODAY" : "LOCKED IN") : "TAKEN TODAY")
+                .hud(11, locked ? theme.signalInk : theme.fgSubtle)
             Spacer(minLength: 8)
             Text(rightLabel).hud(11, theme.fgSubtle, tracking: 0.12)
         }

@@ -108,6 +108,12 @@ shoot 22-day-blush day blush
 shoot 23-locked-blush locked blush
 shoot 24-empty-blush empty blush
 shoot 25-widgets-locked-blush widgets-locked blush
+# StandBy and CarPlay remove a widget's canvas and draw it on black: Blush switches to its dark-canvas text there.
+shoot 26-widgets-standby-blush widgets-standby blush
+shoot 26-widgets-standby-signal widgets-standby signal
+# Locked mode in Settings (the nudge needs Pro), and the paywall when the App Store returned every plan but yearly.
+shoot 27-settings-locked settings-locked
+shoot 28-paywall-no-yearly paywall-no-yearly
 
 # The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
 if [ -n "$small" ] && [ "$small" != "$udid" ]; then

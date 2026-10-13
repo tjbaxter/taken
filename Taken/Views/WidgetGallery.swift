@@ -1,24 +1,32 @@
 import SwiftUI
 
-/// Design check for the widgets, rendered in the app with demo data (`-demo -screen widgets`, and
-/// `-screen widgets-locked` for the read-only states without Taken Pro), in the look chosen with `-theme`. Not
-/// reachable from the UI; CI captures it so the widget look can be reviewed without a Home Screen.
+/// Design check for the widgets, rendered in the app with demo data (`-demo -screen widgets`, `-screen widgets-locked`
+/// for the read-only states without Taken Pro, `-screen widgets-standby` for the small widget with its canvas removed),
+/// in the look chosen with `-theme`. Not reachable from the UI; CI captures it so the widget look can be reviewed
+/// without a Home Screen.
 struct WidgetGallery: View {
+    enum Mode {
+        case home
+        case locked
+        /// StandBy and CarPlay: the system removes the canvas and draws the small widget on black.
+        case standBy
+    }
+
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
-    let locked: Bool
+    let mode: Mode
 
-    init(locked: Bool = false) {
-        self.locked = locked
+    init(mode: Mode = .home) {
+        self.mode = mode
     }
 
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                if locked {
-                    lockedStates
-                } else {
-                    states
+                switch mode {
+                case .home: states
+                case .locked: lockedStates
+                case .standBy: standByStates
                 }
             }
             .padding(.horizontal, 20)
@@ -97,6 +105,40 @@ struct WidgetGallery: View {
             .font(.sans(14))
             .foregroundStyle(theme.fgSubtle)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// The small widget where StandBy and CarPlay remove its canvas: on black, in the look the widget switches to there
+    /// (`Theme.withoutBackground`, which is the look itself for the dark ones).
+    @ViewBuilder
+    private var standByStates: some View {
+        let now = model.now
+        let partial = WidgetSnapshot(state: model.state, now: now)
+        let done = WidgetSnapshot(state: demo(allTaken: true), now: now)
+        let lockedPartial = WidgetSnapshot(state: model.state, now: now, locked: true)
+        let lockedDone = WidgetSnapshot(state: demo(allTaken: true), now: now, locked: true)
+        SectionHeader(index: "W1", title: "STANDBY", trailing: "NO BACKGROUND")
+        HStack(spacing: 22) {
+            standByTile { SmallStackView(snapshot: partial) }
+            standByTile { SmallStackView(snapshot: done) }
+        }
+        SectionHeader(index: "W2", title: "STANDBY", trailing: "NO PRO", trailingColor: theme.signalInk)
+        HStack(spacing: 22) {
+            standByTile { SmallStackView(snapshot: lockedPartial) }
+            standByTile { SmallStackView(snapshot: lockedDone) }
+        }
+        SectionHeader(index: "W3", title: "WHY")
+        Text("StandBy and CarPlay draw the small widget on black without its canvas. A light look keeps its signal there and switches its text to the dark canvas roles, so it stays readable.")
+            .font(.sans(14))
+            .foregroundStyle(theme.fgSubtle)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    private func standByTile<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        content()
+            .environment(\.theme, theme.withoutBackground)
+            .padding(16)
+            .frame(width: 170, height: 170)
+            .background(Theme.removedBackground, in: RoundedRectangle(cornerRadius: 22, style: .continuous))
     }
 
     /// A Home Screen widget: the look's canvas, as `containerBackground` draws it.

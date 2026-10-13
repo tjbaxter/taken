@@ -104,10 +104,19 @@ enum ProCopy {
     static let subline = "Every dose, logged to the minute. Widgets, Lock Screen, Siri."
     /// The subline as the paywall sets it: one thought per line.
     static let sublineLines = "Every dose, logged to the minute.\nWidgets, Lock Screen, Siri."
-    static let features = ["ONE TAP LOGGING + TAKE ALL", "HOME, LOCK SCREEN + CONTROL CENTER", "FULL HISTORY + CSV EXPORT"]
+    /// What Pro unlocks, and only that: the log, the history and CSV export stay open without it.
+    static let features = ["ONE TAP LOGGING + TAKE ALL", "HOME, LOCK SCREEN + CONTROL CENTER", "SIRI + THE EVENING NUDGE"]
 
     /// What Siri, Shortcuts and a nudge say when logging needs Pro.
     static let lockedDialog = "Logging needs Taken Pro. Open Taken to continue."
+    /// Settings > REMINDER without Pro: no nudge is scheduled.
+    static let nudgeLocked = "THE NUDGE NEEDS TAKEN PRO"
+    /// Restore found Pro.
+    static let restored = "Restored. Taken Pro is on."
+    /// Restore found nothing active: true for someone who never bought and for a plan that ended.
+    static let nothingToRestore = "No active Taken Pro on this Apple Account."
+    /// Settings > PRO for a lifetime or founding member whose subscription still renews.
+    static let renewingNextToProForGood = "Your subscription still renews. Taken Pro is yours for good, so you can cancel it."
     static let renewalTerms = "Renews automatically until cancelled. Cancel anytime in Settings at least 24 hours before renewal."
     static let lifetimeTerms = "One payment. Yours for good."
 
@@ -192,7 +201,8 @@ enum ProCopy {
     }
 
     /// Settings > PRO status line: "FOUNDING MEMBER · PRO FOR LIFE", "PRO YEARLY · RENEWS 12 OCT 2027",
-    /// "PRO LIFETIME", "TRIAL · ENDS 19 OCT", "NOT ACTIVE".
+    /// "PRO LIFETIME", "TRIAL · ENDS 19 OCT", "PRO YEARLY · RENEWING" (the period ended and the renewal has not
+    /// shown yet), "NOT ACTIVE".
     static func statusLine(_ status: ProStatus?, now: Date, timeZone: TimeZone = .current) -> String {
         guard let status, status.isActive(at: now) else { return "NOT ACTIVE" }
         switch status.reason {
@@ -201,11 +211,13 @@ enum ProCopy {
         case .lifetime:
             return "PRO LIFETIME"
         case .trial:
+            if status.awaitingRenewal(at: now) { return "TRIAL \u{00B7} RENEWING" }
             guard let end = status.expiresAt else { return "TRIAL" }
             return "TRIAL \u{00B7} ENDS \(Fmt.shortDate(end, year: false, timeZone: timeZone))"
         case .yearly, .monthly:
             let name = status.reason == .yearly ? "PRO YEARLY" : "PRO MONTHLY"
             if status.billingIssue { return "\(name) \u{00B7} BILLING ISSUE" }
+            if status.awaitingRenewal(at: now) { return "\(name) \u{00B7} RENEWING" }
             guard let end = status.expiresAt else { return name }
             let verb = status.willRenew == false ? "ENDS" : "RENEWS"
             return "\(name) \u{00B7} \(verb) \(Fmt.shortDate(end, year: true, timeZone: timeZone))"

@@ -38,6 +38,19 @@ struct PaywallView: View {
     private var eligible: Bool { pro.introEligible == true }
     private var offer: PlanOffer? { pro.offers[selected] }
 
+    /// StoreKit has answered, so a plan it did not return is missing, not loading.
+    private var plansAnswered: Bool { pro.offersPhase == .ready || pro.offersPhase == .failed }
+
+    /// A plan the App Store did not return (not on sale here, or not attached to this version): "--", not selectable.
+    private func isMissing(_ plan: ProPlan) -> Bool { pro.offers[plan] == nil && plansAnswered }
+
+    /// Yearly is chosen when the App Store returns it; otherwise the first plan it did return.
+    private func preselect() {
+        guard pro.offers[selected] == nil,
+              let first = ProPlan.allCases.first(where: { pro.offers[$0] != nil }) else { return }
+        selected = first
+    }
+
     var body: some View {
         GeometryReader { geo in
             // Every plan sits above the button: with room to spare on a 6.9 inch iPhone, tighter on 6.1 and 6.3 inch
@@ -84,7 +97,12 @@ struct PaywallView: View {
             // Pro came on another way while the sheet was up: a restore, an offer code, an approved Ask to Buy.
             if pro.isActive(at: Date()) { celebrate() }
         }
-        .task { await pro.loadOffers() }
+        .onChange(of: pro.offersPhase) { _, _ in preselect() }
+        .task {
+            preselect()
+            await pro.loadOffers()
+            preselect()
+        }
     }
 
     // MARK: Top
@@ -285,7 +303,8 @@ struct PaywallView: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
-        .disabled(unlocked)
+        .disabled(unlocked || isMissing(plan))
+        .opacity(isMissing(plan) ? 0.55 : 1)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(cardLabel(plan, offer: offer, tag: tag))
         .accessibilityAddTraits(isOn ? [.isButton, .isSelected] : .isButton)
@@ -308,15 +327,16 @@ struct PaywallView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 if let monthly = ProCopy.monthlyEquivalent(offer) {
+                    // On the chosen card's signal wash the muted ink keeps it AA; the subtle one does on a plain card.
                     Text(monthly)
                         .font(.monoFixed(11, .monoMedium))
-                        .foregroundStyle(theme.fgSubtle)
+                        .foregroundStyle(isOn ? theme.fgMuted : theme.fgSubtle)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
             }
         } else {
-            Text(pro.offersPhase == .failed ? "--" : "\u{00B7}\u{00B7}\u{00B7}")
+            Text(plansAnswered ? "--" : "\u{00B7}\u{00B7}\u{00B7}")
                 .font(.monoFixed(16, .monoMedium))
                 .foregroundStyle(theme.fgFaint)
         }
@@ -341,6 +361,7 @@ struct PaywallView: View {
 
     private func cardLabel(_ plan: ProPlan, offer: PlanOffer?, tag: String?) -> String {
         var parts = [plan.rawValue.capitalized]
+        if isMissing(plan) { parts.append("Not available right now") }
         if let offer {
             if let period = offer.period {
                 parts.append("\(offer.displayPrice) \(ProCopy.per(period))")
@@ -392,12 +413,13 @@ struct PaywallView: View {
         case .restoring: return "RESTORING"
         case nil: break
         }
-        if offer == nil { return pro.offersPhase == .failed ? "TRY AGAIN" : "LOADING PLANS" }
+        // A plan the App Store did not return is never left on a spinner: the button asks it again.
+        if offer == nil { return plansAnswered ? "TRY AGAIN" : "LOADING PLANS" }
         return ProCopy.cta(offer, eligible: eligible)
     }
 
     private var ctaEnabled: Bool {
-        !unlocked && busy == nil && (offer != nil || pro.offersPhase == .failed)
+        !unlocked && busy == nil && (offer != nil || plansAnswered)
     }
 
     private func cta(height: CGFloat) -> some View {
@@ -490,7 +512,7 @@ struct PaywallView: View {
             .lineLimit(1)
             .fixedSize()
             .padding(.horizontal, 5)
-            .frame(minHeight: 40)
+            .frame(minHeight: 44)
             .contentShape(Rectangle())
     }
 
@@ -526,7 +548,10 @@ struct PaywallView: View {
 
     private func primaryAction() {
         if offer == nil {
-            Task { await pro.loadOffers(force: true) }
+            Task {
+                await pro.loadOffers(force: true)
+                preselect()
+            }
             return
         }
         buy()
@@ -564,7 +589,7 @@ struct PaywallView: View {
             case .restored:
                 celebrate()
             case .nothing:
-                note = Note(text: "No Taken Pro purchase on this Apple Account yet.", lit: false)
+                note = Note(text: ProCopy.nothingToRestore, lit: false)
             case .cancelled:
                 break
             case .failed(let text):

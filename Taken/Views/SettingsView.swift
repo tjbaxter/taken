@@ -122,10 +122,20 @@ struct SettingsView: View {
         return ProCopy.statusLine(model.pro.status, now: model.now)
     }
 
-    /// Manage subscription matters to subscribers and to anyone without Pro (an ended plan restarts there).
+    /// Manage subscription matters to subscribers, to anyone without Pro (an ended plan restarts there), and to a
+    /// lifetime or founding member whose subscription still renews.
     private var showsManage: Bool {
-        guard proActive, let reason = model.pro.status?.reason else { return true }
-        return reason == .trial || reason == .yearly || reason == .monthly
+        guard proActive, let status = model.pro.status else { return true }
+        switch status.reason {
+        case .lifetime, .founding: return status.renewingSubscription
+        case .trial, .yearly, .monthly, .none: return true
+        }
+    }
+
+    /// Pro for good, and a subscription on the same Apple Account still charging for it.
+    private var renewsNextToProForGood: Bool {
+        guard proActive, let status = model.pro.status else { return false }
+        return (status.reason == .lifetime || status.reason == .founding) && status.renewingSubscription
     }
 
     private var proSection: some View {
@@ -140,6 +150,13 @@ struct SettingsView: View {
             .frame(minHeight: 44)
             .settingsRow()
             .accessibilityElement(children: .combine)
+
+            if renewsNextToProForGood {
+                Text(ProCopy.renewingNextToProForGood)
+                    .font(.sans(14))
+                    .foregroundStyle(theme.fgMuted)
+                    .settingsRow()
+            }
 
             if !proActive {
                 Button {
@@ -202,9 +219,9 @@ struct SettingsView: View {
             restoring = false
             switch outcome {
             case .restored:
-                proNote = "Restored. Taken Pro is on."
+                proNote = ProCopy.restored
             case .nothing:
-                proNote = "No Taken Pro purchase on this Apple Account yet."
+                proNote = ProCopy.nothingToRestore
             case .cancelled:
                 proNote = nil
             case .failed(let text):
@@ -276,9 +293,11 @@ struct SettingsView: View {
 
     private var reminderSection: some View {
         Section {
+            // Without Pro a tap on the toggle opens the paywall, and the nudge (with iOS's permission prompt) comes on
+            // once Pro does. Turning it off always works.
             Toggle(isOn: Binding(
                 get: { model.settings.reminderEnabled },
-                set: { enabled in Task { await model.setReminderEnabled(enabled) } }
+                set: { enabled in model.setReminder(enabled, anchor: paywallAnchor) }
             )) {
                 Text("NUDGE").hud(12, theme.fg)
             }
@@ -300,6 +319,33 @@ struct SettingsView: View {
                 .font(.sans(14))
                 .foregroundStyle(theme.fgSubtle)
                 .settingsRow()
+
+            if model.isLocked {
+                // No nudge is scheduled without Pro: say so here, where it is set, and let the line open the plans.
+                Button {
+                    model.presentPaywall(anchor: paywallAnchor, origin: .settings)
+                } label: {
+                    HStack(spacing: 10) {
+                        Image(systemName: "lock.fill")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(theme.signalInk)
+                        Text(ProCopy.nudgeLocked)
+                            .hud(10.5, theme.signalInk, tracking: 0.1)
+                            .lineLimit(1)
+                            .minimumScaleFactor(0.8)
+                        Spacer(minLength: 8)
+                        Image(systemName: "arrow.right")
+                            .font(.system(size: 11, weight: .semibold))
+                            .foregroundStyle(theme.fgSubtle)
+                    }
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .settingsRow()
+                .accessibilityLabel("The nudge needs Taken Pro")
+                .accessibilityHint("Opens Taken Pro.")
+            }
 
             if model.notificationsDenied {
                 Button {

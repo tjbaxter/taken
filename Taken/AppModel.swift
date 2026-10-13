@@ -74,6 +74,8 @@ final class AppModel {
     @ObservationIgnored private var introTask: Task<Void, Never>?
     @ObservationIgnored private var introWaitsForSheet = false
     @ObservationIgnored private var iconTask: Task<Void, Never>?
+    /// A new look's icon waits for Settings to close, so trying the looks brings up iOS's icon alert once.
+    @ObservationIgnored private var iconWaitsForSettings = false
     /// What the paywall was opened for, run once Pro is on and the sheet has closed.
     @ObservationIgnored private var afterPaywall: (@MainActor () -> Void)?
 
@@ -94,6 +96,7 @@ final class AppModel {
         self.engine = engine
         self.today = engine.todaySummary(now: now)
         recomputeStats()
+        if !state.doses.isEmpty { self.pro.noteLogged() }
         if !isDemo {
             startTicker()
             darwinObserver = DarwinObserver { [weak self] in
@@ -105,6 +108,9 @@ final class AppModel {
             }
             self.pro.onChange = { [weak self] in self?.proDidChange() }
             self.pro.start()
+            // Siri and the nudge run in this process: before refusing a log on a renewing plan's lapsed cache, they
+            // ask the App Store again through this store.
+            ProRecheck.handler = { [weak self] in _ = await self?.pro.refresh() }
         }
     }
 
@@ -129,8 +135,13 @@ final class AppModel {
             : DemoData.state(now: demoNow, allTaken: screen == "today-done")
         seeded.settings.theme = look
         try? store.replace(with: seeded)
-        // Store screenshots show Taken with Pro; -screen paywall and -screen locked show it without.
-        let pro = ProStore(demoLocked: screen == "paywall" || screen == "locked", now: demoNow)
+        // Store screenshots show Taken with Pro; -screen paywall, locked and settings-locked show it without, and
+        // paywall-no-yearly shows the paywall when the App Store returned every plan but yearly.
+        let lockedScreens: Set<String> = ["paywall", "locked", "settings-locked", "paywall-no-yearly"]
+        var offers = DemoOffers.all
+        if screen == "paywall-no-yearly" { offers[.yearly] = nil }
+        let demoLocked = screen.map { lockedScreens.contains($0) } ?? false
+        let pro = ProStore(demoLocked: demoLocked, now: demoNow, offers: offers)
         return AppModel(store: store, pro: pro, isDemo: true, launchScreen: screen, clockNow: { demoNow })
     }
 
@@ -146,10 +157,11 @@ final class AppModel {
     /// Items TAKE ALL logs right now: pending, and not logged in the last hour (StackEngine.repeatGuard).
     var takeAllCount: Int { engine.quickLogRows(today, now: now).count }
 
-    /// Whether a dose may be logged right now (PRO.md).
+    /// Whether a dose may be logged right now (PRO.md). The first session ends with the first dose ever, which the
+    /// ledger keeps, so erasing the log or deleting items never reopens it.
     var access: ProAccess {
         ProGate.access(status: pro.status, settled: pro.settled, legacyLog: pro.legacyLog,
-                       hasLogged: !state.doses.isEmpty, now: now)
+                       hasLogged: !state.doses.isEmpty || pro.hasLoggedBefore, now: now)
     }
 
     /// Locked mode: the log stays readable, logging opens the paywall.
@@ -185,6 +197,8 @@ final class AppModel {
         now = fresh
         today = engine.todaySummary(now: fresh)
         if dayChanged { recomputeStats() }
+        // Open across a plan's period end: the renewal is checked with the App Store then, not at the next launch.
+        pro.checkRenewalIfDue(now: fresh)
     }
 
     func reload() {
@@ -203,7 +217,7 @@ final class AppModel {
         let snapshot = state
         Task {
             // Renewals, refunds and purchases made elsewhere land here (PRO.md: refresh on foreground).
-            await pro.refresh()
+            await pro.foreground()
             await Reminders.reschedule(state: snapshot, now: Date())
             let denied = await Reminders.isDenied()
             self.notificationsDenied = denied && snapshot.settings.reminderEnabled
@@ -223,8 +237,9 @@ final class AppModel {
         case "settings": sheet = .settings
         case "day": sheet = .day(DemoData.sheetDay(now: now))
         case "look": sheet = .settings
+        case "settings-locked": sheet = .settings
         case "log": scrollTarget = "log"
-        case "paywall": presentPaywall(origin: .intro)
+        case "paywall", "paywall-no-yearly": presentPaywall(origin: .intro)
         default: break
         }
     }
@@ -262,6 +277,7 @@ final class AppModel {
 
     private func apply(_ fresh: StackState) {
         state = fresh
+        if !fresh.doses.isEmpty { pro.noteLogged() }
         if fresh.settings.theme != theme.id {
             theme = Theme.look(fresh.settings.theme)
             scheduleIconSync()
@@ -377,6 +393,10 @@ final class AppModel {
 
     /// A sheet on TODAY finished closing.
     func rootSheetDidDismiss() {
+        if iconWaitsForSettings {
+            iconWaitsForSettings = false
+            scheduleIconSync(after: .milliseconds(350))
+        }
         guard introWaitsForSheet else { return }
         introWaitsForSheet = false
         scheduleIntro(after: .milliseconds(500))
@@ -570,6 +590,20 @@ final class AppModel {
 
     // MARK: Settings
 
+    /// The NUDGE toggle. Turning it off always works. Turning it on needs Pro once something has been logged (no nudge
+    /// is scheduled without it): locked, the tap opens the paywall and the nudge, with iOS's permission prompt, comes
+    /// on once Pro does.
+    func setReminder(_ enabled: Bool, anchor: PaywallAnchor) {
+        guard enabled else {
+            Task { await setReminderEnabled(false) }
+            return
+        }
+        requirePro(anchor) { [weak self] in
+            guard let self else { return }
+            Task { await self.setReminderEnabled(true) }
+        }
+    }
+
     func setReminderEnabled(_ enabled: Bool) async {
         if enabled && !isDemo {
             let granted = await Reminders.requestPermission()
@@ -596,7 +630,7 @@ final class AppModel {
     // MARK: Look
 
     /// One tap in Settings > LOOK. The app recolours at once; the widgets and the control reload with the write, and
-    /// the app icon follows a moment later (iOS confirms an icon change with its own alert).
+    /// the app icon follows once Settings closes (iOS confirms an icon change with its own alert).
     func setLook(_ look: ThemeID) {
         guard look != theme.id else { return }
         Haptics.selection(hapticsOn)
@@ -605,14 +639,18 @@ final class AppModel {
         }
     }
 
-    /// Switches the app icon to the look's own after a short pause, so a few quick taps through the looks end in one
-    /// icon change and one system alert. Signal is the primary icon.
+    /// Switches the app icon to the look's own after a short pause. While Settings is open it waits for Settings to
+    /// close, so trying every look ends in one icon change and one system alert. Signal is the primary icon.
     private func scheduleIconSync(after delay: Duration = .milliseconds(600)) {
         guard !isDemo else { return }
         iconTask?.cancel()
         iconTask = Task { [weak self] in
             try? await Task.sleep(for: delay)
             guard !Task.isCancelled, let self else { return }
+            if self.sheet == .settings {
+                self.iconWaitsForSettings = true
+                return
+            }
             await self.syncAppIcon()
         }
     }

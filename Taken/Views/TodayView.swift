@@ -15,7 +15,9 @@ struct RootView: View {
             if model.isDemo && model.launchScreen == "widgets" {
                 WidgetGallery()
             } else if model.isDemo && model.launchScreen == "widgets-locked" {
-                WidgetGallery(locked: true)
+                WidgetGallery(mode: .locked)
+            } else if model.isDemo && model.launchScreen == "widgets-standby" {
+                WidgetGallery(mode: .standBy)
             } else {
                 main
             }
@@ -108,10 +110,12 @@ struct TodayView: View {
     @ViewBuilder
     private var stackContent: some View {
         let today = model.today
-        SectionHeader(index: "01", title: "STATUS", trailing: today.allTaken ? "LOCKED" : "LIVE",
+        // A finished day locks in. Without Pro the lock means Taken Pro, so the finished day reads DONE.
+        SectionHeader(index: "01", title: "STATUS",
+                      trailing: today.allTaken ? (model.isLocked ? "DONE" : "LOCKED") : "LIVE",
                       trailingColor: today.allTaken ? theme.signalInk : theme.fgSubtle)
         StatusPanel(summary: today, now: model.now, clock: model.clock, lockInCount: model.lockInCount,
-                    streak: model.streak)
+                    streak: model.streak, proLocked: model.isLocked)
         if model.isLocked {
             LockedBar(text: model.lockedBarText) {
                 model.presentPaywall(origin: .bar)
