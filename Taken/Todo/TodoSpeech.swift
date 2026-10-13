@@ -429,9 +429,9 @@ final class AnalyzerBackend: SpeechBackend, @unchecked Sendable {
         let analyzer = self.analyzer
         let results = lock.withLock { self.results }
         // Finalize what is left, but never keep the person waiting more than a couple of seconds.
-        let finishing = Task.detached { try? await analyzer.finalizeAndFinishThroughEndOfInput() }
-        _ = await Self.first(of: { _ = await finishing.value }, orAfter: .seconds(2.5))
-        _ = await Self.first(of: { _ = await results?.value }, orAfter: .seconds(0.5))
+        _ = await firstResult(of: { try? await analyzer.finalizeAndFinishThroughEndOfInput(); return true },
+                              orAfter: .seconds(2.5), fallback: false)
+        _ = await firstResult(of: { _ = await results?.value; return true }, orAfter: .seconds(0.5), fallback: false)
         results?.cancel()
         return transcript.text
     }
@@ -441,17 +441,6 @@ final class AnalyzerBackend: SpeechBackend, @unchecked Sendable {
         let analyzer = self.analyzer
         lock.withLock { results?.cancel() }
         Task.detached { await analyzer.cancelAndFinishNow() }
-    }
-
-    /// Runs `work`, giving up after `limit`.
-    private static func first(of work: @escaping @Sendable () async -> Void, orAfter limit: Duration) async -> Bool {
-        await withTaskGroup(of: Bool.self) { group in
-            group.addTask { await work(); return true }
-            group.addTask { try? await Task.sleep(for: limit); return false }
-            let finished = await group.next() ?? false
-            group.cancelAll()
-            return finished
-        }
     }
 }
 

@@ -291,3 +291,38 @@ extension TodoText {
         return first.uppercased() + text.dropFirst()
     }
 }
+
+// MARK: - Deadlines
+
+/// Runs `work` and returns its value, or `fallback` once `limit` has passed, without waiting for `work` to notice it
+/// was cancelled: a model or a transcriber that hangs never holds the To-do tab.
+func firstResult<T: Sendable>(of work: @escaping @Sendable () async -> T, orAfter limit: Duration,
+                              fallback: T) async -> T {
+    await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
+        let gate = ResumeOnce(continuation)
+        let job = Task { gate.resume(with: await work()) }
+        Task {
+            try? await Task.sleep(for: limit)
+            job.cancel()
+            gate.resume(with: fallback)
+        }
+    }
+}
+
+/// Resumes a continuation with whichever value comes first, once.
+final class ResumeOnce<T: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var continuation: CheckedContinuation<T, Never>?
+
+    init(_ continuation: CheckedContinuation<T, Never>) {
+        self.continuation = continuation
+    }
+
+    func resume(with value: T) {
+        let pending = lock.withLock { () -> CheckedContinuation<T, Never>? in
+            defer { continuation = nil }
+            return continuation
+        }
+        pending?.resume(returning: value)
+    }
+}

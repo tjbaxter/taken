@@ -114,6 +114,20 @@ final class TodoExtractionTests: XCTestCase {
                                              context: context)
         XCTAssertEqual(sorted.drafts.map(\.title), ["Call the dentist", "Buy milk"])
         XCTAssertEqual(sorted.sorting, .model)
+
+        // A model that never answers (and never notices it was cancelled) still lets the note be saved, whole.
+        struct Hanging: TaskExtractor {
+            func prepare() async {}
+            func extract(transcript: String, context: TodoContext) async -> TodoExtraction {
+                for _ in 0..<5 { try? await Task.sleep(for: .seconds(1)) }
+                return TodoExtraction(drafts: [], sorting: .model)
+            }
+        }
+        let started = Date()
+        let late = await TodoModel.extract("call the dentist", with: Hanging(), context: context, limit: .milliseconds(200))
+        XCTAssertLessThan(Date().timeIntervalSince(started), 2, "the deadline holds")
+        XCTAssertEqual(late.drafts.map(\.title), ["Call the dentist"])
+        XCTAssertEqual(late.sorting, .couldNotSort)
     }
 
     func testThePromptCarriesNowTheZoneAndTheDayStart() {

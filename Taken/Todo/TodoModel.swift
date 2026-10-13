@@ -363,22 +363,14 @@ final class TodoModel {
         }
     }
 
-    /// The extractor's answer, or the whole note as one task when it takes too long.
-    nonisolated static func extract(_ words: String, with extractor: any TaskExtractor,
-                                    context: TodoContext) async -> TodoExtraction {
-        await withTaskGroup(of: TodoExtraction?.self) { group in
-            group.addTask { await extractor.extract(transcript: words, context: context) }
-            group.addTask {
-                try? await Task.sleep(for: sortingLimit)
-                return nil
-            }
-            let first = await group.next() ?? nil
-            group.cancelAll()
-            return first ?? TodoExtraction(drafts: TodoValidation.wholeNote(words), sorting: .couldNotSort)
-        }
+    /// The extractor's answer, or the whole note as one task when it takes longer than `limit`.
+    nonisolated static func extract(_ words: String, with extractor: any TaskExtractor, context: TodoContext,
+                                    limit: Duration = sortingLimit) async -> TodoExtraction {
+        await firstResult(of: { await extractor.extract(transcript: words, context: context) }, orAfter: limit,
+                          fallback: TodoExtraction(drafts: TodoValidation.wholeNote(words), sorting: .couldNotSort))
     }
 
-    /// Stops listening without saving (the tab or the app went away mid-note keeps what was said instead).
+    /// Stops listening and keeps what was said (the app went to the background mid-note).
     func stopIfListening() {
         guard phase == .listening else { return }
         Task { await finishListening() }
@@ -479,10 +471,6 @@ final class TodoModel {
     private func clearNotice() {
         noticeTask?.cancel()
         notice = nil
-    }
-
-    func dismissBlocker() {
-        blocker = nil
     }
 
     private func announce(_ text: String) {
