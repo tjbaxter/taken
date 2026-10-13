@@ -143,7 +143,7 @@ Created in App Store Connect; the ids are fixed (PRO.md). The app reads every pr
 | `com.tombaxter.taken.pro.lifetime` | Non-consumable | $49.99 | none | |
 
 - Subscription group display name: Taken Pro.
-- Review screenshot for each product: `09-paywall.png` from the ci.yml `screenshots` artifact (1320 x 2868).
+- Review screenshot for each product: `store/iap/paywall.png` (1320 x 2868 RGB, the paywall as ci.yml captures it with -demo; `09-paywall.png` in each run's `screenshots` artifact).
 - First in-app purchases go to review with a new app version: add all three to version 1.1 on its version page (In-App Purchases and Subscriptions) before submitting.
 - App Privacy stays Data Not Collected: purchases go through Apple, and nothing about them reaches us.
 

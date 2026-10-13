@@ -7,17 +7,20 @@ struct ItemRowView: View {
     let clock: DayClock
     let expanded: Bool
     var notDueLabel: String? = nil
+    /// Locked mode: a tap that would log opens Taken Pro instead.
+    var locked: Bool = false
     let onTap: () -> Void
 
     @Environment(\.dynamicTypeSize) private var typeSize
 
-    init(row: ItemDay, now: Date, clock: DayClock, expanded: Bool, notDueLabel: String? = nil,
+    init(row: ItemDay, now: Date, clock: DayClock, expanded: Bool, notDueLabel: String? = nil, locked: Bool = false,
          onTap: @escaping () -> Void) {
         self.row = row
         self.now = now
         self.clock = clock
         self.expanded = expanded
         self.notDueLabel = notDueLabel
+        self.locked = locked
         self.onTap = onTap
     }
 
@@ -43,7 +46,7 @@ struct ItemRowView: View {
         .buttonStyle(RowPressStyle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
-        .accessibilityHint(row.isPending || (!row.isDue && row.doses.isEmpty) ? "Double tap to mark taken." : "Double tap for details.")
+        .accessibilityHint(accessibilityHint)
         .accessibilityAddTraits(.isButton)
     }
 
@@ -143,6 +146,11 @@ struct ItemRowView: View {
     private func detailText(index: Int, dose: Dose) -> String {
         let prefix = row.doses.count > 1 ? "DOSE \(index + 1) " : ""
         return "\(prefix)TAKEN \(Fmt.clock(dose.takenAt, clock)) \u{00B7} \(Fmt.agoDetailed(dose.takenAt, now: now))"
+    }
+
+    private var accessibilityHint: String {
+        guard row.isPending || (!row.isDue && row.doses.isEmpty) else { return "Double tap for details." }
+        return locked ? "Logging needs Taken Pro. Double tap to see plans." : "Double tap to mark taken."
     }
 
     private var accessibilityLabel: String {

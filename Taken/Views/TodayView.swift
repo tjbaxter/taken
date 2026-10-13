@@ -140,7 +140,8 @@ struct TodayView: View {
                 }
                 ItemRowView(row: row, now: model.now, clock: model.clock,
                             expanded: model.expandedItemID == row.id,
-                            notDueLabel: notDue ? model.nextLabel(for: row) : nil) {
+                            notDueLabel: notDue ? model.nextLabel(for: row) : nil,
+                            locked: model.isLocked) {
                     model.tap(row)
                 }
                 .contextMenu { menu(for: row) }
