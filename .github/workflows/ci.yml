@@ -104,6 +104,20 @@ jobs:
             test -f "$bundle/PrivacyInfo.xcprivacy"
             test -f "$bundle/GeistMono-Medium.ttf"
           done
+          # iPhone only (SPEC 2): UIDeviceFamily must be exactly [1]. A universal build was rejected once
+          # (90474), and once a universal build is accepted iPad support can never be withdrawn.
+          for bundle in "$app" "$appex"; do
+            families="$(/usr/libexec/PlistBuddy -c 'Print :UIDeviceFamily' "$bundle/Info.plist" 2>/dev/null | grep -Eo '[0-9]+' | tr '\n' ' ' || true)"
+            echo "UIDeviceFamily $(basename "$bundle"): ${families:-missing}"
+            if [ -z "$families" ] && [ "$bundle" = "$appex" ]; then
+              echo "::notice::$(basename "$bundle") has no UIDeviceFamily key; the app's governs"
+              continue
+            fi
+            if [ "$families" != "1 " ]; then
+              echo "::error::$(basename "$bundle") UIDeviceFamily is '${families:-missing}', expected only 1 (iPhone)"
+              exit 1
+            fi
+          done
           test -f "$app/Metadata.appintents/extract.actionsdata" && echo "App Intents metadata present"
           ls "$app" | head -50
 
