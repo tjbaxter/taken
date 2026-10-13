@@ -11,6 +11,7 @@ extension AppDelegate {
         if let item = options.shortcutItem {
             TodoQuickAction.handle(item)
         }
+        TodoQuickAction.openDemoLinkIfAsked()
         let configuration = UISceneConfiguration(name: nil, sessionRole: connectingSceneSession.role)
         configuration.delegateClass = TodoSceneDelegate.self
         return configuration
@@ -31,5 +32,16 @@ enum TodoQuickAction {
         guard item.type == TodoCaptureRoute.quickActionType else { return false }
         TodoCaptureRoute.shared.requestRecording()
         return true
+    }
+
+    /// CI only (`-demo -open-url taken://pro`): Taken opens one of its own links after launch, the way a widget does,
+    /// so the screenshots prove links still reach SwiftUI with this scene delegate in place.
+    static func openDemoLinkIfAsked(_ arguments: [String] = ProcessInfo.processInfo.arguments) {
+        guard arguments.contains("-demo"), let index = arguments.firstIndex(of: "-open-url"), index + 1 < arguments.count,
+              let url = URL(string: arguments[index + 1]), url.scheme == TodoCaptureRoute.scheme else { return }
+        Task {
+            try? await Task.sleep(for: .seconds(2))
+            _ = await UIApplication.shared.open(url)
+        }
     }
 }

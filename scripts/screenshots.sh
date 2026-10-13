@@ -124,16 +124,15 @@ for look in blush phosphor ice; do
 done
 shoot 32-todo-recording-blush todo-recording blush
 shoot 33-todo-empty todo-empty
-# Links still reach SwiftUI with the quick action's scene delegate in place: taken://pro over TODAY locked opens the
-# paywall, and taken://todo opens the To-do tab.
+# Links still reach SwiftUI with the quick action's scene delegate in place: Taken opens its own link after launch
+# (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). taken://pro over
+# TODAY locked opens the paywall; taken://todo opens the To-do tab.
 link() {
   local name="$1" screen="$2" url="$3"
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
   sleep 1
-  xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" >/dev/null
-  sleep 6
-  xcrun simctl openurl "$udid" "$url" || echo "::warning::openurl $url failed"
-  sleep 4
+  xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -open-url "$url" >/dev/null
+  sleep 9
   xcrun simctl io "$udid" screenshot --type=png "$out/$name.png" >/dev/null
   echo "captured $out/$name.png after $url"
 }
