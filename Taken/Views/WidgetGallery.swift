@@ -112,6 +112,8 @@ struct WidgetGallery: View {
     private func accessory<Content: View>(width: CGFloat, height: CGFloat, @ViewBuilder _ content: () -> Content) -> some View {
         content()
             .foregroundStyle(theme.lockScreenInk)
+            // The Lock Screen draws gauges in its own white too, never in the app's tint.
+            .tint(theme.lockScreenInk)
             .padding(.horizontal, 6)
             .frame(width: width, height: height)
             .background(theme.lockScreenPlate, in: RoundedRectangle(cornerRadius: 12, style: .continuous))

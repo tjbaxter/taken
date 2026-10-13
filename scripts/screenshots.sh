@@ -96,16 +96,18 @@ shoot 13-look-signal look signal
 for look in blush phosphor ice; do
   shoot "14-today-$look" today "$look"
   shoot "15-today-done-$look" today-done "$look"
-  shoot "16-paywall-$look" paywall "$look"
-  shoot "17-widgets-$look" widgets "$look"
-  shoot "18-look-$look" look "$look"
+  shoot "16-log-$look" log "$look"
+  shoot "17-paywall-$look" paywall "$look"
+  shoot "18-widgets-$look" widgets "$look"
+  shoot "19-look-$look" look "$look"
 done
-# Blush is the light look: the sheets and system controls get a capture too.
-shoot 19-settings-blush settings blush
-shoot 20-add-blush add blush
-shoot 21-day-blush day blush
-shoot 22-locked-blush locked blush
-shoot 23-empty-blush empty blush
+# Blush is the light look: the sheets, system controls and locked states get a capture too.
+shoot 20-settings-blush settings blush
+shoot 21-add-blush add blush
+shoot 22-day-blush day blush
+shoot 23-locked-blush locked blush
+shoot 24-empty-blush empty blush
+shoot 25-widgets-locked-blush widgets-locked blush
 
 # The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
 if [ -n "$small" ] && [ "$small" != "$udid" ]; then

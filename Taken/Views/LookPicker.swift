@@ -79,7 +79,7 @@ private struct LookSwatch: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .frame(height: 92)
         .background(look.bg, in: shape)
-        .overlay(shape.strokeBorder(look.isLight ? look.lineStrong : look.line, lineWidth: 1))
+        .overlay(shape.strokeBorder(look.lineStrong, lineWidth: 1))
         // Everything above draws in the swatch's look; the brackets below are the current look's.
         .environment(\.theme, look)
         .overlay {

@@ -44,6 +44,10 @@ A REMINDER THAT STAYS QUIET
 • It only fires if something is still pending. Already done? Silence.
 • Take all straight from the notification.
 
+FOUR LOOKS
+• Signal, amber on black. Blush, rose on warm white. Phosphor, green on black. Ice, cyan on black.
+• Change it in Settings with one tap. Your widgets and the app icon follow.
+
 YOUR RECORD
 • Five weeks of days as a grid of lit ticks.
 • Your streak and 30-day completion at a glance.
@@ -89,7 +93,8 @@ KEYWORDS = [
 WHATS_NEW = (
     "Taken Pro is here. Log your first dose, then start with 7 days on us and pick yearly, monthly or lifetime. "
     "Everyone who downloaded Taken 1.0 keeps Pro for life, at no cost. Still no ads, no account and no tracking, "
-    "and your log stays on your iPhone."
+    "and your log stays on your iPhone.\n\n"
+    "Four looks in Settings: Signal, Blush, Phosphor and Ice. Your widgets and the app icon follow the one you pick."
 )
 
 REVIEW_NOTES = """\
@@ -109,7 +114,9 @@ With Pro on, logging works everywhere. Steps 6 to 10 each log what is still pend
 7. Lock Screen: touch and hold the Lock Screen, tap Customize, Lock Screen, and add a Taken widget. It shows the count, for example 2/3.
 8. Control Center (iOS 18 and later): open Control Center, tap +, Add a Control, choose Taken, Take all. Tapping it logs everything pending.
 9. Siri: say "Did I take my pills in Taken" to hear what is taken and pending, or "Log my stack in Taken" to log everything pending. Without Pro, Siri says logging needs Taken Pro and logs nothing.
-10. Reminder: tap the gear, turn on NUDGE under REMINDER (notification permission is asked then), and set the time 2 minutes ahead. With something pending the notification arrives; touch and hold it and tap TAKE ALL. Without Pro no nudge is scheduled."""
+10. Reminder: tap the gear, turn on NUDGE under REMINDER (notification permission is asked then), and set the time 2 minutes ahead. With something pending the notification arrives; touch and hold it and tap TAKE ALL. Without Pro no nudge is scheduled.
+
+Looks: tap the gear and scroll to LOOK. Each swatch applies that look to the app at once; the widgets follow, and the app icon changes to the look's own icon, which iOS confirms with its standard alert. Signal is the default look and the primary icon."""
 
 SUPPORT_URL = "https://tjbaxter.github.io/taken/#support"
 MARKETING_URL = "https://tjbaxter.github.io/taken/"
