@@ -241,8 +241,8 @@ struct TodoRootView: View {
                 .frame(minHeight: 44)
         }
         .padding(.horizontal, 16)
-        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
-        .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.line, lineWidth: 1))
+        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
     }
 
     private func blockerCard(_ blocker: TodoModel.Blocker) -> some View {
@@ -263,8 +263,8 @@ struct TodoRootView: View {
             }
         }
         .padding(16)
-        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
-        .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.line, lineWidth: 1))
+        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
     }
 
     private func message(for blocker: TodoModel.Blocker) -> String {
@@ -405,8 +405,8 @@ struct TodoLiveCard: View {
                 .animation(.easeOut(duration: 0.15), value: transcript)
         }
         .padding(16)
-        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
-        .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.line, lineWidth: 1))
+        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
         .accessibilityElement(children: .combine)
         .accessibilityLabel(phase == .sorting ? TodoCopy.sorting : (transcript.isEmpty ? TodoCopy.listening : transcript))
     }
@@ -460,8 +460,8 @@ struct TodoPillButton: View {
                 .foregroundStyle(filled ? theme.buttonText : theme.fg)
                 .padding(.horizontal, 14)
                 .frame(minHeight: 44)
-                .background(filled ? theme.button : Color.clear, in: RoundedRectangle(cornerRadius: theme.radius.control))
-                .overlay(RoundedRectangle(cornerRadius: theme.radius.control)
+                .background(filled ? theme.button : Color.clear, in: RoundedRectangle(cornerRadius: theme.radius.card / 2, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: theme.radius.card / 2, style: .continuous)
                     .strokeBorder(filled ? Color.clear : theme.lineStrong, lineWidth: 1))
                 .contentShape(Rectangle())
         }

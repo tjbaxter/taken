@@ -384,10 +384,15 @@ final class TodoModel {
                           fallback: TodoExtraction(drafts: TodoValidation.wholeNote(words), sorting: .couldNotSort))
     }
 
-    /// Stops listening and keeps what was said (the app went to the background mid-note).
+    /// Stops listening and keeps what was said (the app went to the background mid-note). The background time is asked
+    /// for here, before the app can be suspended, and held until the note is saved.
     func stopIfListening() {
         guard phase == .listening else { return }
-        Task { await finishListening() }
+        let background = BackgroundTime.begin("Saving a voice note")
+        Task {
+            await finishListening()
+            background.end()
+        }
     }
 
     // MARK: Tasks

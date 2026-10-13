@@ -170,6 +170,8 @@ if [ -n "$small" ] && [ "$small" != "$udid" ]; then
   xcrun simctl launch "$udid" "$bundle_id" -demo -screen today >/dev/null
   sleep 6
   shoot 12-paywall-6.3in paywall
+  # Today on the smaller iPhone: the Not today group stays in view above Take all.
+  shoot 40-today-6.3in today
 fi
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true

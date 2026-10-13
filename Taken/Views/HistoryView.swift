@@ -26,6 +26,10 @@ struct HistoryScreen: View {
                         .font(.sans(14, .sans, relativeTo: .footnote))
                         .foregroundStyle(theme.fgSubtle)
                         .padding(.top, 12)
+                    Label("Your log stays on this iPhone. No account, no ads, no tracking.", systemImage: "lock")
+                        .font(.sans(14, .sans, relativeTo: .footnote))
+                        .foregroundStyle(theme.fgSubtle)
+                        .padding(.top, 28)
                 } else {
                     Text("Your days show up here once your stack is in.")
                         .font(.sans(16, .sans, relativeTo: .body))
@@ -199,7 +203,7 @@ struct StatsRow: View {
             Text(label)
                 .font(.sans(14, .sansMedium, relativeTo: .footnote))
                 .foregroundStyle(theme.fgSubtle)
-            HStack(alignment: .firstTextBaseline, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: unit == "%" ? 1 : 5) {
                 Text(value)
                     .font(.mono(28, .monoMedium, relativeTo: .title))
                     .foregroundStyle(theme.fg)

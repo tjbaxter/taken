@@ -25,6 +25,7 @@ concurrency:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   testflight:
@@ -38,6 +39,30 @@ jobs:
       APP_GROUP: group.com.tombaxter.taken
     steps:
       - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Nothing ships that ci.yml has not passed: the build, the unit tests, and the screenshots with their link checks
+      # (taken://todo must bring the To-do tab to the front). The newest green run on main counts when it is this commit
+      # or an ancestor, and nothing ci.yml checks (it ignores docs/, brand/ and Markdown) has changed since.
+      - name: CI passed for this code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          shas="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 50 \
+                    --json headSha --jq '.[].headSha')"
+          for sha in $shas; do
+            git cat-file -e "$sha^{commit}" 2>/dev/null || continue
+            git merge-base --is-ancestor "$sha" "$head" || continue
+            if git diff --quiet "$sha" "$head" -- . ':(exclude)docs/**' ':(exclude)brand/**' ':(exclude)*.md'; then
+              echo "ci.yml passed on $sha, and nothing it checks has changed since"
+              exit 0
+            fi
+          done
+          echo "::error::No green ci.yml run on main covers $head (build, unit tests, screenshots and link checks). Let CI pass first."
+          exit 1
 
       - name: Check secrets
         env:

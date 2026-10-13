@@ -112,7 +112,11 @@ struct ProfileView: View {
                 Text("Its log entries leave your stats. To keep its history, archive it instead.")
             }
             .confirmationDialog("Erase all data?", isPresented: $confirmErase, titleVisibility: .visible) {
-                Button("Erase all data", role: .destructive) { model.eraseAll() }
+                Button("Erase all data", role: .destructive) {
+                    model.eraseAll()
+                    // The field forgets the name too, so closing Profile never writes it back.
+                    name = ""
+                }
                 Button("Cancel", role: .cancel) {}
             } message: {
                 Text(Self.eraseMessage)
@@ -132,19 +136,12 @@ struct ProfileView: View {
     // MARK: Profile
 
     private var header: some View {
-        Section {
+        // Built here, on the main actor: the photo picker's label closure is not.
+        let badge = photoBadge
+        return Section {
             VStack(spacing: 14) {
                 PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
-                    ZStack(alignment: .bottomTrailing) {
-                        ProfileAvatar(size: 92)
-                        Image(systemName: loadingPhoto ? "ellipsis" : "camera.fill")
-                            .font(.system(size: 12, weight: .semibold))
-                            .foregroundStyle(theme.buttonText)
-                            .frame(width: 30, height: 30)
-                            .background(theme.button, in: Circle())
-                            .overlay(Circle().strokeBorder(theme.bg, lineWidth: 2))
-                    }
-                    .frame(minWidth: 44, minHeight: 44)
+                    badge
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel(model.profilePhoto == nil ? "Add a profile photo" : "Change your profile photo")
@@ -173,6 +170,20 @@ struct ProfileView: View {
             .padding(.vertical, 8)
             .listRowBackground(Color.clear)
         }
+    }
+
+    /// The avatar with a camera badge: a tap opens Apple's photo picker.
+    private var photoBadge: some View {
+        ZStack(alignment: .bottomTrailing) {
+            ProfileAvatar(size: 92)
+            Image(systemName: loadingPhoto ? "ellipsis" : "camera.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(theme.buttonText)
+                .frame(width: 30, height: 30)
+                .background(theme.button, in: Circle())
+                .overlay(Circle().strokeBorder(theme.bg, lineWidth: 2))
+        }
+        .frame(minWidth: 44, minHeight: 44)
     }
 
     /// "14-day streak · 97% over 30 days"

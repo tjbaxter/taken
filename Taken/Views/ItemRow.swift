@@ -46,8 +46,8 @@ struct ItemRowView: View {
                             .lineLimit(1)
                     }
                     .padding(.leading, 16)
-                    .padding(.vertical, 12)
-                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                    .padding(.vertical, 10)
+                    .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(RowPressStyle())
@@ -64,7 +64,7 @@ struct ItemRowView: View {
                     }
                     .padding(.trailing, 16)
                     .padding(.leading, 8)
-                    .frame(minWidth: 72, minHeight: 64, alignment: .trailing)
+                    .frame(minWidth: 72, minHeight: 60, alignment: .trailing)
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(RingPressStyle())

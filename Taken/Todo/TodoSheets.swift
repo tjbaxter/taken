@@ -149,8 +149,8 @@ struct TodoTypeSheet: View {
                 }
                 .frame(minHeight: 140)
                 .padding(10)
-                .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
-                .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.line, lineWidth: 1))
+                .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+                .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
                 Spacer(minLength: 0)
             }
             .padding(20)

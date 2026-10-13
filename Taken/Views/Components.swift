@@ -23,8 +23,8 @@ struct SectionHeader: View {
                     .foregroundStyle(theme.fgSubtle)
             }
         }
-        .padding(.top, 26)
-        .padding(.bottom, 10)
+        .padding(.top, 22)
+        .padding(.bottom, 8)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }

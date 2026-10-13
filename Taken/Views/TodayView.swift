@@ -139,7 +139,7 @@ struct TodayView: View {
     private var stackContent: some View {
         let today = model.today
         ProgressSummary(summary: today, clock: model.clock, lockInCount: model.lockInCount, streak: model.streak)
-            .padding(.top, 22)
+            .padding(.top, 18)
         if model.isLocked {
             LockedBar(text: model.lockedBarText) {
                 model.presentPaywall(origin: .bar)
@@ -156,8 +156,8 @@ struct TodayView: View {
             Spacer(minLength: 8)
             AddToStackButton()
         }
-        .padding(.top, 26)
-        .padding(.bottom, 8)
+        .padding(.top, 20)
+        .padding(.bottom, 6)
 
         if today.due.isEmpty {
             Card {
