@@ -10,7 +10,7 @@ gives exact, crisp anti-aliasing. Colours come from the Taken design tokens
     python3 brand/icon.py --concept reticle --out /tmp/x.png --variant default
     python3 brand/icon.py --concepts brand/concepts   # render every concept
     python3 brand/icon.py --look blush --out /tmp/blush.png   # one look's icon
-    python3 brand/icon.py --looks-sheet brand/looks.png       # every look, large and at Home Screen sizes
+    python3 brand/icon.py --looks-sheet brand/looks.jpg       # every look, large and at Home Screen sizes
 
 Variants:
     default  opaque sRGB, no alpha (App Store marketing icon rule)
@@ -1090,7 +1090,7 @@ def main():
     ap.add_argument("--concepts", help="render every concept (default variant) into this folder")
     ap.add_argument("--web-only", action="store_true", help="only the SVG marks and the site icons")
     ap.add_argument("--look", choices=LOOK_ORDER, help="with --out: that look's icon")
-    ap.add_argument("--looks-sheet", help="write every look's icon, large and at Home Screen sizes, to this PNG")
+    ap.add_argument("--looks-sheet", help="write every look's icon, large and at Home Screen sizes, to this image")
     ap.add_argument("--icons-only", action="store_true", help="only the asset catalog icon sets")
     a = ap.parse_args()
     if a.looks_sheet:

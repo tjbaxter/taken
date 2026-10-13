@@ -360,6 +360,8 @@ struct SettingsView: View {
             LookPicker(selection: model.theme.id) { look in
                 model.setLook(look)
             }
+            // The hairline under the swatches runs the full width, like the rows around it.
+            .alignmentGuide(.listRowSeparatorLeading) { dimensions in dimensions[.leading] }
             .settingsRow()
             .id(Self.lookAnchor)
 
