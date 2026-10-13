@@ -3,6 +3,9 @@ import SwiftUI
 /// The To-do tab (REDESIGN.md, voice to-dos): a big mic, the words as they are said, and the tasks the on-device model
 /// makes of them. Tap a circle to finish a task, swipe to delete, tap the words to edit. Every colour comes from the
 /// look (`Theme`), so it reads the same in Signal, Blush, Phosphor and Ice.
+///
+/// Tab bar: put `TodoRootView()` in the To-do tab and add `.opensTodoTab { selection = .todo }` to the TabView, so
+/// Siri, the control, the Lock Screen, links, notifications and the quick action (and `-screen todo`) land here.
 struct TodoRootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
