@@ -367,9 +367,10 @@ final class TodoStoreTests: XCTestCase {
         // Two checks a moment apart used to interleave (remove, remove, add, add) and leave a done task's notification
         // scheduled. Now a rebuild never overlaps another, and a request made while one runs replaces any waiting one.
         let log = RebuildLog()
+        // Each rebuild takes 600 ms here, far longer than the two requests below need, even on a slow runner.
         let scheduler = TodoNotificationScheduler { tasks in
             await log.begin(tasks.count)
-            try? await Task.sleep(for: .milliseconds(100))
+            try? await Task.sleep(for: .milliseconds(600))
             await log.end()
         }
         let call = TodoTask(title: "Call Sam", due: .time(at(2026, 10, 13, 16)), createdAt: at(2026, 10, 13, 9), noteId: UUID())
