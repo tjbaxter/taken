@@ -59,3 +59,7 @@ One sheet, no carousel, no fake urgency, no countdowns, no dark patterns.
 - Description gains a TAKEN PRO block: "Taken Pro: 7 days on us, then $19.99 a year, or $3.99 a month, or $49.99 once. Payment is charged to your Apple Account. Subscriptions renew automatically unless cancelled at least 24 hours before the end of the period; manage or cancel in Settings." plus `Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/`.
 - What's New for 1.1 written by the builder; App Review notes explain the founding-member rule and that sandbox shows the paywall.
 - Privacy label stays "Data Not Collected": purchases go through Apple and nothing leaves the device.
+
+## Built in 1.1.0
+
+Implemented as written, with four refinements recorded in SPEC.md 3.9: purchases go through SwiftUI's `PurchaseAction` (StoreKit 2's `product.purchase()` with the right window for its sheet); a log that predates 1.1 is never locked before StoreKit has answered for it (every 1.0 App Store download is a founding member); the one automatic paywall also follows a first dose logged from a widget, the next time Taken opens; and a Control Center control cannot open an app without universal links, so when locked it shows a lock, logs nothing, and Taken offers that TAKE ALL with the paywall when it next opens (the same for Siri and the nudge).

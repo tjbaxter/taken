@@ -39,15 +39,16 @@ struct PaywallView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Every plan sits above the button: with room to spare on a 6.9 inch iPhone; 6.1 and 6.3 inch ones drop
-            // the ruler and tighten up; the smallest scroll, with the button and terms always in view.
+            // Every plan sits above the button: with room to spare on a 6.9 inch iPhone, tighter on 6.1 and 6.3 inch
+            // ones; the smallest drop the ruler and scroll, with the button and terms always in view.
             let compact = geo.size.height < 820
+            let ruler = geo.size.height >= 740
             VStack(spacing: 0) {
                 topBar
                 GeometryReader { area in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            header(compact: compact)
+                            header(compact: compact, ruler: ruler)
                             features(compact: compact)
                                 .padding(.top, compact ? 14 : 22)
                             // Spare height goes here, so the plans sit right above the button.
@@ -119,7 +120,7 @@ struct PaywallView: View {
         .frame(height: 56)
     }
 
-    private func header(compact: Bool) -> some View {
+    private func header(compact: Bool, ruler: Bool) -> some View {
         let today = model.today
         return VStack(alignment: .leading, spacing: 0) {
             Text(ProCopy.headline)
@@ -133,7 +134,7 @@ struct PaywallView: View {
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
-            if !compact {
+            if ruler {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
                         Text("TODAY").hud(10, Palette.fgSubtle, tracking: 0.14)
@@ -144,7 +145,7 @@ struct PaywallView: View {
                     DayRuler(dayStart: model.clock.start(of: today.day), dayEnd: model.clock.end(of: today.day),
                              doses: today.allDoses.map(\.takenAt), now: model.now, dayStartHour: model.clock.dayStartHour)
                 }
-                .padding(.top, 20)
+                .padding(.top, compact ? 16 : 20)
                 .accessibilityHidden(true)
             }
         }

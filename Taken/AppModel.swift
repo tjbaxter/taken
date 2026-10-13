@@ -300,8 +300,9 @@ final class AppModel {
 
     func presentPaywall(anchor: PaywallAnchor = .root, origin: PaywallOrigin, pending: (@MainActor () -> Void)? = nil) {
         guard paywall == nil else { return }
-        // Any paywall counts as the one after the first dose: it never follows a second time on its own.
-        pro.markIntroShown()
+        // Any paywall counts as the one after the first dose, so it never comes up on its own a second time. Plans
+        // looked at from Settings before anything was logged do not: the first dose still brings it up once.
+        if origin != .settings || !state.doses.isEmpty { pro.markIntroShown() }
         Task { await pro.loadOffers() }
         let request = PaywallRequest(anchor: anchor, origin: origin, pending: pending)
         if anchor == .root && sheet != nil {
