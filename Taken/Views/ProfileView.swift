@@ -22,6 +22,7 @@ struct ProfileView: View {
     @State private var proNote: String?
     @State private var name = ""
     @State private var photoItem: PhotosPickerItem?
+    @State private var pickingPhoto = false
     @State private var loadingPhoto = false
 
     init() {}
@@ -47,6 +48,7 @@ struct ProfileView: View {
                 .scrollContentBackground(.hidden)
                 .background(theme.bg)
                 .environment(\.editMode, $editMode)
+                .photosPicker(isPresented: $pickingPhoto, selection: $photoItem, matching: .images)
                 .task {
                     // `-demo -screen look`: the Look section in view, for the screenshots.
                     guard model.isDemo && model.launchScreen == "look" else { return }
@@ -136,12 +138,13 @@ struct ProfileView: View {
     // MARK: Profile
 
     private var header: some View {
-        // Built here, on the main actor: the photo picker's label closure is not.
-        let badge = photoBadge
-        return Section {
+        Section {
             VStack(spacing: 14) {
-                PhotosPicker(selection: $photoItem, matching: .images, photoLibrary: .shared()) {
-                    badge
+                // A plain button opens Apple's photo picker (`.photosPicker` on the list), so the label stays main-actor code.
+                Button {
+                    pickingPhoto = true
+                } label: {
+                    photoBadge
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel(model.profilePhoto == nil ? "Add a profile photo" : "Change your profile photo")
