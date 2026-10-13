@@ -39,6 +39,13 @@ LOG IT FROM ANYWHERE
 • A Take all control for Control Center.
 • Siri: ask "Did I take my pills in Taken" and hear the answer with times. Say "Log my stack in Taken" to take everything.
 
+VOICE TO-DOS
+• Tap the mic and say it the way it comes out: "Today by 4 I need to call the dentist, pick up the dry cleaning and email Sam."
+• Taken turns the ramble into a tidy list, with the times you said.
+• Tap the circle when one is done. Yesterday's open to-dos stay until they are.
+• Start a note from Siri ("Add to-dos in Taken"), the Action button, Control Center, the Lock Screen or the app icon.
+• Speech and sorting happen on your iPhone. The audio is never stored or sent. Sorting into separate to-dos uses Apple Intelligence where your iPhone has it.
+
 A REMINDER THAT STAYS QUIET
 • One optional nudge at the time you choose.
 • It only fires if something is still pending. Already done? Silence.
@@ -62,6 +69,7 @@ NOTHING ELSE
 TAKEN PRO
 • Add your stack and log your first dose before you choose a plan.
 • Pro keeps you logging: one tap in the app, TAKE ALL, widgets, the Lock Screen, Control Center, Siri and the nudge.
+• Your first voice note is on us. After it, voice to-dos are part of Pro.
 • Your record is never held back. Without Pro your log, history and CSV export stay open.
 • Downloaded Taken 1.0? You keep Pro for life.
 
@@ -94,7 +102,8 @@ WHATS_NEW = (
     "Taken Pro is here. Log your first dose, then pick yearly (7 days on us for new subscribers), monthly or lifetime. "
     "Everyone who downloaded Taken 1.0 keeps Pro for life, at no cost. Still no ads, no account and no tracking, "
     "and your log stays on your iPhone.\n\n"
-    "Four looks in Settings: Signal, Blush, Phosphor and Ice. Your widgets and the app icon follow the one you pick."
+    "Four looks in Settings: Signal, Blush, Phosphor and Ice. Your widgets and the app icon follow the one you pick.\n\n"
+    "Voice to-dos: tap the mic, say what you need to do, and Taken sorts it into a list on your iPhone."
 )
 
 REVIEW_NOTES = """\
@@ -115,6 +124,8 @@ With Pro on, logging works everywhere. Steps 6 to 10 each log what is still pend
 8. Control Center (iOS 18 and later): open Control Center, tap +, Add a Control, choose Taken, Take all. Tapping it logs everything pending.
 9. Siri: say "Did I take my pills in Taken" to hear what is taken and pending, or "Log my stack in Taken" to log everything pending. Without Pro, Siri says logging needs Taken Pro and logs nothing.
 10. Reminder: tap the gear, turn on NUDGE under REMINDER (notification permission is asked then), and set the time 2 minutes ahead. With something pending the notification arrives; touch and hold it and tap TAKE ALL. Without Pro no nudge is scheduled: REMINDER says THE NUDGE NEEDS TAKEN PRO, and turning NUDGE on opens the Taken Pro sheet.
+
+Voice to-dos: open the To-do tab and tap the mic. iOS asks for the microphone and speech recognition. Say "Tomorrow at 9 call the dentist and buy milk" and pause; Taken stops after about 1.5 seconds and lists the to-dos (with Apple Intelligence on, two of them, one due tomorrow at 09:00; without it, one to-do with the words). Speech and sorting run on the device. The first voice note needs no Pro; the next tap on the mic opens the Taken Pro sheet. Siri: "Add to-dos in Taken" opens the tab listening.
 
 Looks: tap the gear and scroll to LOOK. Each swatch applies that look to the app at once and the widgets follow. When Settings closes, the app icon changes to the look's own icon, which iOS confirms with its standard alert. Signal is the default look and the primary icon."""
 
