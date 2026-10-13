@@ -84,7 +84,7 @@ struct TodayView: View {
         StatusPanel(summary: today, now: model.now, clock: model.clock, lockInCount: model.lockInCount,
                     streak: model.streak)
 
-        SectionHeader(index: "02", title: "STACK", trailing: "\(today.due.count) DUE")
+        SectionHeader(index: "02", title: "STACK", trailing: Fmt.stackProgress(today))
         if today.due.isEmpty {
             Panel {
                 Text("NOTHING DUE TODAY")
@@ -99,7 +99,7 @@ struct TodayView: View {
 
         if !today.notDue.isEmpty {
             HStack(spacing: 10) {
-                Text("NOT DUE").hud(10.5, Palette.fgFaint)
+                Text("NOT DUE").hud(10.5, Palette.fgSubtle)
                 DashedRule()
             }
             .padding(.top, 18)
@@ -107,7 +107,6 @@ struct TodayView: View {
             Panel(stacked: false) {
                 rows(today.notDue, notDue: true)
             }
-            .opacity(0.85)
         }
 
         SectionHeader(index: "03", title: "LOG", trailing: "5 WEEKS")
@@ -134,8 +133,19 @@ struct TodayView: View {
                     model.tap(row)
                 }
                 .contextMenu { menu(for: row) }
+                .accessibilityActions { voiceOverActions(for: row) }
             }
         }
+    }
+
+    /// The context menu's actions for VoiceOver, so undo never depends on reaching the toast in time.
+    @ViewBuilder
+    private func voiceOverActions(for row: ItemDay) -> some View {
+        if !row.doses.isEmpty {
+            Button("Undo last dose") { model.undoLastDose(row.item) }
+        }
+        Button("Set time") { model.sheet = .setTime(row.item.id) }
+        Button("Edit item") { model.sheet = .editItem(row.item.id) }
     }
 
     @ViewBuilder
@@ -200,13 +210,15 @@ struct BottomDock: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        let pending = model.today.pendingItems.count
+        // Counts what TAKE ALL logs right now, so the number on the button is the number it takes.
+        let pending = model.takeAllCount
         let showTakeAll = pending >= 2
         let visible = showTakeAll || model.toast != nil
         VStack(spacing: 10) {
             if let toast = model.toast {
                 ToastView(toast: toast) { model.undo(toast) }
                     .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .accessibilityAction(named: "Dismiss") { model.dismissToast() }
             }
             if showTakeAll {
                 PrimaryButton(title: "TAKE ALL (\(pending))", lamp: true) {
@@ -244,7 +256,7 @@ struct ToastView: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
             Spacer(minLength: 8)
-            if !toast.doseIDs.isEmpty {
+            if toast.undo != nil {
                 Button(action: onUndo) {
                     Text("\u{00B7} UNDO")
                         .font(.monoFixed(12, .monoSemibold))

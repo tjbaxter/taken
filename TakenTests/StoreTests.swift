@@ -14,8 +14,14 @@ final class StoreTests: XCTestCase {
             makeItem("Zinc", "ZNC", .alternateDays, created: created, sortIndex: 2),
             makeItem("Minoxidil", "MIN", .weekdays([2, 4, 6]), created: created, sortIndex: 3),
         ])
-        state.logDose(itemId: state.items[0].id, at: Date(timeIntervalSince1970: 1_791_000_000.123))
+        state.logDose(itemId: state.items[0].id, at: Date(timeIntervalSince1970: 1_791_000_000.123), timeZone: london)
+        state.updateItem(id: state.items[2].id, name: "Zinc", code: "ZNC", frequency: .onceDaily, now: at(2026, 10, 5, 9))
+        state.setArchived(id: state.items[3].id, archived: true, now: at(2026, 10, 6, 9))
+        state.setArchived(id: state.items[3].id, archived: false, now: at(2026, 10, 9, 9))
         state.settings = StackSettings(dayStartHour: 3, reminderEnabled: true, reminderMinutes: 20 * 60 + 30, hapticsEnabled: false)
+        XCTAssertEqual(state.doses.first?.utcOffset, 3600, "BST")
+        XCTAssertEqual(state.items[2].pastFrequencies, [FrequencyEra(until: at(2026, 10, 5, 9), frequency: .alternateDays)])
+        XCTAssertEqual(state.items[3].pauses, [Pause(from: at(2026, 10, 6, 9), until: at(2026, 10, 9, 9))])
 
         try store.replace(with: state)
         XCTAssertEqual(store.load(), state)
@@ -34,11 +40,15 @@ final class StoreTests: XCTestCase {
     }
 
     func testDecodesOlderFilesWithMissingKeys() throws {
-        let json = #"{"items":[{"id":"6F1C2D3E-4A5B-4C6D-8E9F-0A1B2C3D4E5F","name":"Zinc","code":"ZNC","frequency":{"kind":"alt"},"createdAt":1791000000,"archived":false,"sortIndex":0}],"doses":[]}"#
+        let json = #"{"items":[{"id":"6F1C2D3E-4A5B-4C6D-8E9F-0A1B2C3D4E5F","name":"Zinc","code":"ZNC","frequency":{"kind":"alt"},"createdAt":1791000000,"archived":false,"sortIndex":0}],"doses":[{"id":"7A1C2D3E-4A5B-4C6D-8E9F-0A1B2C3D4E5F","itemId":"6F1C2D3E-4A5B-4C6D-8E9F-0A1B2C3D4E5F","takenAt":1791000000}]}"#
         let state = try TakenStore.decode(Data(json.utf8))
         XCTAssertEqual(state.items.first?.frequency, .alternateDays)
         XCTAssertEqual(state.settings, StackSettings(), "missing settings fall back to defaults")
         XCTAssertNil(state.items.first?.archivedAt)
+        XCTAssertNil(state.items.first?.pastFrequencies, "files from before frequency history still load")
+        XCTAssertNil(state.items.first?.pauses)
+        XCTAssertEqual(state.doses.count, 1)
+        XCTAssertNil(state.doses.first?.utcOffset, "doses from before offsets were recorded still load")
     }
 
     func testCorruptFileIsKeptAsideNotOverwrittenSilently() throws {
@@ -68,7 +78,7 @@ final class StoreTests: XCTestCase {
             let store = TakenStore(fileURL: url, postsChangeNotifications: false)
             for index in 0..<dosesEach {
                 let when = Date(timeIntervalSince1970: 1_791_000_000 + Double(writer * 1_000 + index))
-                _ = try? store.update { state in state.logDose(itemId: itemID, at: when) }
+                _ = try? store.update { state in state.logDose(itemId: itemID, at: when, timeZone: london) }
             }
         }
         XCTAssertEqual(setup.load().doses.count, writers * dosesEach)
@@ -79,8 +89,8 @@ final class StoreTests: XCTestCase {
         let vd3 = makeItem("Vitamin D3", "VD3", created: created, sortIndex: 0)
         let odd = makeItem("Fish Oil, \"Triple\"", "FSH", created: created, sortIndex: 1)
         var state = StackState(items: [vd3, odd])
-        state.logDose(itemId: odd.id, at: at(2026, 10, 12, 19, 5))
-        state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 7, 42))
+        state.logDose(itemId: odd.id, at: at(2026, 10, 12, 19, 5), timeZone: london)
+        state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 7, 42), timeZone: london)
         state.doses.append(Dose(itemId: UUID(), takenAt: at(2026, 10, 12, 8)))
 
         let csv = CSVExport.make(state: state, timeZone: london)

@@ -155,10 +155,13 @@ struct SettingsView: View {
             .settingsRow()
 
             if model.settings.reminderEnabled {
-                DatePicker(selection: reminderTime, displayedComponents: .hourAndMinute) {
+                HStack {
                     Text("TIME").hud(12, Palette.fg)
+                    Spacer()
+                    MonoTimeButton(title: "NUDGE TIME", minutes: model.settings.reminderMinutes) { minutes in
+                        model.setReminderMinutes(minutes)
+                    }
                 }
-                .environment(\.locale, Locale(identifier: "en_GB"))
                 .settingsRow()
             }
 
@@ -198,7 +201,7 @@ struct SettingsView: View {
                     HStack(spacing: 8) {
                         Text(Fmt.hour(model.settings.dayStartHour))
                             .font(.monoFixed(15, .monoMedium))
-                            .foregroundStyle(Palette.signal)
+                            .foregroundStyle(Palette.fg)
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.system(size: 11, weight: .semibold))
                             .foregroundStyle(Palette.fgSubtle)
@@ -283,18 +286,6 @@ struct SettingsView: View {
         }
     }
 
-    private var reminderTime: Binding<Date> {
-        Binding(
-            get: {
-                let minutes = model.settings.reminderMinutes
-                return Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: Date()) ?? Date()
-            },
-            set: { date in
-                let c = Calendar.current.dateComponents([.hour, .minute], from: date)
-                model.setReminderMinutes((c.hour ?? 21) * 60 + (c.minute ?? 0))
-            }
-        )
-    }
 }
 
 private struct SettingsHeader<Trailing: View>: View {

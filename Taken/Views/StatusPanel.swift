@@ -80,7 +80,7 @@ struct StatusPanel: View {
                     .foregroundStyle(Palette.fg)
                     .contentTransition(.numericText())
                 Text("/\(summary.dueDoses)")
-                    .foregroundStyle(Palette.fgFaint)
+                    .foregroundStyle(Palette.fgSubtle)
             }
             .font(.monoFixed(68, .monoMedium))
             .tracking(-2)
@@ -133,7 +133,7 @@ struct StatusPanel: View {
     private var lastDoseBlock: some View {
         if let last = summary.lastDose {
             VStack(alignment: .trailing, spacing: 5) {
-                Text("LAST DOSE").hud(10, Palette.fgFaint)
+                Text("LAST DOSE").hud(10, Palette.fgSubtle)
                 Text(Fmt.clock(last.takenAt, clock))
                     .font(.monoFixed(20, .monoMedium))
                     .foregroundStyle(Palette.signal)
@@ -141,11 +141,11 @@ struct StatusPanel: View {
             }
         } else {
             VStack(alignment: .trailing, spacing: 5) {
-                Text("LAST DOSE").hud(10, Palette.fgFaint)
+                Text("LAST DOSE").hud(10, Palette.fgSubtle)
                 Text("--:--")
                     .font(.monoFixed(20, .monoMedium))
-                    .foregroundStyle(Palette.fgFaint)
-                Text("NONE TODAY").hud(10, Palette.fgFaint, tracking: 0.12)
+                    .foregroundStyle(Palette.fgSubtle)
+                Text("NONE TODAY").hud(10, Palette.fgSubtle, tracking: 0.12)
             }
         }
     }

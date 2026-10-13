@@ -30,7 +30,8 @@ final class AppDelegate: NSObject, UIApplicationDelegate {
     }
 }
 
-/// Handles the nudge's TAKE ALL action in the background, without opening the app.
+/// Handles the nudge: TAKE ALL runs in the background without opening the app; a tap or OPEN opens the
+/// app on the day the nudge was for.
 final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @unchecked Sendable {
     static let shared = NotificationHandler()
 
@@ -41,13 +42,50 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
 
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
-        guard response.actionIdentifier == Reminders.takeAllActionID else { return }
+        let request = response.notification.request
+        let day = Reminders.nudgeDay(identifier: request.identifier, userInfo: request.content.userInfo)
+        let action = response.actionIdentifier
         let now = Date()
-        let result = try? TakenStore.shared.update { state -> [Dose] in
-            state.takeAllPending(now: now, clock: DayClock(dayStartHour: state.settings.dayStartHour))
+        if action == Reminders.takeAllActionID {
+            // A nudge left over from an earlier day never logs today's doses.
+            guard Reminders.isCurrent(nudgeDay: day, state: TakenStore.shared.load(), now: now) else {
+                if let day { await Reminders.explainStale(day: day) }
+                return
+            }
+            let result = try? TakenStore.shared.update { state -> [Dose] in
+                state.takeAllPending(now: now, clock: DayClock(dayStartHour: state.settings.dayStartHour))
+            }
+            if let result {
+                await Sync.afterWrite(result.state)
+            }
+        } else if action == UNNotificationDefaultActionIdentifier || action == Reminders.openActionID, let day {
+            await MainActor.run { NudgeRoute.shared.open(day) }
         }
-        if let result {
-            await Sync.afterWrite(result.state)
+    }
+}
+
+/// Where a tapped nudge sends the app: the day it was for. The notification handler sets it and the
+/// app model opens it, whichever of the two is ready first.
+@MainActor
+final class NudgeRoute {
+    static let shared = NudgeRoute()
+
+    private var handler: (@MainActor (DayKey) -> Void)?
+    private var waiting: DayKey?
+
+    func open(_ day: DayKey) {
+        if let handler {
+            handler(day)
+        } else {
+            waiting = day
+        }
+    }
+
+    func attach(_ handler: @escaping @MainActor (DayKey) -> Void) {
+        self.handler = handler
+        if let day = waiting {
+            waiting = nil
+            handler(day)
         }
     }
 }

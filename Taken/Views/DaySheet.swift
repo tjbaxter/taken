@@ -16,24 +16,26 @@ struct DaySheet: View {
 
     var body: some View {
         let summary = model.sheetSummary(for: day)
+        let future = isFuture
         VStack(spacing: 0) {
-            SheetHeader(title: Fmt.dayHeader(day), subtitle: statusLine(summary),
+            SheetHeader(title: Fmt.dayHeader(day), subtitle: Fmt.daySheetStatus(summary, isToday: isToday),
                         subtitleColor: summary.allTaken ? Palette.signal : Palette.fgSubtle) {
                 dismiss()
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     SectionHeader(index: "01", title: "LOG AT", trailing: isToday ? "TODAY" : nil)
-                    logTimeRow
+                    logTimeRow(isFuture: future)
                     SectionHeader(index: "02", title: "ITEMS", trailing: "\(summary.items.count)")
                     if summary.items.isEmpty {
-                        Text("NOTHING IN YOUR STACK").hud(11, Palette.fgFaint)
+                        Text("NOTHING IN YOUR STACK").hud(11, Palette.fgSubtle)
                     } else {
                         Panel {
                             VStack(spacing: 0) {
                                 ForEach(Array(summary.items.enumerated()), id: \.element.id) { index, row in
                                     if index > 0 { DashedRule().padding(.horizontal, 14) }
-                                    DayItemRow(row: row, clock: model.clock, logLabel: Fmt.minutes(logMinutes),
+                                    DayItemRow(row: row, clock: model.clock, isToday: isToday,
+                                               logLabel: Fmt.minutes(logMinutes), canLog: !future,
                                                onLog: { model.logDose(row.item, on: day, minutes: logMinutes) },
                                                onRemove: { removing = $0 })
                                 }
@@ -42,7 +44,7 @@ struct DaySheet: View {
                     }
                     Text("Tap a time to remove that dose.")
                         .font(.sans(13))
-                        .foregroundStyle(Palette.fgFaint)
+                        .foregroundStyle(Palette.fgSubtle)
                         .padding(.top, 14)
                 }
                 .padding(.horizontal, 20)
@@ -73,58 +75,43 @@ struct DaySheet: View {
 
     private var isToday: Bool { day == model.today.day }
 
+    /// The chosen time on this day has not come yet, so it cannot be logged.
+    private var isFuture: Bool {
+        model.clock.date(on: day, hour: logMinutes / 60, minute: logMinutes % 60) > model.now
+    }
+
     private var removalTitle: String {
         guard let removing else { return "Remove dose?" }
         let name = model.state.item(removing.itemId)?.name ?? "this item"
         return "Remove the \(Fmt.clock(removing.takenAt, model.clock)) dose of \(name)?"
     }
 
-    private var logTimeRow: some View {
+    private func logTimeRow(isFuture: Bool) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 4) {
                 Text("NEW ENTRIES").hud(12, Palette.fg)
-                Text(isToday ? "Defaults to now." : "Defaults to 09:00. Change it if you remember.")
+                Text(isFuture ? "That time is still to come. Pick an earlier one."
+                              : (isToday ? "Defaults to now." : "Defaults to 09:00. Change it if you remember."))
                     .font(.sans(13))
-                    .foregroundStyle(Palette.fgSubtle)
+                    .foregroundStyle(isFuture ? Palette.fg : Palette.fgSubtle)
             }
             Spacer()
-            DatePicker("", selection: logTime, displayedComponents: .hourAndMinute)
-                .labelsHidden()
-                .environment(\.locale, Locale(identifier: "en_GB"))
-                .tint(Palette.signal)
+            MonoTimeButton(title: "LOG AT", minutes: logMinutes) { minutes in
+                logMinutes = minutes
+            }
         }
         .padding(14)
         .background(Palette.bgRaised, in: RoundedRectangle(cornerRadius: 4))
         .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.line, lineWidth: 1))
-    }
-
-    private var logTime: Binding<Date> {
-        Binding(
-            get: {
-                Calendar.current.date(bySettingHour: logMinutes / 60, minute: logMinutes % 60, second: 0, of: Date()) ?? Date()
-            },
-            set: { date in
-                let c = Calendar.current.dateComponents([.hour, .minute], from: date)
-                logMinutes = (c.hour ?? 9) * 60 + (c.minute ?? 0)
-            }
-        )
-    }
-
-    private func statusLine(_ summary: DaySummary) -> String {
-        switch summary.status {
-        case .nothingDue: return summary.allDoses.isEmpty ? "NOTHING DUE" : "\(summary.allDoses.count) LOGGED \u{00B7} NOTHING DUE"
-        case .complete: return "ALL TAKEN \u{00B7} \(summary.takenDueDoses)/\(summary.dueDoses)"
-        case .partial: return "\(summary.takenDueDoses)/\(summary.dueDoses) TAKEN \u{00B7} \(summary.pendingDoses) MISSING"
-        case .missed: return isToday ? "\(summary.dueDoses) PENDING" : "NOTHING LOGGED \u{00B7} 0/\(summary.dueDoses)"
-        case .future: return ""
-        }
     }
 }
 
 private struct DayItemRow: View {
     let row: ItemDay
     let clock: DayClock
+    let isToday: Bool
     let logLabel: String
+    let canLog: Bool
     let onLog: () -> Void
     let onRemove: (Dose) -> Void
 
@@ -136,7 +123,7 @@ private struct DayItemRow: View {
                     .font(.sans(16, .sansMedium))
                     .foregroundStyle(Palette.fg)
                     .lineLimit(1)
-                Text(subtitle).hud(10, subtitleColor, tracking: 0.12)
+                Text(Fmt.dayItemStatus(row, isToday: isToday)).hud(10, subtitleColor, tracking: 0.12)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
@@ -200,16 +187,10 @@ private struct DayItemRow: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
+            .disabled(!canLog)
+            .opacity(canLog ? 1 : 0.4)
             .accessibilityLabel("Log \(row.item.name) at \(logLabel)")
         }
-    }
-
-    private var subtitle: String {
-        if !row.isActive && row.doses.isEmpty { return "\(Fmt.frequency(row.item.frequency)) \u{00B7} ADDED LATER" }
-        if !row.isDue { return "\(Fmt.frequency(row.item.frequency)) \u{00B7} NOT DUE" }
-        if row.isDone { return "\(Fmt.frequency(row.item.frequency)) \u{00B7} TAKEN" }
-        if row.doses.isEmpty { return "\(Fmt.frequency(row.item.frequency)) \u{00B7} MISSED" }
-        return "\(Fmt.frequency(row.item.frequency)) \u{00B7} \(row.takenCount)/\(row.dosesPerDay)"
     }
 
     private var subtitleColor: Color {
@@ -234,6 +215,18 @@ struct SetTimeSheet: View {
         model.today.items.first { $0.id == item.id }?.lastDose
     }
 
+    /// The wheel's time on today's logical day has not come yet (an hour before the day start means
+    /// tomorrow morning), so it is never used in place of the time that was picked.
+    private var isFuture: Bool {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: time)
+        return model.clock.date(on: model.today.day, hour: c.hour ?? 0, minute: c.minute ?? 0) > model.now
+    }
+
+    private var buttonTitle: String {
+        if isFuture { return "IN THE FUTURE" }
+        return lastDose == nil ? "LOG AT \(timeLabel)" : "SET TO \(timeLabel)"
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             SheetHeader(title: "SET TIME \u{00B7} \(item.code)",
@@ -247,7 +240,7 @@ struct SetTimeSheet: View {
                 .environment(\.colorScheme, .dark)
                 .frame(maxWidth: .infinity)
                 .padding(.top, 8)
-            PrimaryButton(title: lastDose == nil ? "LOG AT \(timeLabel)" : "SET TO \(timeLabel)") {
+            PrimaryButton(title: buttonTitle, enabled: !isFuture) {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: time)
                 model.setTime(item, hour: c.hour ?? 0, minute: c.minute ?? 0)
                 dismiss()

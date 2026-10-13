@@ -75,6 +75,42 @@ enum Fmt {
         return "NEXT: \(dayOfMonth) \(months[max(0, min(11, month - 1))])"
     }
 
+    /// The STACK header's count, in items as TAKE ALL counts them: "2 LEFT", or "5 TAKEN" once every due
+    /// item is done. Nil when nothing is due.
+    static func stackProgress(_ summary: DaySummary) -> String? {
+        let due = summary.due
+        guard !due.isEmpty else { return nil }
+        let left = summary.pendingItems.count
+        return left == 0 ? "\(due.count) TAKEN" : "\(left) LEFT"
+    }
+
+    /// The day sheet's status line. Today is still running, so what is not taken yet is PENDING, not MISSING.
+    static func daySheetStatus(_ summary: DaySummary, isToday: Bool) -> String {
+        switch summary.status {
+        case .nothingDue:
+            return summary.allDoses.isEmpty ? "NOTHING DUE" : "\(summary.allDoses.count) LOGGED \u{00B7} NOTHING DUE"
+        case .complete:
+            return "ALL TAKEN \u{00B7} \(summary.takenDueDoses)/\(summary.dueDoses)"
+        case .partial:
+            return "\(summary.takenDueDoses)/\(summary.dueDoses) TAKEN \u{00B7} \(summary.pendingDoses) \(isToday ? "PENDING" : "MISSING")"
+        case .missed:
+            return isToday ? "\(summary.dueDoses) PENDING" : "NOTHING LOGGED \u{00B7} 0/\(summary.dueDoses)"
+        case .future:
+            return ""
+        }
+    }
+
+    /// A day sheet row: "DAILY · TAKEN", "2X DAILY · 1/2", "DAILY · MISSED" (PENDING today), with the
+    /// frequency the item had on that day.
+    static func dayItemStatus(_ row: ItemDay, isToday: Bool) -> String {
+        let schedule = frequency(row.frequency)
+        if !row.isActive && row.doses.isEmpty { return "\(schedule) \u{00B7} \(row.isPaused ? "ARCHIVED" : "ADDED LATER")" }
+        if !row.isDue { return "\(schedule) \u{00B7} NOT DUE" }
+        if row.isDone { return "\(schedule) \u{00B7} TAKEN" }
+        if row.doses.isEmpty { return "\(schedule) \u{00B7} \(isToday ? "PENDING" : "MISSED")" }
+        return "\(schedule) \u{00B7} \(row.takenCount)/\(row.dosesPerDay)"
+    }
+
     /// Locale aware short time for VoiceOver and Siri: "7:42 AM" or "07:42".
     static func spoken(_ date: Date) -> String {
         date.formatted(date: .omitted, time: .shortened)

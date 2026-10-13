@@ -65,7 +65,7 @@ final class DayLogicTests: XCTestCase {
         var engine = StackEngine(state: state, clock: c)
         XCTAssertTrue(engine.isDue(zinc, on: monday), "never taken: due")
 
-        state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8))
+        state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8), timeZone: london)
         engine = StackEngine(state: state, clock: c)
         XCTAssertFalse(engine.isDue(zinc, on: monday), "taken yesterday: not due")
         XCTAssertEqual(engine.nextDueDay(for: zinc, after: monday), monday.adding(1), "NEXT: TOMORROW")
@@ -73,7 +73,7 @@ final class DayLogicTests: XCTestCase {
         XCTAssertTrue(engine.isDue(zinc, on: monday.adding(1)), "two days after the last dose: due")
 
         state = StackState(items: [zinc])
-        state.logDose(itemId: zinc.id, at: at(2026, 10, 10, 8))
+        state.logDose(itemId: zinc.id, at: at(2026, 10, 10, 8), timeZone: london)
         engine = StackEngine(state: state, clock: c)
         XCTAssertTrue(engine.isDue(zinc, on: monday), "last dose two days ago: due")
 
@@ -87,7 +87,7 @@ final class DayLogicTests: XCTestCase {
         let vd3 = makeItem("Vitamin D3", "VD3", created: created, sortIndex: 0)
         let zinc = makeItem("Zinc", "ZNC", .alternateDays, created: created, sortIndex: 1)
         var state = StackState(items: [vd3, zinc])
-        state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8))
+        state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8), timeZone: london)
         let today = StackEngine(state: state, clock: c).todaySummary(now: at(2026, 10, 12, 10))
         XCTAssertEqual(today.due.map(\.item.id), [vd3.id])
         XCTAssertEqual(today.notDue.map(\.item.id), [zinc.id])
@@ -118,12 +118,12 @@ final class DayLogicTests: XCTestCase {
         XCTAssertEqual(row.pendingCount, 2)
         XCTAssertFalse(row.isDone)
 
-        state.logDose(itemId: fish.id, at: now)
+        state.logDose(itemId: fish.id, at: now, timeZone: london)
         row = StackEngine(state: state, clock: c).todaySummary(now: now).items[0]
         XCTAssertEqual(row.pendingCount, 1)
         XCTAssertFalse(row.isDone)
 
-        state.logDose(itemId: fish.id, at: at(2026, 10, 12, 19))
+        state.logDose(itemId: fish.id, at: at(2026, 10, 12, 19), timeZone: london)
         let summary = StackEngine(state: state, clock: c).todaySummary(now: at(2026, 10, 12, 20))
         XCTAssertTrue(summary.items[0].isDone)
         XCTAssertTrue(summary.allTaken)
@@ -140,8 +140,8 @@ final class DayLogicTests: XCTestCase {
         let fish = makeItem("Fish Oil", "FSH", .daily(times: 2), created: created, sortIndex: 2)
         let zinc = makeItem("Zinc", "ZNC", .alternateDays, created: created, sortIndex: 3)
         var state = StackState(items: [vd3, fin, fish, zinc])
-        state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 7, 42))
-        state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8))
+        state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 7, 42), timeZone: london)
+        state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8), timeZone: london)
 
         let now = at(2026, 10, 12, 21)
         let logged = state.takeAllPending(now: now, clock: c)
@@ -150,10 +150,37 @@ final class DayLogicTests: XCTestCase {
         XCTAssertEqual(state.doses.filter { $0.itemId == vd3.id }.count, 1, "already taken: untouched")
         XCTAssertEqual(state.doses.filter { $0.itemId == zinc.id }.count, 1, "not due: untouched")
 
-        let again = state.takeAllPending(now: now, clock: c)
-        XCTAssertEqual(again.map(\.itemId), [fish.id], "second dose of the 2x item")
-        XCTAssertTrue(state.takeAllPending(now: now, clock: c).isEmpty, "nothing left")
-        XCTAssertTrue(StackEngine(state: state, clock: c).todaySummary(now: now).allTaken)
+        XCTAssertTrue(state.takeAllPending(now: now, clock: c).isEmpty,
+                      "a second TAKE ALL at once never logs the 2x item's next dose")
+        XCTAssertTrue(state.takeAllPending(now: now.addingTimeInterval(59 * 60), clock: c).isEmpty,
+                      "nor does one within the hour")
+        let later = now.addingTimeInterval(61 * 60)
+        let again = state.takeAllPending(now: later, clock: c)
+        XCTAssertEqual(again.map(\.itemId), [fish.id], "an hour on, the second dose of the 2x item")
+        XCTAssertTrue(state.takeAllPending(now: later, clock: c).isEmpty, "nothing left")
+        XCTAssertTrue(StackEngine(state: state, clock: c).todaySummary(now: later).allTaken)
+    }
+
+    func testRepeatedTakeAllNeverStacksDosesOfMultiDoseItems() {
+        // The widget, the control and Siri can all fire TAKE ALL twice in a row.
+        let c = londonClock()
+        let created = at(2026, 10, 1, 8)
+        let met = makeItem("Metformin", "MET", .daily(times: 2), created: created, sortIndex: 0)
+        let fish = makeItem("Fish Oil", "FSH", .daily(times: 3), created: created, sortIndex: 1)
+        let vd3 = makeItem("Vitamin D3", "VD3", created: created, sortIndex: 2)
+        var state = StackState(items: [met, fish, vd3])
+        let morning = at(2026, 10, 12, 8)
+        XCTAssertEqual(state.takeAllPending(now: morning, clock: c).count, 3)
+        XCTAssertTrue(state.takeAllPending(now: morning.addingTimeInterval(5), clock: c).isEmpty)
+        let engine = StackEngine(state: state, clock: c)
+        let today = engine.todaySummary(now: morning.addingTimeInterval(5))
+        XCTAssertEqual(today.pendingItems.map(\.item.id), [met.id, fish.id], "their next doses stay pending")
+        XCTAssertTrue(engine.quickLogRows(today, now: morning.addingTimeInterval(5)).isEmpty)
+        XCTAssertEqual(engine.quickLogResumes(today.pendingItems[0], now: morning.addingTimeInterval(5)),
+                       morning.addingTimeInterval(StackEngine.repeatGuard))
+
+        // The row in the app is a deliberate tap: never held back.
+        XCTAssertNotNil(state.logDose(itemId: met.id, at: morning.addingTimeInterval(10), timeZone: london))
     }
 
     func testWidgetLogNeverDoubleLogs() {
@@ -166,18 +193,62 @@ final class DayLogicTests: XCTestCase {
         XCTAssertEqual(state.doses.count, 1)
     }
 
+    func testWidgetRowNeverLogsTheNextDoseWithinTheHour() {
+        let c = londonClock()
+        let fish = makeItem("Fish Oil", "FSH", .daily(times: 2), created: at(2026, 10, 1, 8))
+        var state = StackState(items: [fish])
+        let morning = at(2026, 10, 12, 8)
+        XCTAssertNotNil(state.logNextDoseIfPending(itemId: fish.id, now: morning, clock: c))
+        XCTAssertNil(state.logNextDoseIfPending(itemId: fish.id, now: morning.addingTimeInterval(20), clock: c),
+                     "a second tap seconds later")
+        XCTAssertNil(state.logNextDoseIfPending(itemId: fish.id, now: morning.addingTimeInterval(59 * 60), clock: c))
+        XCTAssertNotNil(state.logNextDoseIfPending(itemId: fish.id, now: at(2026, 10, 12, 19), clock: c), "the evening dose")
+        XCTAssertNil(state.logNextDoseIfPending(itemId: fish.id, now: at(2026, 10, 12, 21), clock: c), "done for the day")
+        XCTAssertEqual(state.doses.count, 2)
+    }
+
+    func testWidgetSnapshotHoldsTakeAllBackUntilTheHourIsUp() {
+        let fish = makeItem("Fish Oil", "FSH", .daily(times: 2), created: at(2026, 10, 1, 8), sortIndex: 0)
+        let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8), sortIndex: 1)
+        var state = StackState(items: [fish, vd3])
+        let morning = at(2026, 10, 12, 8)
+        state.logDose(itemId: fish.id, at: morning, timeZone: london)
+        state.logDose(itemId: vd3.id, at: morning, timeZone: london)
+
+        let soon = WidgetSnapshot(state: state, now: morning.addingTimeInterval(600), timeZone: london)
+        XCTAssertEqual(soon.pendingItems, 1)
+        XCTAssertEqual(soon.readyItems, 0, "no TAKE ALL while the only pending item was logged ten minutes ago")
+        XCTAssertEqual(soon.rows.first?.id, fish.id)
+        XCTAssertEqual(soon.rows.first?.ready, false)
+        XCTAssertEqual(soon.nextReady, morning.addingTimeInterval(StackEngine.repeatGuard))
+
+        let evening = WidgetSnapshot(state: state, now: at(2026, 10, 12, 19), timeZone: london)
+        XCTAssertEqual(evening.readyItems, 1)
+        XCTAssertEqual(evening.rows.first?.ready, true)
+        XCTAssertNil(evening.nextReady)
+    }
+
+    func testTakeAllExplainsAHeldBackItem() {
+        let fish = makeItem("Fish Oil", "FSH", .daily(times: 2), created: at(2026, 10, 1, 8))
+        var state = StackState(items: [fish])
+        let morning = at(2026, 10, 12, 8)
+        state.logDose(itemId: fish.id, at: morning, timeZone: london)
+        let answer = SiriAnswers.nothingPending(state: state, now: morning.addingTimeInterval(60), timeZone: london)
+        XCTAssertTrue(answer.hasPrefix("Nothing logged. Fish Oil was logged in the last hour."), answer)
+    }
+
     // MARK: Undo and backfill
 
     func testUndoRemovesOnlyThatDose() {
         let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
         var state = StackState(items: [vd3])
-        let yesterday = state.logDose(itemId: vd3.id, at: at(2026, 10, 11, 8))!
-        let today = state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 8))!
+        let yesterday = state.logDose(itemId: vd3.id, at: at(2026, 10, 11, 8), timeZone: london)!
+        let today = state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 8), timeZone: london)!
         state.removeDoses([today.id])
         XCTAssertEqual(state.doses.map(\.id), [yesterday.id])
 
-        let again = state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 9))!
+        let again = state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 9), timeZone: london)!
         let removed = state.undoLastDose(itemId: vd3.id, on: DayKey(year: 2026, month: 10, day: 12), clock: c)
         XCTAssertEqual(removed?.id, again.id)
         XCTAssertEqual(state.doses.map(\.id), [yesterday.id], "undo never reaches into another day")
@@ -191,7 +262,7 @@ final class DayLogicTests: XCTestCase {
         let saturday = DayKey(year: 2026, month: 10, day: 10)
         XCTAssertEqual(StackEngine(state: state, clock: c).summary(for: saturday).status, .missed)
 
-        state.logDose(itemId: vd3.id, at: c.date(on: saturday, hour: 9, minute: 0))
+        state.logDose(itemId: vd3.id, at: c.date(on: saturday, hour: 9, minute: 0), timeZone: london)
         let engine = StackEngine(state: state, clock: c)
         XCTAssertEqual(engine.summary(for: saturday).status, .complete)
         XCTAssertEqual(engine.doses(of: vd3.id, on: saturday).first?.takenAt, at(2026, 10, 10, 9, 0))
@@ -203,16 +274,81 @@ final class DayLogicTests: XCTestCase {
         var state = StackState(items: [vd3])
         let sunday = DayKey(year: 2026, month: 10, day: 11)
         XCTAssertEqual(StackEngine(state: state, clock: c).summary(for: sunday).status, .nothingDue)
-        state.logDose(itemId: vd3.id, at: c.date(on: sunday, hour: 9, minute: 0))
+        state.logDose(itemId: vd3.id, at: c.date(on: sunday, hour: 9, minute: 0), timeZone: london)
         XCTAssertEqual(StackEngine(state: state, clock: c).summary(for: sunday).status, .complete)
     }
 
     func testSetDoseTime() {
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
         var state = StackState(items: [vd3])
-        let dose = state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 21))!
-        state.setDoseTime(doseId: dose.id, to: at(2026, 10, 12, 7))
+        let dose = state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 21), timeZone: london)!
+        state.setDoseTime(doseId: dose.id, to: at(2026, 10, 12, 7), timeZone: london)
         XCTAssertEqual(state.doses.first?.takenAt, at(2026, 10, 12, 7))
+    }
+
+    func testUndoPutsADoseBackExactlyAsItWas() {
+        let c = londonClock()
+        let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
+        var state = StackState(items: [vd3])
+        let monday = DayKey(year: 2026, month: 10, day: 12)
+        let dose = state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 7, 42), timeZone: london)!
+
+        // Undo last dose by mistake, then UNDO on its toast.
+        let removed = state.undoLastDose(itemId: vd3.id, on: monday, clock: c)!
+        XCTAssertTrue(state.doses.isEmpty)
+        state.restore(removed)
+        XCTAssertEqual(state.doses, [dose], "same id, same 07:42")
+        state.restore(removed)
+        XCTAssertEqual(state.doses.count, 1, "restoring twice never duplicates")
+
+        // Set time, then UNDO on its toast.
+        state.setDoseTime(doseId: dose.id, to: at(2026, 10, 12, 7, 0), timeZone: london)
+        XCTAssertEqual(state.doses.first?.takenAt, at(2026, 10, 12, 7, 0))
+        state.restore(dose)
+        XCTAssertEqual(state.doses, [dose], "the replaced time comes back")
+
+        state.deleteItem(id: vd3.id)
+        state.restore(dose)
+        XCTAssertTrue(state.doses.isEmpty, "never restores a dose of a deleted item")
+    }
+
+    func testDayStatusWordsForTodayAndEarlierDays() {
+        let c = londonClock()
+        let created = at(2026, 10, 1, 8)
+        let vd3 = makeItem("Vitamin D3", "VD3", created: created, sortIndex: 0)
+        let mag = makeItem("Magnesium", "MAG", created: created, sortIndex: 1)
+        var state = StackState(items: [vd3, mag])
+        state.logDose(itemId: vd3.id, at: at(2026, 10, 11, 8), timeZone: london)
+        state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 8), timeZone: london)
+        let engine = StackEngine(state: state, clock: c)
+        let today = engine.sheetSummary(for: DayKey(year: 2026, month: 10, day: 12))
+        let sunday = engine.sheetSummary(for: DayKey(year: 2026, month: 10, day: 11))
+
+        XCTAssertEqual(Fmt.daySheetStatus(today, isToday: true), "1/2 TAKEN \u{00B7} 1 PENDING")
+        XCTAssertEqual(Fmt.daySheetStatus(sunday, isToday: false), "1/2 TAKEN \u{00B7} 1 MISSING")
+        XCTAssertEqual(Fmt.dayItemStatus(today.items[1], isToday: true), "DAILY \u{00B7} PENDING")
+        XCTAssertEqual(Fmt.dayItemStatus(sunday.items[1], isToday: false), "DAILY \u{00B7} MISSED")
+        XCTAssertEqual(Fmt.dayItemStatus(today.items[0], isToday: true), "DAILY \u{00B7} TAKEN")
+    }
+
+    func testStackHeaderCountsItemsLeftNotItemsScheduled() {
+        let c = londonClock()
+        let created = at(2026, 10, 1, 8)
+        let vd3 = makeItem("Vitamin D3", "VD3", created: created, sortIndex: 0)
+        let fish = makeItem("Fish Oil", "FSH", .daily(times: 2), created: created, sortIndex: 1)
+        let zinc = makeItem("Zinc", "ZNC", .alternateDays, created: created, sortIndex: 2)
+        var state = StackState(items: [vd3, fish, zinc])
+        state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8), timeZone: london)
+        state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 8), timeZone: london)
+        state.logDose(itemId: fish.id, at: at(2026, 10, 12, 8), timeZone: london)
+        let now = at(2026, 10, 12, 21)
+        XCTAssertEqual(Fmt.stackProgress(StackEngine(state: state, clock: c).todaySummary(now: now)), "1 LEFT")
+        state.logDose(itemId: fish.id, at: at(2026, 10, 12, 19), timeZone: london)
+        XCTAssertEqual(Fmt.stackProgress(StackEngine(state: state, clock: c).todaySummary(now: now)), "2 TAKEN",
+                       "the not-due item is not counted")
+        var onlyZinc = StackState(items: [zinc])
+        onlyZinc.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8), timeZone: london)
+        XCTAssertNil(Fmt.stackProgress(StackEngine(state: onlyZinc, clock: c).todaySummary(now: now)), "nothing due today")
     }
 
     // MARK: Stats
@@ -223,12 +359,12 @@ final class DayLogicTests: XCTestCase {
         let mwf = makeItem("Minoxidil", "MIN", .weekdays([2, 4, 6]), created: created)
         var state = StackState(items: [mwf])
         // Mon 5, Wed 7, Fri 9 Oct taken; Mon 12 is today and not yet taken.
-        for day in [5, 7, 9] { state.logDose(itemId: mwf.id, at: at(2026, 10, day, 8)) }
+        for day in [5, 7, 9] { state.logDose(itemId: mwf.id, at: at(2026, 10, day, 8), timeZone: london) }
         var engine = StackEngine(state: state, clock: c)
         let monday = DayKey(year: 2026, month: 10, day: 12)
         XCTAssertEqual(engine.streak(today: monday), 3, "weekends and off days do not break it; today pending does not either")
 
-        state.logDose(itemId: mwf.id, at: at(2026, 10, 12, 8))
+        state.logDose(itemId: mwf.id, at: at(2026, 10, 12, 8), timeZone: london)
         engine = StackEngine(state: state, clock: c)
         XCTAssertEqual(engine.streak(today: monday), 4, "today counts once complete")
     }
@@ -237,7 +373,7 @@ final class DayLogicTests: XCTestCase {
         let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
         var state = StackState(items: [vd3])
-        for day in [8, 9, 11] { state.logDose(itemId: vd3.id, at: at(2026, 10, day, 8)) }
+        for day in [8, 9, 11] { state.logDose(itemId: vd3.id, at: at(2026, 10, day, 8), timeZone: london) }
         let engine = StackEngine(state: state, clock: c)
         XCTAssertEqual(engine.streak(today: DayKey(year: 2026, month: 10, day: 12)), 1, "10 Oct was missed")
     }
@@ -248,7 +384,7 @@ final class DayLogicTests: XCTestCase {
         var state = StackState(items: [vd3])
         let today = DayKey(year: 2026, month: 10, day: 12)
         for offset in 1...29 where offset != 5 && offset != 9 {
-            state.logDose(itemId: vd3.id, at: c.date(on: today.adding(-offset), hour: 8, minute: 0))
+            state.logDose(itemId: vd3.id, at: c.date(on: today.adding(-offset), hour: 8, minute: 0), timeZone: london)
         }
         let engine = StackEngine(state: state, clock: c)
         let pending = engine.adherence(today: today)
@@ -256,7 +392,7 @@ final class DayLogicTests: XCTestCase {
         XCTAssertEqual(pending.taken, 27)
         XCTAssertEqual(pending.percent, 93)
 
-        state.logDose(itemId: vd3.id, at: c.date(on: today, hour: 8, minute: 0))
+        state.logDose(itemId: vd3.id, at: c.date(on: today, hour: 8, minute: 0), timeZone: london)
         let done = StackEngine(state: state, clock: c).adherence(today: today)
         XCTAssertEqual(done.due, 30)
         XCTAssertEqual(done.taken, 28)
@@ -269,7 +405,7 @@ final class DayLogicTests: XCTestCase {
         let c = londonClock()
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 9, 1, 8))
         var state = StackState(items: [vd3])
-        state.logDose(itemId: vd3.id, at: at(2026, 10, 11, 8))
+        state.logDose(itemId: vd3.id, at: at(2026, 10, 11, 8), timeZone: london)
         let wednesday = DayKey(year: 2026, month: 10, day: 14)
         let grid = StackEngine(state: state, clock: c).history(today: wednesday)
         XCTAssertEqual(grid.count, 5)
@@ -286,19 +422,130 @@ final class DayLogicTests: XCTestCase {
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8), sortIndex: 0)
         let mag = makeItem("Magnesium", "MAG", created: at(2026, 10, 1, 8), sortIndex: 1)
         var state = StackState(items: [vd3, mag])
-        state.logDose(itemId: mag.id, at: at(2026, 10, 5, 21))
+        state.logDose(itemId: mag.id, at: at(2026, 10, 5, 21), timeZone: london)
         state.setArchived(id: mag.id, archived: true, now: at(2026, 10, 10, 12))
         let engine = StackEngine(state: state, clock: c)
         XCTAssertEqual(engine.todaySummary(now: at(2026, 10, 12, 9)).items.map(\.item.id), [vd3.id])
         XCTAssertEqual(engine.summary(for: DayKey(year: 2026, month: 10, day: 5)).items.count, 2)
     }
 
+    func testFrequencyChangeNeverRewritesPastDays() {
+        let c = londonClock()
+        let fin = makeItem("Finasteride", "FIN", .alternateDays, created: at(2026, 9, 1, 8))
+        var state = StackState(items: [fin])
+        let monday = DayKey(year: 2026, month: 10, day: 12)
+        // Every other day for three weeks, the last one yesterday.
+        for offset in stride(from: 21, through: 1, by: -2) {
+            state.logDose(itemId: fin.id, at: c.date(on: monday.adding(-offset), hour: 8, minute: 0), timeZone: london)
+        }
+        let before = StackEngine(state: state, clock: c)
+        let offDay = monday.adding(-2)
+        XCTAssertEqual(before.summary(for: offDay).status, .nothingDue)
+
+        state.updateItem(id: fin.id, name: "Finasteride", code: "FIN", frequency: .onceDaily, now: at(2026, 10, 12, 9))
+        let after = StackEngine(state: state, clock: c)
+        XCTAssertEqual(after.summary(for: offDay).status, .nothingDue, "an off day stays off")
+        XCTAssertEqual(after.history(today: monday).flatMap { $0 }.filter { $0.day < monday }.map(\.status),
+                       before.history(today: monday).flatMap { $0 }.filter { $0.day < monday }.map(\.status),
+                       "every earlier day in the grid is unchanged")
+        XCTAssertEqual(after.streak(today: monday), before.streak(today: monday))
+        XCTAssertEqual(after.adherence(today: monday), before.adherence(today: monday))
+        let today = after.todaySummary(now: at(2026, 10, 12, 10)).items[0]
+        XCTAssertTrue(today.isDue, "the new frequency applies from today")
+        XCTAssertEqual(today.frequency, .onceDaily)
+        XCTAssertEqual(after.summary(for: offDay).items[0].frequency, .alternateDays)
+
+        // 1x to 2x: earlier days stay complete at 1/1.
+        let fish = makeItem("Fish Oil", "FSH", created: at(2026, 9, 1, 8))
+        var oil = StackState(items: [fish])
+        for offset in 1...5 {
+            oil.logDose(itemId: fish.id, at: c.date(on: monday.adding(-offset), hour: 8, minute: 0), timeZone: london)
+        }
+        oil.updateItem(id: fish.id, name: "Fish Oil", code: "FSH", frequency: .daily(times: 2), now: at(2026, 10, 12, 9))
+        oil.updateItem(id: fish.id, name: "Fish Oil", code: "FSH", frequency: .daily(times: 3), now: at(2026, 10, 12, 9, 5))
+        let oilEngine = StackEngine(state: oil, clock: c)
+        XCTAssertEqual(oilEngine.summary(for: monday.adding(-1)).status, .complete)
+        XCTAssertEqual(oilEngine.todaySummary(now: at(2026, 10, 12, 10)).dueDoses, 3, "two changes on one day: the last wins today")
+        XCTAssertEqual(oilEngine.summary(for: monday.adding(-1)).dueDoses, 1, "and the first frequency still holds before it")
+    }
+
+    func testUnarchiveKeepsTheArchivedDaysOutOfHistory() {
+        let c = londonClock()
+        let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 9, 1, 8), sortIndex: 0)
+        let mag = makeItem("Magnesium", "MAG", created: at(2026, 9, 1, 8), sortIndex: 1)
+        var state = StackState(items: [vd3, mag])
+        for day in 1...11 { state.logDose(itemId: vd3.id, at: at(2026, 10, day, 8), timeZone: london) }
+        for day in 1...4 { state.logDose(itemId: mag.id, at: at(2026, 10, day, 21), timeZone: london) }
+        state.setArchived(id: mag.id, archived: true, now: at(2026, 10, 5, 7))
+        let monday = DayKey(year: 2026, month: 10, day: 12)
+        let before = StackEngine(state: state, clock: c)
+
+        state.setArchived(id: mag.id, archived: false, now: at(2026, 10, 12, 9))
+        let after = StackEngine(state: state, clock: c)
+        let thursday = DayKey(year: 2026, month: 10, day: 8)
+        XCTAssertEqual(after.summary(for: thursday).status, .complete, "an archived day is not a missed day")
+        XCTAssertEqual(after.history(today: monday).flatMap { $0 }.map(\.status),
+                       before.history(today: monday).flatMap { $0 }.map(\.status))
+        XCTAssertEqual(after.streak(today: monday), before.streak(today: monday))
+        XCTAssertEqual(after.adherence(today: monday), before.adherence(today: monday))
+        XCTAssertTrue(after.todaySummary(now: at(2026, 10, 12, 10)).pendingItems.contains { $0.item.id == mag.id },
+                      "back in today's stack")
+
+        // The day sheet still offers the archived days, and a dose logged there counts.
+        let row = after.sheetSummary(for: thursday).items.first { $0.item.id == mag.id }
+        XCTAssertEqual(row.map { Fmt.dayItemStatus($0, isToday: false) }, "DAILY \u{00B7} ARCHIVED")
+        state.logDose(itemId: mag.id, at: at(2026, 10, 8, 21), timeZone: london)
+        XCTAssertEqual(StackEngine(state: state, clock: c).summary(for: thursday).dueDoses, 2)
+    }
+
+    func testDosesKeepTheirDayAfterATimeZoneChange() {
+        let newYork = TimeZone(identifier: "America/New_York")!
+        let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
+        let monday = DayKey(year: 2026, month: 10, day: 12)
+
+        // 07:42 BST on Monday in London is 02:42 EDT, before New York's 04:00 day start.
+        var west = StackState(items: [vd3])
+        west.logDose(itemId: vd3.id, at: at(2026, 10, 12, 7, 42), timeZone: london)
+        let inNewYork = StackEngine(state: west, clock: londonClock(4, newYork))
+        let today = inNewYork.todaySummary(now: at(2026, 10, 12, 13, 0, newYork))
+        XCTAssertEqual(today.day, monday)
+        XCTAssertTrue(today.allTaken, "this morning's dose still belongs to Monday")
+        XCTAssertEqual(inNewYork.summary(for: monday.adding(-1)).status, .missed, "and not to Sunday")
+        XCTAssertNotNil(west.undoLastDose(itemId: vd3.id, on: monday, clock: londonClock(4, newYork)))
+
+        // 23:30 EDT on Monday is 04:30 BST on Tuesday: it stays Monday's, and Tuesday is still to take.
+        var east = StackState(items: [vd3])
+        east.logDose(itemId: vd3.id, at: at(2026, 10, 12, 23, 30, newYork), timeZone: newYork)
+        let inLondon = StackEngine(state: east, clock: londonClock())
+        XCTAssertEqual(inLondon.summary(for: monday).status, .complete)
+        let tuesday = inLondon.todaySummary(now: at(2026, 10, 13, 10))
+        XCTAssertEqual(tuesday.day, monday.adding(1))
+        XCTAssertEqual(tuesday.pendingItems.count, 1)
+
+        // A dose saved before offsets were recorded reads in the current zone, as it always did.
+        var legacy = StackState(items: [vd3])
+        legacy.doses.append(Dose(itemId: vd3.id, takenAt: at(2026, 10, 12, 7, 42)))
+        XCTAssertEqual(StackEngine(state: legacy, clock: londonClock(4, newYork)).summary(for: monday.adding(-1)).status,
+                       .complete)
+    }
+
+    func testLogItemNeverLogsToAnArchivedItem() {
+        let cre = makeItem("Creatine", "CRE", created: at(2026, 10, 1, 8))
+        var state = StackState(items: [cre])
+        state.setArchived(id: cre.id, archived: true, now: at(2026, 10, 10, 9))
+        XCTAssertNil(state.logActiveDose(itemId: cre.id, at: at(2026, 10, 12, 18, 5), timeZone: london))
+        XCTAssertTrue(state.doses.isEmpty)
+        state.setArchived(id: cre.id, archived: false, now: at(2026, 10, 12, 18))
+        XCTAssertNotNil(state.logActiveDose(itemId: cre.id, at: at(2026, 10, 12, 18, 5), timeZone: london))
+        XCTAssertNil(state.logActiveDose(itemId: UUID(), at: at(2026, 10, 12, 18, 5), timeZone: london))
+    }
+
     func testDeleteRemovesItemAndItsDoses() {
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8), sortIndex: 0)
         let mag = makeItem("Magnesium", "MAG", created: at(2026, 10, 1, 8), sortIndex: 1)
         var state = StackState(items: [vd3, mag])
-        state.logDose(itemId: mag.id, at: at(2026, 10, 5, 21))
-        state.logDose(itemId: vd3.id, at: at(2026, 10, 5, 8))
+        state.logDose(itemId: mag.id, at: at(2026, 10, 5, 21), timeZone: london)
+        state.logDose(itemId: vd3.id, at: at(2026, 10, 5, 8), timeZone: london)
         state.deleteItem(id: mag.id)
         XCTAssertEqual(state.items.map(\.id), [vd3.id])
         XCTAssertEqual(state.doses.count, 1)
@@ -344,13 +591,13 @@ final class DayLogicTests: XCTestCase {
         let fish = makeItem("Fish Oil", "FSH", created: created, sortIndex: 1)
         let zinc = makeItem("Zinc", "ZNC", .alternateDays, created: created, sortIndex: 2)
         var state = StackState(items: [vd3, fish, zinc])
-        state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8))
-        state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 7, 42))
+        state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8), timeZone: london)
+        state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 7, 42), timeZone: london)
         let pending = SiriAnswers.status(state: state, now: at(2026, 10, 12, 21), timeZone: london)
         XCTAssertTrue(pending.hasPrefix("Not yet: Fish Oil is pending."), pending)
         XCTAssertTrue(pending.contains("Zinc is not due today."), pending)
 
-        state.logDose(itemId: fish.id, at: at(2026, 10, 12, 7, 42))
+        state.logDose(itemId: fish.id, at: at(2026, 10, 12, 7, 42), timeZone: london)
         let done = SiriAnswers.status(state: state, now: at(2026, 10, 12, 21), timeZone: london)
         XCTAssertTrue(done.hasPrefix("Yes. Vitamin D3 at "), done)
     }

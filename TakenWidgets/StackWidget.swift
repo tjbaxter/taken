@@ -29,10 +29,13 @@ struct StackProvider: TimelineProvider {
         let now = Date()
         let state = TakenStore.shared.load()
         let rollover = DayClock(dayStartHour: state.settings.dayStartHour).nextRollover(after: now)
-        let entries = [
-            StackEntry(date: now, snapshot: WidgetSnapshot(state: state, now: now)),
-            StackEntry(date: rollover, snapshot: WidgetSnapshot(state: state, now: rollover)),
-        ]
+        let current = WidgetSnapshot(state: state, now: now)
+        var entries = [StackEntry(date: now, snapshot: current)]
+        // An item logged in the last hour turns tappable again once the repeat guard is over.
+        if let ready = current.nextReady, ready > now, ready < rollover {
+            entries.append(StackEntry(date: ready, snapshot: WidgetSnapshot(state: state, now: ready)))
+        }
+        entries.append(StackEntry(date: rollover, snapshot: WidgetSnapshot(state: state, now: rollover)))
         completion(Timeline(entries: entries, policy: .after(rollover)))
     }
 }

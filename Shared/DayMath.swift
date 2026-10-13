@@ -102,4 +102,21 @@ struct DayClock: Sendable {
         let hm = hourMinute(of: date)
         return hm.hour * 60 + hm.minute
     }
+
+    /// Seconds east of UTC in this clock's time zone at a moment.
+    func utcOffset(at date: Date) -> Int {
+        calendar.timeZone.secondsFromGMT(for: date)
+    }
+
+    /// The same day start at a fixed UTC offset: how a dose logged in another zone finds its day.
+    func fixed(utcOffset offset: Int) -> DayClock {
+        DayClock(dayStartHour: dayStartHour, timeZone: TimeZone(secondsFromGMT: offset) ?? calendar.timeZone)
+    }
+
+    /// The day a dose belongs to: the day that was being lived where it was logged. A dose with no
+    /// recorded offset, or one logged in this clock's offset, reads in this clock's zone.
+    func day(of dose: Dose) -> DayKey {
+        guard let offset = dose.utcOffset, offset != utcOffset(at: dose.takenAt) else { return day(for: dose.takenAt) }
+        return fixed(utcOffset: offset).day(for: dose.takenAt)
+    }
 }

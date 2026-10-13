@@ -9,24 +9,26 @@ struct ItemRowView: View {
     var notDueLabel: String? = nil
     let onTap: () -> Void
 
+    @Environment(\.dynamicTypeSize) private var typeSize
+
+    init(row: ItemDay, now: Date, clock: DayClock, expanded: Bool, notDueLabel: String? = nil,
+         onTap: @escaping () -> Void) {
+        self.row = row
+        self.now = now
+        self.clock = clock
+        self.expanded = expanded
+        self.notDueLabel = notDueLabel
+        self.onTap = onTap
+    }
+
     var body: some View {
         Button(action: onTap) {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 14) {
-                    CodeTag(code: row.item.code, lit: row.isDue && row.isDone, dim: notDueLabel != nil && row.doses.isEmpty)
-                    VStack(alignment: .leading, spacing: 5) {
-                        Text(row.item.name)
-                            .font(.sans(17, .sansMedium))
-                            .foregroundStyle(notDueLabel != nil && row.doses.isEmpty ? Palette.fgMuted : Palette.fg)
-                            .lineLimit(1)
-                        Text(Fmt.frequency(row.item.frequency)).hud(10.5, Palette.fgSubtle, tracking: 0.12)
-                    }
-                    Spacer(minLength: 8)
-                    readout
-                    StateMark(row: row)
+                if typeSize.isAccessibilitySize {
+                    stackedLine
+                } else {
+                    line
                 }
-                .padding(.horizontal, 14)
-                .frame(minHeight: 70)
 
                 if expanded {
                     detailLine
@@ -45,6 +47,54 @@ struct ItemRowView: View {
         .accessibilityAddTraits(.isButton)
     }
 
+    /// The row on one line: tag, name, readout, state.
+    private var line: some View {
+        HStack(spacing: 14) {
+            CodeTag(code: row.item.code, lit: row.isDue && row.isDone, dim: notDueLabel != nil && row.doses.isEmpty)
+            VStack(alignment: .leading, spacing: 5) {
+                nameText.lineLimit(1)
+                frequencyText
+            }
+            Spacer(minLength: 8)
+            readout
+            StateMark(row: row)
+        }
+        .padding(.horizontal, 14)
+        .frame(minHeight: 70)
+    }
+
+    /// Accessibility text sizes: the readout moves under the name, so the name keeps the width it needs.
+    private var stackedLine: some View {
+        HStack(spacing: 14) {
+            CodeTag(code: row.item.code, lit: row.isDue && row.isDone, dim: notDueLabel != nil && row.doses.isEmpty)
+            VStack(alignment: .leading, spacing: 6) {
+                nameText.lineLimit(2)
+                frequencyText
+                stackedReadout
+            }
+            .layoutPriority(1)
+            Spacer(minLength: 8)
+            StateMark(row: row)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(minHeight: 70)
+    }
+
+    private var nameText: some View {
+        Text(row.item.name)
+            .font(.sans(17, .sansMedium))
+            .foregroundStyle(notDueLabel != nil && row.doses.isEmpty ? Palette.fgMuted : Palette.fg)
+    }
+
+    private var frequencyText: some View {
+        Text(Fmt.frequency(row.frequency)).hud(10.5, Palette.fgSubtle, tracking: 0.12)
+    }
+
+    private func agoText(_ last: Dose) -> String {
+        row.dosesPerDay > 1 ? "\(row.takenCount)/\(row.dosesPerDay) \u{00B7} \(Fmt.ago(last.takenAt, now: now))" : Fmt.ago(last.takenAt, now: now)
+    }
+
     @ViewBuilder
     private var readout: some View {
         if let last = row.lastDose {
@@ -52,13 +102,30 @@ struct ItemRowView: View {
                 Text(Fmt.clock(last.takenAt, clock))
                     .font(.monoFixed(15, .monoMedium))
                     .foregroundStyle(Palette.signal)
-                Text(row.dosesPerDay > 1 ? "\(row.takenCount)/\(row.dosesPerDay) \u{00B7} \(Fmt.ago(last.takenAt, now: now))" : Fmt.ago(last.takenAt, now: now))
+                Text(agoText(last))
                     .hud(10, Palette.fgSubtle, tracking: 0.1)
             }
         } else if let notDueLabel {
-            Text(notDueLabel).hud(10, Palette.fgFaint, tracking: 0.1)
+            Text(notDueLabel).hud(10, Palette.fgSubtle, tracking: 0.1)
         } else {
-            Text("PENDING").hud(10.5, Palette.fgFaint, tracking: 0.14)
+            Text("PENDING").hud(10.5, Palette.fgSubtle, tracking: 0.14)
+        }
+    }
+
+    @ViewBuilder
+    private var stackedReadout: some View {
+        if let last = row.lastDose {
+            HStack(spacing: 8) {
+                Text(Fmt.clock(last.takenAt, clock))
+                    .font(.monoFixed(15, .monoMedium))
+                    .foregroundStyle(Palette.signal)
+                Text(agoText(last))
+                    .hud(10, Palette.fgSubtle, tracking: 0.1)
+            }
+        } else if let notDueLabel {
+            Text(notDueLabel).hud(10, Palette.fgSubtle, tracking: 0.1)
+        } else {
+            Text("PENDING").hud(10.5, Palette.fgSubtle, tracking: 0.14)
         }
     }
 

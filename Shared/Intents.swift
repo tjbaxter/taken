@@ -64,9 +64,12 @@ struct LogItemIntent: AppIntent {
         let itemID = item.id
         do {
             let result = try TakenStore.shared.update { state in
-                state.logDose(itemId: itemID, at: now)
+                state.logActiveDose(itemId: itemID, at: now)
             }
             guard let dose = result.value, let logged = result.state.item(dose.itemId) else {
+                if let archived = result.state.item(itemID), archived.archived {
+                    return .result(dialog: "\(archived.name) is archived in Taken. Unarchive it in Settings to log it.")
+                }
                 return .result(dialog: "That item is no longer in your stack.")
             }
             await Sync.afterWrite(result.state)
@@ -77,7 +80,8 @@ struct LogItemIntent: AppIntent {
     }
 }
 
-/// Widget row tap. Logs only while a dose is still pending, so a stale widget can never double log.
+/// Widget row tap. Logs only while a dose is still pending and the item was not logged in the last hour,
+/// so a stale widget or a second tap can never double log.
 struct LogNextDoseIntent: AppIntent {
     static var title: LocalizedStringResource { "Log next dose" }
     static var isDiscoverable: Bool { false }
@@ -187,11 +191,17 @@ enum SiriAnswers {
         return sentences.joined(separator: " ")
     }
 
-    static func nothingPending(state: StackState, now: Date) -> String {
-        let clock = DayClock(dayStartHour: state.settings.dayStartHour)
+    /// Why TAKE ALL logged nothing.
+    static func nothingPending(state: StackState, now: Date, timeZone: TimeZone = .current) -> String {
+        let clock = DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone)
         let today = StackEngine(state: state, clock: clock).todaySummary(now: now)
         if today.isEmpty { return "Your stack is empty. Open Taken to add what you take." }
         if today.allTaken { return "Nothing pending. All taken today." }
+        // Still pending, but logged within the last hour: TAKE ALL never logs a next dose on top of it.
+        let recent = today.pendingItems.map { $0.item.name }
+        if !recent.isEmpty {
+            return "Nothing logged. \(Fmt.list(recent)) \(recent.count == 1 ? "was" : "were") logged in the last hour. To log another dose now, tap it in Taken."
+        }
         return "Nothing pending right now."
     }
 }

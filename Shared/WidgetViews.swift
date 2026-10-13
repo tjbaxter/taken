@@ -13,6 +13,8 @@ struct WidgetRow: Identifiable, Sendable {
     let taken: Int
     let due: Int
     let lastTime: Date?
+    /// A tap may log it now: still pending, and not logged in the last hour (StackEngine.repeatGuard).
+    let ready: Bool
 
     var done: Bool { taken >= due }
 }
@@ -21,23 +23,31 @@ struct WidgetSnapshot: Sendable {
     let takenDue: Int
     let dueDoses: Int
     let pendingItems: Int
+    /// Items TAKE ALL logs right now. Fewer than `pendingItems` while one was logged in the last hour.
+    let readyItems: Int
     let rows: [WidgetRow]
     let lastDose: Date?
     let hasStack: Bool
     let clock: DayClock
+    /// When a pending item held back by the repeat guard can be tapped again, for the timeline.
+    let nextReady: Date?
 
     var allTaken: Bool { dueDoses > 0 && takenDue >= dueDoses }
 
-    init(state: StackState, now: Date) {
-        let clock = DayClock(dayStartHour: state.settings.dayStartHour)
-        let summary = StackEngine(state: state, clock: clock).todaySummary(now: now)
+    init(state: StackState, now: Date, timeZone: TimeZone = .autoupdatingCurrent) {
+        let clock = DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone)
+        let engine = StackEngine(state: state, clock: clock)
+        let summary = engine.todaySummary(now: now)
         self.clock = clock
         takenDue = summary.takenDueDoses
         dueDoses = summary.dueDoses
         pendingItems = summary.pendingItems.count
+        readyItems = engine.quickLogRows(summary, now: now).count
+        nextReady = summary.pendingItems.compactMap { engine.quickLogResumes($0, now: now) }.min()
         let all = summary.due.map { row in
             WidgetRow(id: row.item.id, code: row.item.code, name: row.item.name,
-                      taken: row.takenCount, due: row.dosesPerDay, lastTime: row.lastDose?.takenAt)
+                      taken: row.takenCount, due: row.dosesPerDay, lastTime: row.lastDose?.takenAt,
+                      ready: engine.canQuickLog(row, now: now))
         }
         // What is still to take comes first, so the rows a widget has room for are the ones worth tapping.
         rows = all.filter { !$0.done } + all.filter { $0.done }
@@ -70,6 +80,12 @@ private struct WidgetHeader: View {
 private struct MiniBar: View {
     let total: Int
     let lit: Int
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    init(total: Int, lit: Int) {
+        self.total = total
+        self.lit = lit
+    }
 
     var body: some View {
         HStack(spacing: 3) {
@@ -77,7 +93,9 @@ private struct MiniBar: View {
                 if total > 0 && index < lit {
                     Rectangle().fill(Palette.signal).frame(height: 4).widgetAccentable()
                 } else {
-                    Rectangle().fill(Palette.bgInset)
+                    // Tinted and clear Home Screens draw every opaque fill white: an unlit segment
+                    // keeps its meaning only as a faint one.
+                    Rectangle().fill(renderingMode == .fullColor ? Palette.bgInset : Color.white.opacity(0.2))
                         .overlay(Rectangle().strokeBorder(Palette.line, lineWidth: 1))
                         .frame(height: 4)
                 }
@@ -88,12 +106,19 @@ private struct MiniBar: View {
 
 private struct Counter: View {
     let snapshot: WidgetSnapshot
-    var size: CGFloat
+    let size: CGFloat
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    init(snapshot: WidgetSnapshot, size: CGFloat) {
+        self.snapshot = snapshot
+        self.size = size
+    }
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             Text("\(snapshot.takenDue)").foregroundStyle(Palette.fg)
-            Text("/\(snapshot.dueDoses)").foregroundStyle(Palette.fgFaint)
+            Text("/\(snapshot.dueDoses)")
+                .foregroundStyle(renderingMode == .fullColor ? Palette.fgFaint : Palette.fg.opacity(0.45))
         }
         .font(.monoFixed(size, .monoMedium))
         .tracking(-1)
@@ -104,8 +129,16 @@ private struct Counter: View {
 
 private struct TakeAllWidgetButton: View {
     let pending: Int
+    @Environment(\.widgetRenderingMode) private var renderingMode
+
+    init(pending: Int) {
+        self.pending = pending
+    }
 
     var body: some View {
+        // Full colour: the light button. Tinted and clear Home Screens draw every opaque fill and label
+        // white, so there the button is an outline and the label stays readable.
+        let fullColor = renderingMode == .fullColor
         Button(intent: TakeAllIntent()) {
             HStack(spacing: 6) {
                 Rectangle().fill(Palette.signal).frame(width: 5, height: 5).widgetAccentable()
@@ -118,12 +151,34 @@ private struct TakeAllWidgetButton: View {
                         .opacity(0.6)
                 }
             }
-            .foregroundStyle(Palette.buttonText)
+            .foregroundStyle(fullColor ? Palette.buttonText : Palette.fg)
             .frame(maxWidth: .infinity)
             .frame(height: 34)
-            .background(Palette.button, in: RoundedRectangle(cornerRadius: 4))
+            .background {
+                if fullColor {
+                    RoundedRectangle(cornerRadius: 4).fill(Palette.button)
+                } else {
+                    RoundedRectangle(cornerRadius: 4)
+                        .fill(Color.white.opacity(0.12))
+                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.white.opacity(0.6), lineWidth: 1))
+                }
+            }
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// The small widget's bottom line when there is no TAKE ALL to show.
+private struct StatusLine: View {
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Rectangle().fill(Palette.signal).frame(width: 5, height: 5).widgetAccentable()
+            Text(text)
+                .hudFixed(9.5, Palette.fgMuted, tracking: 0.12)
+        }
+        .frame(height: 34, alignment: .leading)
     }
 }
 
@@ -131,12 +186,7 @@ private struct LockedLine: View {
     let snapshot: WidgetSnapshot
 
     var body: some View {
-        HStack(spacing: 6) {
-            Rectangle().fill(Palette.signal).frame(width: 5, height: 5).widgetAccentable()
-            Text(snapshot.lastDose.map { "LOCKED \(Fmt.clock($0, snapshot.clock))" } ?? "LOCKED")
-                .hudFixed(9.5, Palette.fgMuted, tracking: 0.12)
-        }
-        .frame(height: 34, alignment: .leading)
+        StatusLine(text: snapshot.lastDose.map { "LOCKED \(Fmt.clock($0, snapshot.clock))" } ?? "LOCKED")
     }
 }
 
@@ -172,8 +222,12 @@ struct SmallStackView: View {
                 Spacer(minLength: 6)
                 MiniBar(total: snapshot.dueDoses, lit: snapshot.takenDue)
                     .padding(.bottom, 10)
-                if snapshot.pendingItems > 0 {
-                    TakeAllWidgetButton(pending: snapshot.pendingItems)
+                if snapshot.readyItems > 0 {
+                    TakeAllWidgetButton(pending: snapshot.readyItems)
+                } else if snapshot.pendingItems > 0 {
+                    // Logged in the last hour, its next dose still to come: a second tap here would log
+                    // that next dose too early, so the button returns when the hour is up.
+                    StatusLine(text: snapshot.lastDose.map { "LOGGED \(Fmt.clock($0, snapshot.clock))" } ?? "LOGGED")
                 } else {
                     LockedLine(snapshot: snapshot)
                 }
@@ -221,7 +275,7 @@ private struct MediumRow: View {
     let clock: DayClock
 
     var body: some View {
-        if row.done {
+        if row.done || !row.ready {
             label
         } else {
             Button(intent: LogNextDoseIntent(itemID: row.id)) { label }
@@ -248,7 +302,7 @@ private struct MediumRow: View {
                     .foregroundStyle(Palette.signal)
                     .widgetAccentable()
             } else {
-                Text("TAP")
+                Text(row.ready ? "TAP" : "--:--")
                     .hudFixed(9, Palette.fgFaint, tracking: 0.14)
             }
         }
@@ -290,20 +344,25 @@ struct CircularStackView: View {
                 }
             }
             .accessibilityLabel("All taken")
+        } else if snapshot.readyItems > 0 {
+            Button(intent: TakeAllIntent()) { gauge }
+                .buttonStyle(.plain)
+                .accessibilityLabel("\(snapshot.takenDue) of \(snapshot.dueDoses) taken. Tap to take all.")
         } else {
-            Button(intent: TakeAllIntent()) {
-                Gauge(value: Double(snapshot.takenDue), in: 0...Double(max(snapshot.dueDoses, 1))) {
-                    Text("TAKEN")
-                } currentValueLabel: {
-                    Text("\(snapshot.takenDue)/\(snapshot.dueDoses)")
-                        .font(.monoFixed(12, .monoSemibold))
-                }
-                .gaugeStyle(.accessoryCircularCapacity)
-                .widgetAccentable()
-            }
-            .buttonStyle(.plain)
-            .accessibilityLabel("\(snapshot.takenDue) of \(snapshot.dueDoses) taken. Tap to take all.")
+            gauge
+                .accessibilityLabel("\(snapshot.takenDue) of \(snapshot.dueDoses) taken.")
         }
+    }
+
+    private var gauge: some View {
+        Gauge(value: Double(snapshot.takenDue), in: 0...Double(max(snapshot.dueDoses, 1))) {
+            Text("TAKEN")
+        } currentValueLabel: {
+            Text("\(snapshot.takenDue)/\(snapshot.dueDoses)")
+                .font(.monoFixed(12, .monoSemibold))
+        }
+        .gaugeStyle(.accessoryCircularCapacity)
+        .widgetAccentable()
     }
 }
 
@@ -317,7 +376,7 @@ struct RectangularStackView: View {
                 Text("Add your stack in the app.").font(.custom(Face.sans.rawValue, fixedSize: 12))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-        } else if snapshot.allTaken || snapshot.pendingItems == 0 {
+        } else if snapshot.readyItems == 0 {
             content
         } else {
             Button(intent: TakeAllIntent()) { content }

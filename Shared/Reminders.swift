@@ -8,6 +8,10 @@ enum Reminders {
     static let takeAllActionID = "taken.nudge.take-all"
     static let openActionID = "taken.nudge.open"
     static let requestPrefix = "taken.nudge.day."
+    /// The one-off note that a TAKE ALL on an earlier day's nudge logged nothing.
+    static let staleIdentifier = "taken.nudge.stale"
+    /// userInfo key holding the logical day (DayKey ordinal) a nudge is for.
+    static let dayKey = "day"
     static let horizonDays = 14
 
     struct Plan: Equatable, Sendable {
@@ -40,6 +44,40 @@ enum Reminders {
                               components: components, body: body(for: pending.map { $0.item.code })))
         }
         return plans
+    }
+
+    /// The logical day a nudge was for: from its userInfo, else from its identifier ("taken.nudge.day.20738").
+    static func nudgeDay(identifier: String, userInfo: [AnyHashable: Any] = [:]) -> DayKey? {
+        if let ordinal = userInfo[dayKey] as? Int { return DayKey(ordinal: ordinal) }
+        guard identifier.hasPrefix(requestPrefix), let ordinal = Int(identifier.dropFirst(requestPrefix.count)) else {
+            return nil
+        }
+        return DayKey(ordinal: ordinal)
+    }
+
+    /// A nudge's TAKE ALL logs only on the day the nudge was for, so last night's nudge tapped this
+    /// morning never logs today's doses. A nudge with no day (none are scheduled that way) counts as today's.
+    static func isCurrent(nudgeDay: DayKey?, state: StackState, now: Date, timeZone: TimeZone = .current) -> Bool {
+        guard let nudgeDay else { return true }
+        return nudgeDay == DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone).day(for: now)
+    }
+
+    /// Delivered nudges to withdraw from Notification Center: every earlier day's, and today's once nothing
+    /// is pending. Today's stays while something is still pending, so its TAKE ALL keeps working.
+    static func staleDelivered(_ identifiers: [String], state: StackState, now: Date,
+                               timeZone: TimeZone = .current) -> [String] {
+        let clock = DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone)
+        let today = clock.day(for: now)
+        let todayDone = StackEngine(state: state, clock: clock).todaySummary(now: now).pendingItems.isEmpty
+        return identifiers.filter { identifier in
+            guard let day = nudgeDay(identifier: identifier) else { return identifier == staleIdentifier }
+            return day < today || (day == today && todayDone)
+        }
+    }
+
+    /// "Nothing logged. That nudge was for MON 12 OCT. Tap to open that day."
+    static func staleBody(day: DayKey) -> String {
+        "Nothing logged. That nudge was for \(Fmt.dayHeader(day)). Tap to open that day."
     }
 
     /// "2 pending: VD3, FSH"
@@ -75,19 +113,18 @@ enum Reminders {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .denied
     }
 
-    /// Replace every pending nudge with a fresh plan.
+    /// Replace every pending nudge with a fresh plan, and withdraw delivered nudges that no longer apply.
     static func reschedule(state: StackState, now: Date) async {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
         let ours = pending.map(\.identifier).filter { $0.hasPrefix(requestPrefix) }
         if !ours.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ours) }
 
+        let delivered = await center.deliveredNotifications().map(\.request.identifier)
+        let stale = staleDelivered(delivered, state: state, now: now)
+        if !stale.isEmpty { center.removeDeliveredNotifications(withIdentifiers: stale) }
+
         let plans = plan(state: state, now: now)
-        // A day that is now done drops its already-delivered nudge too.
-        let today = DayClock(dayStartHour: state.settings.dayStartHour).day(for: now)
-        if !plans.contains(where: { $0.day == today }) {
-            center.removeDeliveredNotifications(withIdentifiers: [requestPrefix + String(today.ordinal)])
-        }
         guard !plans.isEmpty, await isAuthorized() else { return }
 
         for plan in plans {
@@ -96,9 +133,21 @@ enum Reminders {
             content.sound = .default
             content.categoryIdentifier = categoryID
             content.threadIdentifier = "taken.nudge"
+            content.userInfo = [dayKey: plan.day.ordinal]
             let trigger = UNCalendarNotificationTrigger(dateMatching: plan.components, repeats: false)
             let request = UNNotificationRequest(identifier: plan.identifier, content: content, trigger: trigger)
             try? await center.add(request)
         }
+    }
+
+    /// TAKE ALL on an earlier day's nudge logs nothing. Say so quietly, and let a tap open that day.
+    static func explainStale(day: DayKey) async {
+        guard await isAuthorized() else { return }
+        let content = UNMutableNotificationContent()
+        content.body = staleBody(day: day)
+        content.threadIdentifier = "taken.nudge"
+        content.userInfo = [dayKey: day.ordinal]
+        let request = UNNotificationRequest(identifier: staleIdentifier, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
     }
 }

@@ -20,10 +20,18 @@ enum SheetRoute: Identifiable, Hashable {
     }
 }
 
+/// What UNDO on a toast puts back.
+enum UndoStep: Equatable, Sendable {
+    /// Remove doses that were just logged.
+    case remove(Set<UUID>)
+    /// Put doses back exactly as they were: a removed dose, or a dose before its time was changed.
+    case restore([Dose])
+}
+
 struct Toast: Identifiable, Equatable {
     let id = UUID()
     let message: String
-    let doseIDs: Set<UUID>
+    var undo: UndoStep? = nil
 }
 
 /// The app's single source of UI state. Reads and writes go through TakenStore.
@@ -78,6 +86,9 @@ final class AppModel {
                 guard let model = self else { return }
                 Task { @MainActor in model.reload() }
             }
+            NudgeRoute.shared.attach { [weak self] day in
+                self?.openDay(fromNudge: day)
+            }
         }
     }
 
@@ -107,6 +118,9 @@ final class AppModel {
     var activeItems: [Item] { engine.orderedItems.filter { !$0.archived } }
     var archivedItems: [Item] { engine.orderedItems.filter { $0.archived } }
     var hasStack: Bool { !activeItems.isEmpty }
+
+    /// Items TAKE ALL logs right now: pending, and not logged in the last hour (StackEngine.repeatGuard).
+    var takeAllCount: Int { engine.quickLogRows(today, now: now).count }
 
     func nextLabel(for row: ItemDay) -> String {
         Fmt.next(engine.nextDueDay(for: row.item, after: today.day), today: today.day)
@@ -174,6 +188,12 @@ final class AppModel {
         reload()
     }
 
+    /// A tapped nudge opens on the day it was for: today's on TODAY, an earlier day's on that day's sheet.
+    func openDay(fromNudge day: DayKey) {
+        reload()
+        sheet = day == today.day ? nil : .day(day)
+    }
+
     private func apply(_ fresh: StackState) {
         state = fresh
         now = clockNow()
@@ -200,7 +220,7 @@ final class AppModel {
             }
             return result.value
         } catch {
-            show(Toast(message: "COULD NOT SAVE. TRY AGAIN", doseIDs: []))
+            show(Toast(message: "COULD NOT SAVE. TRY AGAIN"))
             return nil
         }
     }
@@ -222,9 +242,11 @@ final class AppModel {
     func log(_ item: Item) {
         let at = clockNow()
         let wasLocked = today.allTaken
-        guard let dose = write({ $0.logDose(itemId: item.id, at: at) }) ?? nil else { return }
+        let zone = clock.calendar.timeZone
+        guard let dose = write({ $0.logDose(itemId: item.id, at: at, timeZone: zone) }) ?? nil else { return }
         afterTake(wasLocked: wasLocked)
-        show(Toast(message: "\(item.code) TAKEN \(Fmt.clock(at, clock))", doseIDs: [dose.id]))
+        show(Toast(message: "\(item.code) TAKEN \(Fmt.clock(at, clock))", undo: .remove([dose.id])))
+        announce("\(item.name) taken at \(Fmt.spoken(at)).")
     }
 
     func takeAll() {
@@ -233,7 +255,8 @@ final class AppModel {
         let clock = self.clock
         guard let logged = write({ $0.takeAllPending(now: at, clock: clock) }), !logged.isEmpty else { return }
         afterTake(wasLocked: wasLocked)
-        show(Toast(message: "\(logged.count) TAKEN \(Fmt.clock(at, clock))", doseIDs: Set(logged.map(\.id))))
+        show(Toast(message: "\(logged.count) TAKEN \(Fmt.clock(at, clock))", undo: .remove(Set(logged.map(\.id)))))
+        announce("\(logged.count) taken at \(Fmt.spoken(at)).")
     }
 
     private func afterTake(wasLocked: Bool) {
@@ -246,50 +269,68 @@ final class AppModel {
     }
 
     func undo(_ toast: Toast) {
-        guard !toast.doseIDs.isEmpty else { return }
-        write { $0.removeDoses(toast.doseIDs) }
+        guard let step = toast.undo else { return }
+        switch step {
+        case .remove(let ids):
+            write { $0.removeDoses(ids) }
+        case .restore(let doses):
+            write { state in
+                for dose in doses { state.restore(dose) }
+            }
+        }
         Haptics.soft(hapticsOn)
         dismissToast()
+        announce("Undone.")
     }
 
+    /// Removes today's latest dose of an item. The toast's UNDO puts it back with its original time.
     func undoLastDose(_ item: Item) {
         let day = today.day
         let clock = self.clock
-        let removed = write({ $0.undoLastDose(itemId: item.id, on: day, clock: clock) }) ?? nil
-        if removed != nil {
-            Haptics.soft(hapticsOn)
-            show(Toast(message: "\(item.code) LAST DOSE REMOVED", doseIDs: []))
-        }
+        guard let removed = write({ $0.undoLastDose(itemId: item.id, on: day, clock: clock) }) ?? nil else { return }
+        Haptics.soft(hapticsOn)
+        show(Toast(message: "\(item.code) LAST DOSE REMOVED", undo: .restore([removed])))
+        announce("\(item.name), last dose removed.")
     }
 
-    /// Set time: corrects today's latest dose, or logs one at that time if none yet.
+    /// The moment a wall-clock time means on a logical day, and whether it is still to come.
+    func moment(on day: DayKey, minutes: Int) -> (date: Date, isFuture: Bool) {
+        let date = clock.date(on: day, hour: minutes / 60, minute: minutes % 60)
+        return (date, date > clockNow())
+    }
+
+    /// Set time: corrects today's latest dose, or logs one at that time if none yet. A time still to come
+    /// is never used (the sheet disables it), and the toast's UNDO restores the time it replaced.
     func setTime(_ item: Item, hour: Int, minute: Int) {
         let clock = self.clock
-        var date = clock.date(on: today.day, hour: hour, minute: minute)
-        if date > clockNow() { date = clockNow() }
+        let (at, isFuture) = moment(on: today.day, minutes: hour * 60 + minute)
+        guard !isFuture else { return }
+        let zone = clock.calendar.timeZone
         let existing = today.items.first { $0.id == item.id }?.lastDose
         let wasLocked = today.allTaken
-        let at = date
         if let existing {
-            write { $0.setDoseTime(doseId: existing.id, to: at) }
+            write { $0.setDoseTime(doseId: existing.id, to: at, timeZone: zone) }
             Haptics.impact(hapticsOn)
-            show(Toast(message: "\(item.code) SET TO \(Fmt.clock(at, clock))", doseIDs: []))
-        } else if let dose = write({ $0.logDose(itemId: item.id, at: at) }) ?? nil {
+            show(Toast(message: "\(item.code) SET TO \(Fmt.clock(at, clock))", undo: .restore([existing])))
+            announce("\(item.name) set to \(Fmt.spoken(at)).")
+        } else if let dose = write({ $0.logDose(itemId: item.id, at: at, timeZone: zone) }) ?? nil {
             afterTake(wasLocked: wasLocked)
-            show(Toast(message: "\(item.code) TAKEN \(Fmt.clock(at, clock))", doseIDs: [dose.id]))
+            show(Toast(message: "\(item.code) TAKEN \(Fmt.clock(at, clock))", undo: .remove([dose.id])))
+            announce("\(item.name) taken at \(Fmt.spoken(at)).")
         }
     }
 
     // MARK: Backfill (day sheet)
 
+    /// Logs a dose at a time on a day. A time still to come is never used (the sheet disables it).
     func logDose(_ item: Item, on day: DayKey, minutes: Int) {
-        var date = clock.date(on: day, hour: minutes / 60, minute: minutes % 60)
-        if date > clockNow() { date = clockNow() }
-        let at = date
-        let logged = write({ $0.logDose(itemId: item.id, at: at) }) ?? nil
-        if logged != nil {
-            Haptics.impact(hapticsOn)
-        }
+        let (at, isFuture) = moment(on: day, minutes: minutes)
+        guard !isFuture else { return }
+        let zone = clock.calendar.timeZone
+        let logged = write({ $0.logDose(itemId: item.id, at: at, timeZone: zone) }) ?? nil
+        guard logged != nil else { return }
+        Haptics.impact(hapticsOn)
+        announce("\(item.name) logged at \(Fmt.spoken(at)).")
     }
 
     func removeDose(_ dose: Dose) {
@@ -303,14 +344,14 @@ final class AppModel {
         let at = clockNow()
         guard let added = write({ $0.addItems(drafts, now: at) }), !added.isEmpty else { return }
         Haptics.impact(hapticsOn)
-        show(Toast(message: added.count == 1 ? "\(added[0].code) ADDED" : "\(added.count) ADDED TO STACK", doseIDs: []))
+        show(Toast(message: added.count == 1 ? "\(added[0].code) ADDED" : "\(added.count) ADDED TO STACK"))
         refreshShortcuts()
     }
 
     func updateItem(id: UUID, name: String, code: String, frequency: Frequency, archived: Bool) {
         let at = clockNow()
         write { state in
-            state.updateItem(id: id, name: name, code: code, frequency: frequency)
+            state.updateItem(id: id, name: name, code: code, frequency: frequency, now: at)
             state.setArchived(id: id, archived: archived, now: at)
         }
         refreshShortcuts()
@@ -367,12 +408,20 @@ final class AppModel {
     func show(_ toast: Toast) {
         toastTask?.cancel()
         withAnimation(.snappy(duration: 0.2)) { self.toast = toast }
+        // With VoiceOver the toast stays until it is dismissed, so UNDO is still there after a swipe to it.
+        guard !UIAccessibility.isVoiceOverRunning else { return }
         let id = toast.id
         toastTask = Task { [weak self] in
             try? await Task.sleep(for: .seconds(4))
             guard !Task.isCancelled, let self, self.toast?.id == id else { return }
             withAnimation(.snappy(duration: 0.2)) { self.toast = nil }
         }
+    }
+
+    /// Spoken confirmation for VoiceOver.
+    private func announce(_ text: String) {
+        guard !isDemo else { return }
+        UIAccessibility.post(notification: .announcement, argument: text)
     }
 
     func dismissToast() {

@@ -51,19 +51,49 @@ extension Frequency: Codable {
     }
 }
 
+/// A frequency an item had before it was changed. Days before the day of `until` keep `frequency`,
+/// so a settings change never rewrites the past.
+struct FrequencyEra: Codable, Hashable, Sendable {
+    /// The moment the item moved off `frequency`.
+    var until: Date
+    var frequency: Frequency
+
+    init(until: Date, frequency: Frequency) {
+        self.until = until
+        self.frequency = frequency
+    }
+}
+
+/// A stretch an item spent archived: from the day of `from` up to, not including, the day of `until`.
+struct Pause: Codable, Hashable, Sendable {
+    var from: Date
+    var until: Date
+
+    init(from: Date, until: Date) {
+        self.from = from
+        self.until = until
+    }
+}
+
 /// One thing in the stack.
 struct Item: Codable, Identifiable, Hashable, Sendable {
     var id: UUID
     var name: String
     var code: String
+    /// The frequency from the last change on. Earlier days use `pastFrequencies`.
     var frequency: Frequency
     var createdAt: Date
     var archived: Bool
     var archivedAt: Date?
     var sortIndex: Int
+    /// Frequencies before each change, oldest first. Nil in files written before it existed.
+    var pastFrequencies: [FrequencyEra]?
+    /// Archived stretches that have ended, oldest first. Nil in files written before it existed.
+    var pauses: [Pause]?
 
     init(id: UUID = UUID(), name: String, code: String, frequency: Frequency, createdAt: Date,
-         archived: Bool = false, archivedAt: Date? = nil, sortIndex: Int) {
+         archived: Bool = false, archivedAt: Date? = nil, sortIndex: Int,
+         pastFrequencies: [FrequencyEra]? = nil, pauses: [Pause]? = nil) {
         self.id = id
         self.name = name
         self.code = code
@@ -72,6 +102,8 @@ struct Item: Codable, Identifiable, Hashable, Sendable {
         self.archived = archived
         self.archivedAt = archivedAt
         self.sortIndex = sortIndex
+        self.pastFrequencies = pastFrequencies
+        self.pauses = pauses
     }
 }
 
@@ -80,11 +112,15 @@ struct Dose: Codable, Identifiable, Hashable, Sendable {
     var id: UUID
     var itemId: UUID
     var takenAt: Date
+    /// Seconds east of UTC where the dose was logged, so it keeps the day it was taken on after the
+    /// phone changes time zone. Nil in files written before it existed: those read in the current zone.
+    var utcOffset: Int?
 
-    init(id: UUID = UUID(), itemId: UUID, takenAt: Date) {
+    init(id: UUID = UUID(), itemId: UUID, takenAt: Date, utcOffset: Int? = nil) {
         self.id = id
         self.itemId = itemId
         self.takenAt = takenAt
+        self.utcOffset = utcOffset
     }
 }
 

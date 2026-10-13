@@ -183,7 +183,94 @@ struct Panel<Content: View>: View {
                         .offset(x: 5, y: 5)
                 }
             }
-            .padding(.trailing, stacked ? 5 : 0)
+            // The offset outline's 5 pt is reserved either way, so stacked and flat panels share one width.
+            .padding(.trailing, 5)
             .padding(.bottom, stacked ? 5 : 0)
+    }
+}
+
+/// A time setting in Geist Mono with a chevron, like the day-start control. A tap opens a wheel in a small
+/// sheet, so every time on screen stays in one type system.
+struct MonoTimeButton: View {
+    let title: String
+    let minutes: Int
+    let onSet: (Int) -> Void
+
+    @State private var editing = false
+
+    init(title: String, minutes: Int, onSet: @escaping (Int) -> Void) {
+        self.title = title
+        self.minutes = minutes
+        self.onSet = onSet
+    }
+
+    var body: some View {
+        Button {
+            editing = true
+        } label: {
+            HStack(spacing: 8) {
+                Text(Fmt.minutes(minutes))
+                    .font(.monoFixed(15, .monoMedium))
+                    .foregroundStyle(Palette.fg)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.fgSubtle)
+            }
+            .frame(minWidth: 44, minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("\(title.capitalized), \(Fmt.minutes(minutes))")
+        .accessibilityHint("Double tap to change.")
+        .sheet(isPresented: $editing) {
+            TimeWheelSheet(title: title, minutes: minutes, onSet: onSet)
+        }
+    }
+}
+
+/// One time of day on a wheel, in a small sheet.
+struct TimeWheelSheet: View {
+    let title: String
+    let minutes: Int
+    let onSet: (Int) -> Void
+
+    @Environment(\.dismiss) private var dismiss
+    @State private var time = Date()
+
+    init(title: String, minutes: Int, onSet: @escaping (Int) -> Void) {
+        self.title = title
+        self.minutes = minutes
+        self.onSet = onSet
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            SheetHeader(title: title) { dismiss() }
+            DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
+                .datePickerStyle(.wheel)
+                .labelsHidden()
+                .environment(\.locale, Locale(identifier: "en_GB"))
+                .frame(maxWidth: .infinity)
+                .padding(.top, 8)
+            PrimaryButton(title: "SET \(Fmt.minutes(picked))") {
+                onSet(picked)
+                dismiss()
+            }
+            .padding(.horizontal, 20)
+            .padding(.top, 8)
+            Spacer(minLength: 0)
+        }
+        .background(Palette.bg.ignoresSafeArea())
+        .presentationDetents([.height(400)])
+        .presentationBackground(Palette.bg)
+        .preferredColorScheme(.dark)
+        .onAppear {
+            time = Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: Date()) ?? Date()
+        }
+    }
+
+    private var picked: Int {
+        let c = Calendar.current.dateComponents([.hour, .minute], from: time)
+        return (c.hour ?? 0) * 60 + (c.minute ?? 0)
     }
 }

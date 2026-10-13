@@ -11,17 +11,18 @@ enum FrequencyChoice: String, CaseIterable, Identifiable, Sendable {
         case .twice: return "2X DAILY"
         case .thrice: return "3X DAILY"
         case .alternate: return "ALT DAYS"
-        case .days: return "DAYS"
+        case .days: return "CUSTOM DAYS"
         }
     }
 
+    /// Five segments in the item editor. ALT DAYS stays whole so it never reads as two options.
     var shortLabel: String {
         switch self {
         case .daily: return "DAILY"
         case .twice: return "2X"
         case .thrice: return "3X"
-        case .alternate: return "ALT"
-        case .days: return "DAYS"
+        case .alternate: return "ALT DAYS"
+        case .days: return "CUSTOM"
         }
     }
 
@@ -94,7 +95,7 @@ struct AddSheet: View {
                     FrequencyPicker(choice: $choice, includeDays: false)
                     Text("Change any item later in settings.")
                         .font(.sans(13))
-                        .foregroundStyle(Palette.fgFaint)
+                        .foregroundStyle(Palette.fgSubtle)
                         .padding(.top, 10)
                 }
                 .padding(.horizontal, 20)

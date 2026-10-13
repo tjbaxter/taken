@@ -51,7 +51,7 @@ Stack list: one row per item due today, in user order. Each row:
 - Multi-dose items (2x/3x daily): the row shows dose pips (`●○`), each tap fills the next pip with its own timestamp; done when all pips are filled.
 - Items NOT due today (every-other-day item taken yesterday) render in a separate dim `NOT DUE` group with `NEXT: TOMORROW`. Tapping still logs a dose (no lockout).
 
-Primary action: when 2+ items are pending, a full-width `TAKE ALL` button (mono caps). One tap marks every pending due dose taken at the same time. With 0 pending it is hidden.
+Primary action: when 2+ items are pending, a full-width `TAKE ALL` button (mono caps). One tap marks every pending due dose taken at the same time. With 0 pending it is hidden. Repeat guard: TAKE ALL (here and from a widget, the control, Siri or the nudge) and a widget row skip an item logged in the last hour, so a second tap never logs a 2x or 3x item's next dose on top of the first; the count on the button is what it will log. A tap on the row in the app is never held back.
 
 History (below the list on the same screen): a 5-week contribution grid (Mon-first, today at bottom right), each cell = a day: fully lit (all due taken), half-lit (some), dim tick (none due or none taken), today outlined. Under it two mono stats: `STREAK 14D` (consecutive complete days, today counts once complete, a day with nothing due does not break it) and `30D 97%` (due doses taken / due doses, last 30 days). Tap a cell: a day sheet listing that day's items with their taken times; in the sheet each item can be marked taken (time defaults to 09:00 that day, adjustable) or a dose removed. This is the backfill path for "I forgot to log yesterday".
 
@@ -63,7 +63,7 @@ A grid of quick-pick chips (multi-select, tap to toggle, mono caps). At least: V
 
 ### 3.4 Edit stack (from the gear)
 Settings screen sections:
-- STACK: list of items, reorder (drag), swipe to delete (with confirm), tap to edit name / code tag / frequency (DAILY, 2X, 3X, ALT DAYS, CUSTOM DAYS = weekday toggles) / archive. `ADD` row opens the Add sheet. Deleting an item keeps its past log entries out of stats but never crashes history.
+- STACK: list of items, reorder (drag), swipe to delete (with confirm), tap to edit name / code tag / frequency (DAILY, 2X, 3X, ALT DAYS, CUSTOM DAYS = weekday toggles) / archive. `ADD` row opens the Add sheet. Deleting an item keeps its past log entries out of stats but never crashes history. Settings never rewrite the past: a new frequency applies from today and earlier days keep the one they had; unarchiving keeps the archived days out of history (a dose logged for one of them still counts).
 - REMINDER: one global nudge. Toggle + time (default 21:00). Copy: `If anything is still pending at this time, nudge me.` Ask notification permission only when the user turns this on.
 - DAY STARTS AT: hour picker (default 04:00) so a 1 a.m. dose counts for the day you were living. All "today" logic uses this rollover.
 - HAPTICS: toggle (default on).
@@ -73,6 +73,7 @@ Settings screen sections:
 ### 3.5 Reminders (local notifications only)
 - If enabled: at the nudge time, if any due dose for the current day is still pending, a notification `2 pending: VD3, FSH` with action buttons `TAKE ALL` (runs in background, no app open, marks all pending due doses taken now) and `OPEN`.
 - Implementation must not nag when everything is done: schedule individual (non-repeating) requests for the next 14 days; cancel/reschedule today's whenever state changes (dose logged in app, widget, intent, notification action) and on every app foreground. Content lists what is pending as of scheduling, refreshed on every state change.
+- Each nudge carries its logical day. Its TAKE ALL logs only on that day: last night's nudge tapped this morning logs nothing and says so. Tapping a nudge opens the app on that day. Delivered nudges for earlier days, and today's once nothing is pending, are withdrawn on every reschedule.
 
 ### 3.6 Widgets (TakenWidgets extension, interactive via App Intents, iOS 17+)
 - Home Screen small: big `2/3` + mini pips, and a single tappable `TAKE ALL` (or `ALL TAKEN` locked state).
@@ -80,7 +81,7 @@ Settings screen sections:
 - Lock Screen: accessoryCircular (gauge 2/3, or a check when complete), accessoryRectangular (up to 3 items with ●/○ and times), accessoryInline (`2/3 TAKEN` / `ALL TAKEN 07:42`). Make the circular/rectangular ones log `TAKE ALL` on tap via intent where the system allows; otherwise they deep-link into the app.
 - Control Center (iOS 18+, `@available`): a ControlWidgetButton `Take all` with the app's glyph.
 - Every write from a widget/intent calls `WidgetCenter.shared.reloadAllTimelines()` (and ControlCenter reload) and reschedules reminders. Timelines refresh at the next day rollover.
-- Widget visual style matches the app (black, mono, signal colour); use `containerBackground(for: .widget)`. Support the iOS 18+ tinted/accented rendering modes reasonably (widgetAccentable on the signal elements).
+- Widget visual style matches the app (black, mono, signal colour); use `containerBackground(for: .widget)`. Support the iOS 18+ tinted/accented rendering modes reasonably (widgetAccentable on the signal elements; outside full colour, TAKE ALL is an outline and unlit segments stay faint, since every opaque fill renders white).
 
 ### 3.7 Siri / Shortcuts (App Intents, AppShortcutsProvider)
 - `Take all` intent: phrases "Log my stack in ${applicationName}", "I took my pills in ${applicationName}". Result dialog: "Logged 3: Vitamin D3, Fish Oil, Finasteride."
@@ -88,10 +89,10 @@ Settings screen sections:
 - `Log item` intent with an AppEntity parameter for one item.
 
 ### 3.8 Data and correctness (code owns truth)
-- Model: `Item { id: UUID, name, code, frequency (.daily(times: 1...3) | .alternateDays | .weekdays(Set<Int>)), createdAt, archived, sortIndex }`, `Dose { id, itemId, takenAt: Date }`. Day membership of a dose = calendar day of (takenAt - dayStartHour). Everything computed from doses; no denormalized "done" flags.
+- Model: `Item { id: UUID, name, code, frequency (.daily(times: 1...3) | .alternateDays | .weekdays(Set<Int>)), createdAt, archived, archivedAt, sortIndex, pastFrequencies: [{ until, frequency }]?, pauses: [{ from, until }]? }`, `Dose { id, itemId, takenAt: Date, utcOffset: Int? }`. Day membership of a dose = calendar day of (takenAt - dayStartHour) at the UTC offset where it was logged (`utcOffset`; doses saved before it existed use the current zone). Each day uses the frequency in force that day. Everything computed from doses; no denormalized "done" flags.
 - ALT DAYS: due today if never taken, or the last dose's day is 2+ days before today. If taken yesterday: not due, NEXT TOMORROW.
 - Store: one Codable JSON file in the App Group container, written atomically, read/written through NSFileCoordinator so the app, widget and intents never clobber each other. A single `TakenStore` type (in a shared framework or shared source folder compiled into both targets) owns load/save/mutations and is the only writer. App reloads from disk on scenePhase .active and on a Darwin notification or file presenter callback when the widget writes.
-- Timezone and DST: store absolute Dates; compute days with the user's current calendar and the rollover hour.
+- Timezone and DST: store absolute Dates plus the UTC offset each dose was logged at; compute today with the user's current calendar and the rollover hour, and each dose's day at its own offset, so travel never moves a dose to another day.
 - Unit tests (XCTest target `TakenTests`) cover: day rollover, ALT DAYS due logic, weekday frequency, multi-dose completion, streak (incl. days with nothing due, today incomplete), 30-day %, take-all only touching pending due doses, undo, backfill on a past day, CSV export, store round-trip and concurrent writers.
 
 ## 4. Design language ("dark mil-tech, biohacker, premium, minimal")
