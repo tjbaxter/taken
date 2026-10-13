@@ -65,7 +65,7 @@ TAKEN PRO
 • Your record is never held back. Without Pro your log, history and CSV export stay open.
 • Downloaded Taken 1.0? You keep Pro for life.
 
-Taken Pro: 7 days on us, then $19.99 a year, or $3.99 a month, or $49.99 once. Payment is charged to your Apple Account. Subscriptions renew automatically unless cancelled at least 24 hours before the end of the period; manage or cancel in Settings.
+Taken Pro yearly: 7 days on us for new subscribers, then $19.99 a year. Or $3.99 a month, or $49.99 once. Payment is charged to your Apple Account. Subscriptions renew automatically unless cancelled at least 24 hours before the end of the period; manage or cancel in Settings.
 
 Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
 Privacy Policy: https://tjbaxter.github.io/taken/privacy.html
@@ -91,7 +91,7 @@ KEYWORDS = [
 ]
 
 WHATS_NEW = (
-    "Taken Pro is here. Log your first dose, then start with 7 days on us and pick yearly, monthly or lifetime. "
+    "Taken Pro is here. Log your first dose, then pick yearly (7 days on us for new subscribers), monthly or lifetime. "
     "Everyone who downloaded Taken 1.0 keeps Pro for life, at no cost. Still no ads, no account and no tracking, "
     "and your log stays on your iPhone.\n\n"
     "Four looks in Settings: Signal, Blush, Phosphor and Ice. Your widgets and the app icon follow the one you pick."
@@ -104,7 +104,7 @@ How to see Taken Pro in the sandbox:
 1. On first launch tap ADD TO STACK, tap three chips (for example Vitamin D3, Fish Oil and Finasteride) and tap ADD (3).
 2. Tap the Vitamin D3 row. It lights up with the current time, and about 1.5 seconds later the Taken Pro sheet slides up: yearly selected with 7 DAYS ON US, then monthly and lifetime, prices from the App Store, the renewal terms under the button, and Restore, Redeem code, Terms of Use and Privacy links.
 3. Close it with the X to see locked mode. TODAY still shows the stack, the log and the history grid, with a bar under the status panel reading START 7 DAYS ON US. A row, TAKE ALL, the bar or ADD opens the sheet again; the day sheet and CSV export keep working.
-4. Tap START 7 DAYS ON US and confirm with the sandbox account. The sheet locks in, closes, and the dose that opened it is logged.
+4. Tap START 7 DAYS ON US and confirm with the sandbox account. The sheet locks in, closes, and the dose that opened it is logged. In the sandbox the introductory week lasts about 3 minutes and a year about an hour; Pro stays on through each renewal in the app and on the widgets, the control, Siri and the nudge.
 5. Restore: tap the gear and scroll to PRO, then RESTORE PURCHASES (or Restore on the sheet). REDEEM CODE and MANAGE SUBSCRIPTION are in the same section, under the current plan (for example TRIAL \u00b7 ENDS 20 OCT).
 
 Founding members: everyone whose first download was Taken 1.0 (build 7 or earlier) keeps Pro for life at no cost. The app reads this from AppTransaction.originalAppVersion, in the production environment only. In the sandbox and TestFlight originalAppVersion is always 1.0, so review devices see the paywall as a new customer does.
@@ -114,9 +114,9 @@ With Pro on, logging works everywhere. Steps 6 to 10 each log what is still pend
 7. Lock Screen: touch and hold the Lock Screen, tap Customize, Lock Screen, and add a Taken widget. It shows the count, for example 2/3.
 8. Control Center (iOS 18 and later): open Control Center, tap +, Add a Control, choose Taken, Take all. Tapping it logs everything pending.
 9. Siri: say "Did I take my pills in Taken" to hear what is taken and pending, or "Log my stack in Taken" to log everything pending. Without Pro, Siri says logging needs Taken Pro and logs nothing.
-10. Reminder: tap the gear, turn on NUDGE under REMINDER (notification permission is asked then), and set the time 2 minutes ahead. With something pending the notification arrives; touch and hold it and tap TAKE ALL. Without Pro no nudge is scheduled.
+10. Reminder: tap the gear, turn on NUDGE under REMINDER (notification permission is asked then), and set the time 2 minutes ahead. With something pending the notification arrives; touch and hold it and tap TAKE ALL. Without Pro no nudge is scheduled: REMINDER says THE NUDGE NEEDS TAKEN PRO, and turning NUDGE on opens the Taken Pro sheet.
 
-Looks: tap the gear and scroll to LOOK. Each swatch applies that look to the app at once; the widgets follow, and the app icon changes to the look's own icon, which iOS confirms with its standard alert. Signal is the default look and the primary icon."""
+Looks: tap the gear and scroll to LOOK. Each swatch applies that look to the app at once and the widgets follow. When Settings closes, the app icon changes to the look's own icon, which iOS confirms with its standard alert. Signal is the default look and the primary icon."""
 
 SUPPORT_URL = "https://tjbaxter.github.io/taken/#support"
 MARKETING_URL = "https://tjbaxter.github.io/taken/"
