@@ -2,24 +2,28 @@
 
 Did I take it? Know for sure.
 
-Taken is a source of truth for a daily pill and supplement stack. Tap when taken. Look later and see it, with the exact time. No accounts, no ads, no tracking, no network. Everything stays on the iPhone.
+Taken is a source of truth for a daily pill and supplement stack. Tap when taken. Look later and see it, with the exact time. No accounts, no ads, no tracking, no network calls of its own. Everything stays on the iPhone.
 
 - One tap logs a dose from the app, the Home Screen widget, the Lock Screen, Control Center, the evening nudge or Siri.
 - Adding a stack needs no typing: quick-pick chips, a frequency, done.
 - Daily, 2x and 3x daily, alternate days, or chosen weekdays. A configurable day start keeps a 1 a.m. dose on the right day.
 - Five-week log, streak and 30-day adherence. Backfill any day from the log.
 
-The product, design and release contract is [SPEC.md](SPEC.md).
+- Taken Pro (1.1): the first dose needs nothing; logging after it needs Pro, starting with 7 days on us, then yearly, monthly or lifetime through StoreKit 2. Everyone whose first download was 1.0 keeps Pro for life. The log, history and CSV export always stay readable.
+
+The product, design and release contract is [SPEC.md](SPEC.md); how Taken makes money is [PRO.md](PRO.md).
 
 ## Layout
 
 | Path | What |
 | --- | --- |
 | `project.yml` | XcodeGen spec. The `.xcodeproj` is generated, never committed. |
-| `Shared/` | Model, day logic, store, intents, reminders. Compiled into the app and the widget extension. |
+| `Shared/` | Model, day logic, store, intents, reminders, and the Taken Pro rule, cache and copy (`Pro.swift`, `ProCopy.swift`). Compiled into the app and the widget extension. |
 | `Taken/` | The app: SwiftUI screens, Siri phrases, notification actions, fonts, assets. |
+| `Taken/Pro/` | StoreKit 2 (`ProStore`) and the paywall. StoreKit runs only in the app; the widgets, control and intents read its cached answer. |
+| `Taken/Taken.storekit` | Local StoreKit configuration (three products, the group, the introductory week), set on the scheme's Run action and never bundled. |
 | `TakenWidgets/` | Home and Lock Screen widgets and the Control Center control. |
-| `TakenTests/` | Unit tests for day rollover, frequencies, streaks, take all, undo, backfill, CSV, the store and the nudge plan. |
+| `TakenTests/` | Unit tests for day rollover, frequencies, streaks, take all, undo, backfill, CSV, the store, the nudge plan, the Taken Pro entitlement rule, the gate and the paywall copy. |
 | `scripts/` | CI helpers: Xcode selection, simulator choice, screenshots. |
 
 Data lives in one JSON file in the App Group `group.com.tombaxter.taken`, read and written through `NSFileCoordinator` so the app, widgets, intents and notification actions never overwrite each other.
@@ -28,7 +32,9 @@ Data lives in one JSON file in the App Group `group.com.tombaxter.taken`, read a
 
 `.github/workflows/ci.yml` runs on every push to `main` (docs and brand changes excluded) and on demand. On `macos-26` runners with Xcode 26 it generates the project and, in parallel: builds and runs the unit tests on an iOS 26 iPhone simulator; builds Release for a generic iOS device without signing; and captures App Store screenshots on the iPhone 17 Pro Max simulator with `-demo` data. The PNGs are in the run's `screenshots` artifact.
 
-The app accepts `-demo` (seeded stack and five weeks of history in a temporary store, never the real one) and `-screen today|today-done|add|settings|day|log` to open straight onto a state. `-screen widgets` renders the widget designs in the app for review and `-screen empty` shows first run.
+The app accepts `-demo` (seeded stack and five weeks of history in a temporary store, never the real one) and `-screen today|today-done|add|settings|day|log` to open straight onto a state. `-screen widgets` renders the widget designs in the app for review and `-screen empty` shows first run. `-screen paywall` and `-screen locked` show Taken Pro's paywall and TODAY without Pro, and `-screen widgets-locked` the read-only widgets; under `-demo` StoreKit is never called (CI has no App Store account), so the paywall shows StoreKit-shaped demo plans.
+
+To buy Taken Pro in the simulator, run from Xcode: the scheme's Run action uses `Taken/Taken.storekit`. A copy installed with `simctl` has no StoreKit configuration.
 
 ## Release to TestFlight
 
