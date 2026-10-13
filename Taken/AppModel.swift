@@ -39,6 +39,7 @@ struct Toast: Identifiable, Equatable {
 @Observable
 final class AppModel {
     let store: TakenStore
+    let pro: ProStore
     let isDemo: Bool
     let launchScreen: String?
     private let clockNow: @Sendable () -> Date
@@ -56,6 +57,8 @@ final class AppModel {
     var expandedItemID: UUID?
     /// Section the TODAY scroll view should jump to (screenshots, deep links).
     var scrollTarget: String?
+    /// The Taken Pro sheet, and which presentation level shows it.
+    var paywall: PaywallRequest?
     /// Chips pre-selected in the Add sheet for the `-demo -screen add` screenshot.
     let demoPreselect: [String]
     /// Increments each time the day locks in (ALL TAKEN) from a tap, to run the lock-in animation once.
@@ -65,8 +68,13 @@ final class AppModel {
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var ticker: Task<Void, Never>?
     @ObservationIgnored private var darwinObserver: DarwinObserver?
+    @ObservationIgnored private var introTask: Task<Void, Never>?
+    @ObservationIgnored private var introWaitsForSheet = false
+    /// What the paywall was opened for, run once Pro is on and the sheet has closed.
+    @ObservationIgnored private var afterPaywall: (@MainActor () -> Void)?
 
-    init(store: TakenStore, isDemo: Bool, launchScreen: String?, clockNow: @escaping @Sendable () -> Date) {
+    init(store: TakenStore, pro: ProStore? = nil, isDemo: Bool, launchScreen: String?,
+         clockNow: @escaping @Sendable () -> Date) {
         self.store = store
         self.isDemo = isDemo
         self.launchScreen = launchScreen
@@ -75,6 +83,7 @@ final class AppModel {
         let state = store.load()
         let now = clockNow()
         let engine = StackEngine(state: state, clock: DayClock(dayStartHour: state.settings.dayStartHour))
+        self.pro = pro ?? ProStore(ledger: .shared, hasLogged: !state.doses.isEmpty)
         self.state = state
         self.now = now
         self.engine = engine
@@ -89,6 +98,8 @@ final class AppModel {
             NudgeRoute.shared.attach { [weak self] day in
                 self?.openDay(fromNudge: day)
             }
+            self.pro.onChange = { [weak self] in self?.proDidChange() }
+            self.pro.start()
         }
     }
 
@@ -107,7 +118,9 @@ final class AppModel {
             ? StackState(settings: StackSettings(reminderEnabled: true))
             : DemoData.state(now: demoNow, allTaken: screen == "today-done")
         try? store.replace(with: seeded)
-        return AppModel(store: store, isDemo: true, launchScreen: screen, clockNow: { demoNow })
+        // Store screenshots show Taken with Pro; -screen paywall and -screen locked show it without.
+        let pro = ProStore(demoLocked: screen == "paywall" || screen == "locked", now: demoNow)
+        return AppModel(store: store, pro: pro, isDemo: true, launchScreen: screen, clockNow: { demoNow })
     }
 
     // MARK: Derived
@@ -121,6 +134,20 @@ final class AppModel {
 
     /// Items TAKE ALL logs right now: pending, and not logged in the last hour (StackEngine.repeatGuard).
     var takeAllCount: Int { engine.quickLogRows(today, now: now).count }
+
+    /// Whether a dose may be logged right now (PRO.md).
+    var access: ProAccess {
+        ProGate.access(status: pro.status, settled: pro.settled, legacyLog: pro.legacyLog,
+                       hasLogged: !state.doses.isEmpty, now: now)
+    }
+
+    /// Locked mode: the log stays readable, logging opens the paywall.
+    var isLocked: Bool { access == .locked }
+
+    /// "START 7 DAYS ON US" or "PRO ENDED · TAP TO CONTINUE".
+    var lockedBarText: String {
+        ProCopy.lockedBar(eligible: pro.introEligible, intro: pro.offers[.yearly]?.intro)
+    }
 
     func nextLabel(for row: ItemDay) -> String {
         Fmt.next(engine.nextDueDay(for: row.item, after: today.day), today: today.day)
@@ -164,10 +191,15 @@ final class AppModel {
         guard !isDemo else { return }
         let snapshot = state
         Task {
+            // Renewals, refunds and purchases made elsewhere land here (PRO.md: refresh on foreground).
+            await pro.refresh()
             await Reminders.reschedule(state: snapshot, now: Date())
             let denied = await Reminders.isDenied()
             self.notificationsDenied = denied && snapshot.settings.reminderEnabled
         }
+        consumePendingLog()
+        // A first dose logged from a widget, or an app closed before the sheet came up, still gets its one paywall.
+        if !state.doses.isEmpty && !pro.introShown { scheduleIntro() }
     }
 
     func applyLaunchScreen() async {
@@ -178,14 +210,34 @@ final class AppModel {
         case "settings": sheet = .settings
         case "day": sheet = .day(DemoData.sheetDay(now: now))
         case "log": scrollTarget = "log"
+        case "paywall": presentPaywall(origin: .intro)
         default: break
         }
     }
 
     func handle(url: URL) {
         guard url.scheme == "taken" else { return }
-        sheet = nil
         reload()
+        guard let route = ProRoute(url: url) else {
+            sheet = nil
+            return
+        }
+        // taken://pro from a locked widget: the tap it was, run once Pro is on.
+        let requestedAt = clockNow()
+        var pending: (@MainActor () -> Void)?
+        if let action = route.then {
+            pending = { [weak self] in self?.applyPending(PendingLog(action: action, at: requestedAt)) }
+        }
+        Task { [weak self, pending] in
+            guard let self else { return }
+            // A renewal may have arrived since the widget last drew.
+            await self.pro.refresh()
+            if self.access.allowsLogging {
+                pending?()
+            } else {
+                self.presentPaywall(origin: .link, pending: pending)
+            }
+        }
     }
 
     /// A tapped nudge opens on the day it was for: today's on TODAY, an earlier day's on that day's sheet.
@@ -212,12 +264,15 @@ final class AppModel {
     @discardableResult
     private func write<T>(_ body: (inout StackState) throws -> T) -> T? {
         do {
+            let hadLogged = !state.doses.isEmpty
             let result = try store.update(body)
             apply(result.state)
             if !isDemo {
                 let snapshot = result.state
                 Task { await Sync.afterWrite(snapshot) }
             }
+            // The first dose ever: the moment Taken makes sense. The paywall follows it once (PRO.md).
+            if !hadLogged && !result.state.doses.isEmpty { scheduleIntro() }
             return result.value
         } catch {
             show(Toast(message: "COULD NOT SAVE. TRY AGAIN"))
@@ -225,12 +280,123 @@ final class AppModel {
         }
     }
 
+    // MARK: Taken Pro
+
+    /// Runs `action` while logging is open; otherwise opens the paywall and runs it once Pro is on.
+    func requirePro(_ anchor: PaywallAnchor = .root, _ action: @escaping @MainActor () -> Void) {
+        switch access {
+        case .pro, .firstSession, .pending:
+            action()
+        case .locked:
+            presentPaywall(anchor: anchor, origin: .action, pending: action)
+        case .checking:
+            Task { [weak self] in
+                guard let self else { return }
+                await self.pro.settle()
+                self.requirePro(anchor, action)
+            }
+        }
+    }
+
+    func presentPaywall(anchor: PaywallAnchor = .root, origin: PaywallOrigin, pending: (@MainActor () -> Void)? = nil) {
+        guard paywall == nil else { return }
+        // Any paywall counts as the one after the first dose: it never follows a second time on its own.
+        pro.markIntroShown()
+        Task { await pro.loadOffers() }
+        let request = PaywallRequest(anchor: anchor, origin: origin, pending: pending)
+        if anchor == .root && sheet != nil {
+            // A sheet is up on TODAY: it closes first, then the paywall slides up.
+            sheet = nil
+            Task { [weak self] in
+                try? await Task.sleep(for: .milliseconds(450))
+                guard let self, self.paywall == nil else { return }
+                self.paywall = request
+            }
+        } else {
+            paywall = request
+        }
+    }
+
+    func closePaywall() {
+        paywall = nil
+    }
+
+    /// Pro just came on in the paywall: what opened it runs once the sheet has gone.
+    func paywallUnlocked() {
+        if let pending = paywall?.pending { afterPaywall = pending }
+    }
+
+    /// The paywall sheet finished closing.
+    func paywallDidDismiss() {
+        let action = afterPaywall
+        afterPaywall = nil
+        guard let action, access.allowsLogging else { return }
+        action()
+    }
+
+    /// About 1.5 s after the first dose the paywall slides up, once.
+    private func scheduleIntro(after delay: Duration = .milliseconds(1500)) {
+        guard !isDemo, !pro.introShown, introTask == nil else { return }
+        introTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard let self else { return }
+            await self.pro.settle()
+            self.introTask = nil
+            self.showIntroIfDue()
+        }
+    }
+
+    private func showIntroIfDue() {
+        guard !pro.introShown, paywall == nil, access == .locked else { return }
+        guard sheet == nil else {
+            // Never over a sheet in use: it waits for the sheet to close.
+            introWaitsForSheet = true
+            return
+        }
+        presentPaywall(origin: .intro)
+    }
+
+    /// A sheet on TODAY finished closing.
+    func rootSheetDidDismiss() {
+        guard introWaitsForSheet else { return }
+        introWaitsForSheet = false
+        scheduleIntro(after: .milliseconds(500))
+    }
+
+    /// A log a widget, the control, Siri or a nudge could not make while locked, offered now Taken is open.
+    private func consumePendingLog() {
+        guard let pending = pro.takePendingLog(maxAge: 10 * 60, now: clockNow()) else { return }
+        Task { [weak self] in
+            guard let self else { return }
+            await self.pro.refresh()
+            self.requirePro { [weak self] in self?.applyPending(pending) }
+        }
+    }
+
+    /// Logs what was asked for, at the time it was asked for.
+    private func applyPending(_ pending: PendingLog) {
+        switch pending.action {
+        case .takeAll:
+            takeAll(at: pending.at)
+        case .log(let id):
+            logIfPending(itemID: id, at: pending.at)
+        }
+    }
+
+    private func proDidChange() {
+        guard !isDemo else { return }
+        let snapshot = state
+        // Widgets, the control and the nudges follow Pro.
+        Task { await Sync.afterWrite(snapshot) }
+    }
+
     // MARK: Taking
 
     /// Tap on a row: pending logs a dose, taken shows the detail. Never un-takes.
     func tap(_ row: ItemDay) {
         if row.isPending || (!row.isDue && row.doses.isEmpty) {
-            log(row.item)
+            let item = row.item
+            requirePro { [weak self] in self?.log(item) }
         } else {
             Haptics.soft(hapticsOn)
             withAnimation(.snappy(duration: 0.22)) {
@@ -239,8 +405,8 @@ final class AppModel {
         }
     }
 
-    func log(_ item: Item) {
-        let at = clockNow()
+    func log(_ item: Item, at time: Date? = nil) {
+        let at = time ?? clockNow()
         let wasLocked = today.allTaken
         let zone = clock.calendar.timeZone
         guard let dose = write({ $0.logDose(itemId: item.id, at: at, timeZone: zone) }) ?? nil else { return }
@@ -249,8 +415,19 @@ final class AppModel {
         announce("\(item.name) taken at \(Fmt.spoken(at)).")
     }
 
-    func takeAll() {
-        let at = clockNow()
+    /// A widget row asked for this item: logs only while a dose is still pending, never twice in the hour.
+    private func logIfPending(itemID: UUID, at: Date) {
+        let wasLocked = today.allTaken
+        let clock = self.clock
+        guard let dose = write({ $0.logNextDoseIfPending(itemId: itemID, now: at, clock: clock) }) ?? nil,
+              let item = state.item(dose.itemId) else { return }
+        afterTake(wasLocked: wasLocked)
+        show(Toast(message: "\(item.code) TAKEN \(Fmt.clock(at, clock))", undo: .remove([dose.id])))
+        announce("\(item.name) taken at \(Fmt.spoken(at)).")
+    }
+
+    func takeAll(at time: Date? = nil) {
+        let at = time ?? clockNow()
         let wasLocked = today.allTaken
         let clock = self.clock
         guard let logged = write({ $0.takeAllPending(now: at, clock: clock) }), !logged.isEmpty else { return }

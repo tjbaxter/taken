@@ -21,22 +21,35 @@ struct StackProvider: TimelineProvider {
         if context.isPreview && state.items.isEmpty {
             completion(StackEntry(date: now, snapshot: .demo(now: now)))
         } else {
-            completion(StackEntry(date: now, snapshot: WidgetSnapshot(state: state, now: now)))
+            let ledger = ProLedgerStore.shared.load()
+            completion(StackEntry(date: now, snapshot: Self.snapshot(state: state, ledger: ledger, at: now)))
         }
     }
 
     func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<StackEntry>) -> Void) {
         let now = Date()
         let state = TakenStore.shared.load()
+        let ledger = ProLedgerStore.shared.load()
         let rollover = DayClock(dayStartHour: state.settings.dayStartHour).nextRollover(after: now)
-        let current = WidgetSnapshot(state: state, now: now)
+        let current = Self.snapshot(state: state, ledger: ledger, at: now)
         var entries = [StackEntry(date: now, snapshot: current)]
         // An item logged in the last hour turns tappable again once the repeat guard is over.
         if let ready = current.nextReady, ready > now, ready < rollover {
-            entries.append(StackEntry(date: ready, snapshot: WidgetSnapshot(state: state, now: ready)))
+            entries.append(StackEntry(date: ready, snapshot: Self.snapshot(state: state, ledger: ledger, at: ready)))
         }
-        entries.append(StackEntry(date: rollover, snapshot: WidgetSnapshot(state: state, now: rollover)))
+        // Cached Pro that runs out before the day does: the widget turns read-only at that moment.
+        if !current.locked, let end = ledger?.status?.expiresAt, end > now, end < rollover {
+            entries.append(StackEntry(date: end, snapshot: Self.snapshot(state: state, ledger: ledger, at: end)))
+        }
+        entries.append(StackEntry(date: rollover, snapshot: Self.snapshot(state: state, ledger: ledger, at: rollover)))
+        entries.sort { $0.date < $1.date }
         completion(Timeline(entries: entries, policy: .after(rollover)))
+    }
+
+    /// The widget's view of the stack at a moment, locked when logging needs Taken Pro (PRO.md).
+    static func snapshot(state: StackState, ledger: ProLedger?, at date: Date) -> WidgetSnapshot {
+        let locked = !ProGate.access(ledger: ledger, state: state, now: date).allowsLogging
+        return WidgetSnapshot(state: state, now: date, locked: locked)
     }
 }
 
@@ -65,7 +78,7 @@ struct StackWidgetView: View {
 
     var body: some View {
         content
-            .widgetURL(URL(string: "taken://today"))
+            .widgetURL(entry.snapshot.url)
     }
 
     @ViewBuilder

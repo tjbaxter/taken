@@ -52,6 +52,7 @@ enum FrequencyChoice: String, CaseIterable, Identifiable, Sendable {
 struct AddSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.paywallAnchor) private var paywallAnchor
 
     @State private var selected: [String] = []
     @State private var choice: FrequencyChoice = .daily
@@ -221,8 +222,12 @@ struct AddSheet: View {
             drafts.append(ItemDraft(name: customTrimmed, code: nil, frequency: frequency))
         }
         guard !drafts.isEmpty else { return }
-        model.addItems(drafts)
-        dismiss()
+        let dismiss = self.dismiss
+        // Adding needs no Pro until the first dose; in locked mode it opens the paywall over this sheet.
+        model.requirePro(paywallAnchor) { [weak model = model] in
+            model?.addItems(drafts)
+            dismiss()
+        }
     }
 }
 

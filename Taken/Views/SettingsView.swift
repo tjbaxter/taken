@@ -1,3 +1,4 @@
+import StoreKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -5,17 +6,23 @@ struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
+    @Environment(\.paywallAnchor) private var paywallAnchor
 
     @State private var editMode: EditMode = .inactive
     @State private var pendingDelete: Item?
     @State private var confirmErase = false
     @State private var showAdd = false
+    @State private var redeeming = false
+    @State private var managing = false
+    @State private var restoring = false
+    @State private var proNote: String?
 
     init() {}
 
     var body: some View {
         NavigationStack {
             List {
+                proSection
                 stackSection
                 reminderSection
                 dayStartSection
@@ -53,8 +60,17 @@ struct SettingsView: View {
             }
             .sheet(isPresented: $showAdd) {
                 AddSheet()
+                    .paywallHost(.nested)
                     .environment(model)
                     .preferredColorScheme(.dark)
+            }
+            .offerCodeRedemption(isPresented: $redeeming) { _ in
+                Task { await model.pro.refresh() }
+            }
+            .manageSubscriptionsSheet(isPresented: $managing)
+            .onChange(of: managing) { _, open in
+                // A plan changed or cancelled in Apple's sheet shows here at once.
+                if !open { Task { await model.pro.refresh() } }
             }
             .confirmationDialog(
                 "Delete \(pendingDelete?.name ?? "item")?",
@@ -84,6 +100,104 @@ struct SettingsView: View {
 
     // MARK: Sections
 
+    private var proActive: Bool { model.pro.isActive(at: model.now) }
+
+    private var proStatusLine: String {
+        if model.pro.status == nil && !model.pro.settled { return "CHECKING" }
+        return ProCopy.statusLine(model.pro.status, now: model.now)
+    }
+
+    /// Manage subscription matters to subscribers and to anyone without Pro (an ended plan restarts there).
+    private var showsManage: Bool {
+        guard proActive, let reason = model.pro.status?.reason else { return true }
+        return reason == .trial || reason == .yearly || reason == .monthly
+    }
+
+    private var proSection: some View {
+        Section {
+            HStack(spacing: 10) {
+                Lamp(on: proActive)
+                Text(proStatusLine)
+                    .hud(12, proActive ? Palette.signal : Palette.fg, tracking: 0.1)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+            }
+            .frame(minHeight: 44)
+            .settingsRow()
+            .accessibilityElement(children: .combine)
+
+            if !proActive {
+                Button {
+                    model.presentPaywall(anchor: paywallAnchor, origin: .settings)
+                } label: {
+                    SettingsLinkRow(title: "SEE PLANS", symbol: "arrow.right")
+                }
+                .settingsRow()
+            }
+
+            Button {
+                restore()
+            } label: {
+                SettingsLinkRow(title: restoring ? "RESTORING" : "RESTORE PURCHASES", symbol: "arrow.clockwise")
+            }
+            .disabled(restoring)
+            .settingsRow()
+
+            Button {
+                redeeming = true
+            } label: {
+                SettingsLinkRow(title: "REDEEM CODE", symbol: "ticket")
+            }
+            .settingsRow()
+
+            if showsManage {
+                Button {
+                    managing = true
+                } label: {
+                    SettingsLinkRow(title: "MANAGE SUBSCRIPTION", symbol: "arrow.up.right")
+                }
+                .settingsRow()
+            }
+
+            Link(destination: ProCopy.termsOfUseURL) {
+                SettingsLinkRow(title: "TERMS OF USE", symbol: "arrow.up.right")
+            }
+            .settingsRow()
+            Link(destination: ProCopy.privacyURL) {
+                SettingsLinkRow(title: "PRIVACY POLICY", symbol: "arrow.up.right")
+            }
+            .settingsRow()
+
+            if let proNote {
+                Text(proNote)
+                    .font(.sans(14))
+                    .foregroundStyle(Palette.fgSubtle)
+                    .settingsRow()
+            }
+        } header: {
+            SettingsHeader(index: "01", title: "PRO") { EmptyView() }
+        }
+    }
+
+    private func restore() {
+        restoring = true
+        proNote = nil
+        Task {
+            let outcome = await model.pro.restore()
+            restoring = false
+            switch outcome {
+            case .restored:
+                proNote = "Restored. Taken Pro is on."
+            case .nothing:
+                proNote = "No Taken Pro purchase on this Apple Account yet."
+            case .cancelled:
+                proNote = nil
+            case .failed(let text):
+                proNote = text
+            }
+        }
+    }
+
     private var stackSection: some View {
         Section {
             if model.activeItems.isEmpty {
@@ -109,7 +223,8 @@ struct SettingsView: View {
             .deleteDisabled(true)
 
             Button {
-                showAdd = true
+                let show = $showAdd
+                model.requirePro(paywallAnchor) { show.wrappedValue = true }
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
@@ -129,7 +244,7 @@ struct SettingsView: View {
                 .settingsRow()
             }
         } header: {
-            SettingsHeader(index: "01", title: "STACK") {
+            SettingsHeader(index: "02", title: "STACK") {
                 if model.activeItems.count > 1 {
                     Button {
                         withAnimation { editMode = editMode.isEditing ? .inactive : .active }
@@ -181,7 +296,7 @@ struct SettingsView: View {
                 .settingsRow()
             }
         } header: {
-            SettingsHeader(index: "02", title: "REMINDER") { EmptyView() }
+            SettingsHeader(index: "03", title: "REMINDER") { EmptyView() }
         }
     }
 
@@ -218,7 +333,7 @@ struct SettingsView: View {
                 .foregroundStyle(Palette.fgSubtle)
                 .settingsRow()
         } header: {
-            SettingsHeader(index: "03", title: "DAY") { EmptyView() }
+            SettingsHeader(index: "04", title: "DAY") { EmptyView() }
         }
     }
 
@@ -229,7 +344,7 @@ struct SettingsView: View {
             }
             .settingsRow()
         } header: {
-            SettingsHeader(index: "04", title: "FEEL") { EmptyView() }
+            SettingsHeader(index: "05", title: "FEEL") { EmptyView() }
         }
     }
 
@@ -250,7 +365,7 @@ struct SettingsView: View {
             }
             .settingsRow()
         } header: {
-            SettingsHeader(index: "05", title: "DATA") { EmptyView() }
+            SettingsHeader(index: "06", title: "DATA") { EmptyView() }
         }
     }
 
@@ -268,16 +383,12 @@ struct SettingsView: View {
             }
             .frame(minHeight: 44)
             .settingsRow()
-            Link(destination: URL(string: "https://tjbaxter.github.io/taken/privacy.html")!) {
-                SettingsLinkRow(title: "PRIVACY POLICY", symbol: "arrow.up.right")
-            }
-            .settingsRow()
             Link(destination: URL(string: "https://tjbaxter.github.io/taken/")!) {
                 SettingsLinkRow(title: "SUPPORT", symbol: "arrow.up.right")
             }
             .settingsRow()
         } header: {
-            SettingsHeader(index: "06", title: "ABOUT") { EmptyView() }
+            SettingsHeader(index: "07", title: "ABOUT") { EmptyView() }
         } footer: {
             Text("TAKEN \(AppInfo.versionLine)")
                 .hudFixed(9.5, Palette.fgFaint)

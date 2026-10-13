@@ -85,6 +85,32 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "Taken $version ($build)"
 
+      - name: Founding member cutoff
+        env:
+          BUILD_NUMBER: ${{ steps.version.outputs.build }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # A first download of build <= FoundingMember.maxBuild keeps Taken Pro for life (Shared/Pro.swift), so a
+          # 1.1+ build numbered inside that range would hand Pro to every new customer.
+          set -euo pipefail
+          max_build="$(sed -n 's/.*static let maxBuild = \([0-9][0-9]*\).*/\1/p' Shared/Pro.swift | head -n 1)"
+          if [ -z "$max_build" ]; then
+            echo "::error::FoundingMember.maxBuild not found in Shared/Pro.swift"
+            exit 1
+          fi
+          case "$VERSION" in
+            1.0|1.0.*)
+              echo "1.0.x build $BUILD_NUMBER. Founding members are first downloads of builds 1 to $max_build."
+              ;;
+            *)
+              if [ "$BUILD_NUMBER" -le "$max_build" ]; then
+                echo "::error::Build $BUILD_NUMBER of $VERSION is not above FoundingMember.maxBuild ($max_build). Raise build_offset."
+                exit 1
+              fi
+              echo "Build $BUILD_NUMBER is above the founding cutoff ($max_build)."
+              ;;
+          esac
+
       - name: Select Xcode 26
         run: scripts/select-xcode.sh
 

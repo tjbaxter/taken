@@ -6,6 +6,8 @@ struct RootView: View {
     var body: some View {
         if model.isDemo && model.launchScreen == "widgets" {
             WidgetGallery()
+        } else if model.isDemo && model.launchScreen == "widgets-locked" {
+            WidgetGallery(locked: true)
         } else {
             main
         }
@@ -13,8 +15,10 @@ struct RootView: View {
 
     private var main: some View {
         TodayView()
-            .sheet(item: sheetBinding) { route in
+            .paywallHost(.root)
+            .sheet(item: sheetBinding, onDismiss: { model.rootSheetDidDismiss() }) { route in
                 sheetContent(route)
+                    .paywallHost(.sheet)
                     .environment(model)
                     .preferredColorScheme(.dark)
             }
@@ -83,6 +87,13 @@ struct TodayView: View {
                       trailingColor: today.allTaken ? Palette.signal : Palette.fgSubtle)
         StatusPanel(summary: today, now: model.now, clock: model.clock, lockInCount: model.lockInCount,
                     streak: model.streak)
+        if model.isLocked {
+            LockedBar(text: model.lockedBarText) {
+                model.presentPaywall(origin: .bar)
+            }
+            .padding(.top, 12)
+            .transition(.opacity)
+        }
 
         SectionHeader(index: "02", title: "STACK", trailing: Fmt.stackProgress(today))
         if today.due.isEmpty {
@@ -144,7 +155,7 @@ struct TodayView: View {
         if !row.doses.isEmpty {
             Button("Undo last dose") { model.undoLastDose(row.item) }
         }
-        Button("Set time") { model.sheet = .setTime(row.item.id) }
+        Button("Set time") { openSetTime(row.item.id) }
         Button("Edit item") { model.sheet = .editItem(row.item.id) }
     }
 
@@ -157,7 +168,7 @@ struct TodayView: View {
         }
         .disabled(row.doses.isEmpty)
         Button {
-            model.sheet = .setTime(row.item.id)
+            openSetTime(row.item.id)
         } label: {
             Label("Set time\u{2026}", systemImage: "clock")
         }
@@ -166,6 +177,11 @@ struct TodayView: View {
         } label: {
             Label("Edit item", systemImage: "slider.horizontal.3")
         }
+    }
+
+    /// Set time logs or moves a dose, so in locked mode it opens the paywall instead.
+    private func openSetTime(_ id: UUID) {
+        model.requirePro { [weak model = model] in model?.sheet = .setTime(id) }
     }
 }
 
@@ -221,11 +237,11 @@ struct BottomDock: View {
                     .accessibilityAction(named: "Dismiss") { model.dismissToast() }
             }
             if showTakeAll {
-                PrimaryButton(title: "TAKE ALL (\(pending))", lamp: true) {
-                    model.takeAll()
+                PrimaryButton(title: "TAKE ALL (\(pending))", lamp: true, locked: model.isLocked) {
+                    model.requirePro { [weak model = model] in model?.takeAll() }
                 }
                 .transition(.opacity)
-                .accessibilityHint("Marks every pending dose taken now.")
+                .accessibilityHint(model.isLocked ? "Opens Taken Pro." : "Marks every pending dose taken now.")
             }
         }
         .padding(.horizontal, 20)
@@ -241,6 +257,38 @@ struct BottomDock: View {
         }
         .animation(.snappy(duration: 0.22), value: showTakeAll)
         .animation(.snappy(duration: 0.22), value: model.toast)
+    }
+}
+
+/// Locked mode: the slim bar under the status panel. The log stays readable; a tap opens Taken Pro.
+struct LockedBar: View {
+    let text: String
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 10) {
+                Image(systemName: "lock.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Palette.signal)
+                Text(text)
+                    .hudFixed(11, Palette.fg, face: .monoSemibold, tracking: 0.14)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.75)
+                Spacer(minLength: 8)
+                Image(systemName: "arrow.right")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(Palette.fgMuted)
+            }
+            .padding(.horizontal, 14)
+            .frame(maxWidth: .infinity, minHeight: 44)
+            .background(Palette.signalWash.opacity(0.55), in: RoundedRectangle(cornerRadius: 4))
+            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.signalEdge, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Logging needs Taken Pro. \(text.capitalized).")
+        .accessibilityHint("Opens Taken Pro.")
     }
 }
 
@@ -289,8 +337,8 @@ struct EmptyStackView: View {
                     .padding(.top, 12)
                 Text("NOTHING IN YOUR STACK")
                     .hud(13, Palette.fgMuted, tracking: 0.16)
-                PrimaryButton(title: "ADD TO STACK", lamp: true) {
-                    model.sheet = .add
+                PrimaryButton(title: "ADD TO STACK", lamp: true, locked: model.isLocked) {
+                    model.requirePro { [weak model = model] in model?.sheet = .add }
                 }
             }
             .padding(24)

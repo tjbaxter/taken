@@ -47,9 +47,16 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
         let action = response.actionIdentifier
         let now = Date()
         if action == Reminders.takeAllActionID {
+            let state = TakenStore.shared.load()
             // A nudge left over from an earlier day never logs today's doses.
-            guard Reminders.isCurrent(nudgeDay: day, state: TakenStore.shared.load(), now: now) else {
+            guard Reminders.isCurrent(nudgeDay: day, state: state, now: now) else {
                 if let day { await Reminders.explainStale(day: day) }
+                return
+            }
+            // Logging needs Taken Pro: nothing is written, and Taken offers this TAKE ALL when it next opens.
+            guard ProGate.access(ledger: ProLedgerStore.shared.load(), state: state, now: now).allowsLogging else {
+                ProLedgerStore.shared.recordPending(.takeAll, at: now)
+                await Reminders.explainLocked()
                 return
             }
             let result = try? TakenStore.shared.update { state -> [Dose] in

@@ -7,13 +7,18 @@ enum Sync {
 
     /// Refresh widgets and the Control Center control, tell other processes, reschedule the nudge.
     static func afterWrite(_ state: StackState) async {
+        await reloadSurfaces()
+        await Reminders.reschedule(state: state, now: Date())
+    }
+
+    /// Redraw the widgets and the Control Center control (after a write, or when Taken Pro changes).
+    static func reloadSurfaces() async {
         await MainActor.run {
             WidgetCenter.shared.reloadAllTimelines()
             if #available(iOS 18.0, *) {
                 ControlCenter.shared.reloadAllControls()
             }
         }
-        await Reminders.reschedule(state: state, now: Date())
     }
 
     static func postDarwinNotification() {

@@ -13,6 +13,13 @@ struct TakeAllIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let now = Date()
         let store = TakenStore.shared
+        // Logging needs Taken Pro (PRO.md). Without it nothing is written; the tap is kept and Taken offers it
+        // with the paywall when it next opens.
+        guard ProGate.access(ledger: ProLedgerStore.shared.load(), state: store.load(), now: now).allowsLogging else {
+            ProLedgerStore.shared.recordPending(.takeAll, at: now)
+            await Sync.reloadSurfaces()
+            return .result(dialog: "\(ProCopy.lockedDialog)")
+        }
         do {
             let result = try store.update { state -> [Dose] in
                 let clock = DayClock(dayStartHour: state.settings.dayStartHour)
@@ -62,6 +69,11 @@ struct LogItemIntent: AppIntent {
     func perform() async throws -> some IntentResult & ProvidesDialog {
         let now = Date()
         let itemID = item.id
+        guard ProGate.access(ledger: ProLedgerStore.shared.load(), state: TakenStore.shared.load(), now: now).allowsLogging else {
+            ProLedgerStore.shared.recordPending(.log(itemID), at: now)
+            await Sync.reloadSurfaces()
+            return .result(dialog: "\(ProCopy.lockedDialog)")
+        }
         do {
             let result = try TakenStore.shared.update { state in
                 state.logActiveDose(itemId: itemID, at: now)
@@ -98,6 +110,11 @@ struct LogNextDoseIntent: AppIntent {
     func perform() async throws -> some IntentResult {
         guard let id = UUID(uuidString: itemID) else { return .result() }
         let now = Date()
+        // A widget drawn before Pro ran out: log nothing and redraw it read-only, where a tap opens the paywall.
+        guard ProGate.access(ledger: ProLedgerStore.shared.load(), state: TakenStore.shared.load(), now: now).allowsLogging else {
+            await Sync.reloadSurfaces()
+            return .result()
+        }
         if let result = try? TakenStore.shared.update({ state in
             state.logNextDoseIfPending(itemId: id, now: now, clock: DayClock(dayStartHour: state.settings.dayStartHour))
         }) {

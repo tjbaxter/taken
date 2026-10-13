@@ -42,13 +42,18 @@ struct Lamp: View {
 struct PrimaryButton: View {
     let title: String
     var lamp: Bool = false
+    /// Locked mode: a small lock where the lamp sits, because the tap opens Taken Pro.
+    var locked: Bool = false
     var enabled: Bool = true
     let action: () -> Void
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
-                if lamp {
+                if locked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                } else if lamp {
                     Rectangle().fill(Palette.signal).frame(width: 7, height: 7)
                 }
                 Text(title)

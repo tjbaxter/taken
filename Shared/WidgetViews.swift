@@ -31,10 +31,15 @@ struct WidgetSnapshot: Sendable {
     let clock: DayClock
     /// When a pending item held back by the repeat guard can be tapped again, for the timeline.
     let nextReady: Date?
+    /// Logging needs Taken Pro: the stack shows read-only with a small PRO glyph, and a tap opens the paywall.
+    let locked: Bool
 
     var allTaken: Bool { dueDoses > 0 && takenDue >= dueDoses }
 
-    init(state: StackState, now: Date, timeZone: TimeZone = .autoupdatingCurrent) {
+    /// Where a tap on the widget goes: TODAY, or the paywall when locked.
+    var url: URL { locked ? ProRoute().url : URL(string: "taken://today")! }
+
+    init(state: StackState, now: Date, timeZone: TimeZone = .autoupdatingCurrent, locked: Bool = false) {
         let clock = DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone)
         let engine = StackEngine(state: state, clock: clock)
         let summary = engine.todaySummary(now: now)
@@ -53,6 +58,7 @@ struct WidgetSnapshot: Sendable {
         rows = all.filter { !$0.done } + all.filter { $0.done }
         lastDose = summary.lastDose?.takenAt
         hasStack = !summary.isEmpty
+        self.locked = locked && !summary.isEmpty
     }
 
     static func demo(now: Date) -> WidgetSnapshot {
@@ -73,7 +79,28 @@ private struct WidgetHeader: View {
             Text("TAKEN")
                 .hudFixed(10, Palette.fg, face: .monoSemibold, tracking: 0.24)
             Spacer(minLength: 0)
+            if snapshot.locked { ProLockGlyph() }
         }
+    }
+}
+
+/// The small PRO lock glyph on a locked widget.
+struct ProLockGlyph: View {
+    var body: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "lock.fill")
+                .font(.system(size: 7, weight: .bold))
+            Text("PRO")
+                .font(.monoFixed(8.5, .monoSemibold))
+                .tracking(8.5 * 0.14)
+        }
+        .foregroundStyle(Palette.signal)
+        .padding(.horizontal, 5)
+        .frame(height: 15)
+        .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Palette.signalEdge, lineWidth: 1))
+        .widgetAccentable()
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("Logging needs Taken Pro")
     }
 }
 
@@ -171,10 +198,11 @@ private struct TakeAllWidgetButton: View {
 /// The small widget's bottom line when there is no TAKE ALL to show.
 private struct StatusLine: View {
     let text: String
+    var lit: Bool = true
 
     var body: some View {
         HStack(spacing: 6) {
-            Rectangle().fill(Palette.signal).frame(width: 5, height: 5).widgetAccentable()
+            Rectangle().fill(lit ? Palette.signal : Palette.fgFaint).frame(width: 5, height: 5).widgetAccentable()
             Text(text)
                 .hudFixed(9.5, Palette.fgMuted, tracking: 0.12)
         }
@@ -222,7 +250,10 @@ struct SmallStackView: View {
                 Spacer(minLength: 6)
                 MiniBar(total: snapshot.dueDoses, lit: snapshot.takenDue)
                     .padding(.bottom, 10)
-                if snapshot.readyItems > 0 {
+                if snapshot.locked {
+                    // Read-only: the tap opens Taken Pro (the widget's URL), never logs.
+                    StatusLine(text: "\(snapshot.pendingItems) PENDING", lit: false)
+                } else if snapshot.readyItems > 0 {
                     TakeAllWidgetButton(pending: snapshot.readyItems)
                 } else if snapshot.pendingItems > 0 {
                     // Logged in the last hour, its next dose still to come: a second tap here would log
@@ -256,7 +287,7 @@ struct MediumStackView: View {
                                 .stroke(Palette.lineDash, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                                 .frame(height: 1)
                         }
-                        MediumRow(row: row, clock: snapshot.clock)
+                        MediumRow(row: row, clock: snapshot.clock, locked: snapshot.locked)
                     }
                     if snapshot.rows.count > 4 {
                         Text("+\(snapshot.rows.count - 4) MORE")
@@ -273,9 +304,13 @@ struct MediumStackView: View {
 private struct MediumRow: View {
     let row: WidgetRow
     let clock: DayClock
+    let locked: Bool
 
     var body: some View {
-        if row.done || !row.ready {
+        if locked && !row.done {
+            // Locked: the row opens Taken Pro, and the dose it asked for is logged once Pro is on.
+            Link(destination: ProRoute(then: .log(row.id)).url) { label }
+        } else if row.done || !row.ready {
             label
         } else {
             Button(intent: LogNextDoseIntent(itemID: row.id)) { label }
@@ -302,7 +337,7 @@ private struct MediumRow: View {
                     .foregroundStyle(Palette.signal)
                     .widgetAccentable()
             } else {
-                Text(row.ready ? "TAP" : "--:--")
+                Text(row.ready && !locked ? "TAP" : "--:--")
                     .hudFixed(9, Palette.fgFaint, tracking: 0.14)
             }
         }
@@ -344,6 +379,19 @@ struct CircularStackView: View {
                 }
             }
             .accessibilityLabel("All taken")
+        } else if snapshot.locked {
+            ZStack {
+                AccessoryWidgetBackground()
+                VStack(spacing: 1) {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 10, weight: .semibold))
+                        .widgetAccentable()
+                    Text("\(snapshot.takenDue)/\(snapshot.dueDoses)")
+                        .font(.monoFixed(13, .monoSemibold))
+                }
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel("\(snapshot.takenDue) of \(snapshot.dueDoses) taken. Logging needs Taken Pro.")
         } else if snapshot.readyItems > 0 {
             Button(intent: TakeAllIntent()) { gauge }
                 .buttonStyle(.plain)
@@ -376,7 +424,7 @@ struct RectangularStackView: View {
                 Text("Add your stack in the app.").font(.custom(Face.sans.rawValue, fixedSize: 12))
             }
             .frame(maxWidth: .infinity, alignment: .leading)
-        } else if snapshot.readyItems == 0 {
+        } else if snapshot.readyItems == 0 || snapshot.locked {
             content
         } else {
             Button(intent: TakeAllIntent()) { content }
@@ -391,6 +439,15 @@ struct RectangularStackView: View {
                     .font(.monoFixed(13, .monoSemibold))
                     .widgetAccentable()
                 Spacer(minLength: 0)
+                if snapshot.locked {
+                    HStack(spacing: 2) {
+                        Image(systemName: "lock.fill").font(.system(size: 9, weight: .semibold))
+                        Text("PRO").font(.monoFixed(10, .monoSemibold))
+                    }
+                    .widgetAccentable()
+                    .accessibilityElement(children: .ignore)
+                    .accessibilityLabel("Logging needs Taken Pro")
+                }
             }
             ForEach(snapshot.rows.prefix(3)) { row in
                 HStack(spacing: 5) {
@@ -423,6 +480,8 @@ struct InlineStackView: View {
             Text("TAKEN \u{00B7} ADD YOUR STACK")
         } else if snapshot.allTaken {
             Text(snapshot.lastDose.map { "ALL TAKEN \(Fmt.clock($0, snapshot.clock))" } ?? "ALL TAKEN")
+        } else if snapshot.locked {
+            Label("\(snapshot.takenDue)/\(snapshot.dueDoses) TAKEN \u{00B7} PRO", systemImage: "lock.fill")
         } else {
             Text("\(snapshot.takenDue)/\(snapshot.dueDoses) TAKEN")
         }

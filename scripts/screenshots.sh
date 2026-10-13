@@ -77,6 +77,11 @@ shoot 05-day day
 shoot 06-log log
 shoot 07-widgets widgets
 shoot 08-empty empty
+# Taken Pro (PRO.md): the paywall (yearly selected, introductory week available) and TODAY locked without Pro.
+# CI has no App Store account, so under -demo the paywall shows StoreKit-shaped plans instead of loading products.
+shoot 09-paywall paywall
+shoot 10-locked locked
+shoot 11-widgets-locked widgets-locked
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
 ls -la "$out"

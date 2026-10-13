@@ -4,6 +4,7 @@ import SwiftUI
 struct DaySheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.paywallAnchor) private var paywallAnchor
 
     let day: DayKey
 
@@ -36,7 +37,7 @@ struct DaySheet: View {
                                     if index > 0 { DashedRule().padding(.horizontal, 14) }
                                     DayItemRow(row: row, clock: model.clock, isToday: isToday,
                                                logLabel: Fmt.minutes(logMinutes), canLog: !future,
-                                               onLog: { model.logDose(row.item, on: day, minutes: logMinutes) },
+                                               onLog: { backfill(row.item) },
                                                onRemove: { removing = $0 })
                                 }
                             }
@@ -74,6 +75,15 @@ struct DaySheet: View {
     }
 
     private var isToday: Bool { day == model.today.day }
+
+    /// Backfill logs a dose, so in locked mode it opens the paywall over this sheet; the log stays readable.
+    private func backfill(_ item: Item) {
+        let minutes = logMinutes
+        let day = self.day
+        model.requirePro(paywallAnchor) { [weak model = model] in
+            model?.logDose(item, on: day, minutes: minutes)
+        }
+    }
 
     /// The chosen time on this day has not come yet, so it cannot be logged.
     private var isFuture: Bool {
@@ -203,6 +213,7 @@ private struct DayItemRow: View {
 struct SetTimeSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.paywallAnchor) private var paywallAnchor
 
     let item: Item
     @State private var time = Date()
@@ -242,8 +253,12 @@ struct SetTimeSheet: View {
                 .padding(.top, 8)
             PrimaryButton(title: buttonTitle, enabled: !isFuture) {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: time)
-                model.setTime(item, hour: c.hour ?? 0, minute: c.minute ?? 0)
-                dismiss()
+                let item = self.item
+                let dismiss = self.dismiss
+                model.requirePro(paywallAnchor) { [weak model = model] in
+                    model?.setTime(item, hour: c.hour ?? 0, minute: c.minute ?? 0)
+                    dismiss()
+                }
             }
             .padding(.horizontal, 20)
             .padding(.top, 8)

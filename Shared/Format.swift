@@ -47,6 +47,16 @@ enum Fmt {
 
     static func weekdayShort(_ day: DayKey) -> String { weekdays[day.mondayIndex] }
 
+    /// "19 OCT", or "12 OCT 2027" with the year, for a moment in a time zone.
+    static func shortDate(_ date: Date, year: Bool, timeZone: TimeZone = .current) -> String {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        let month = months[max(0, min(11, (c.month ?? 1) - 1))]
+        let dayMonth = "\(c.day ?? 1) \(month)"
+        return year ? "\(dayMonth) \(c.year ?? 1970)" : dayMonth
+    }
+
     /// "DAILY", "2X DAILY", "ALT DAYS", "MON WED FRI".
     static func frequency(_ frequency: Frequency) -> String {
         switch frequency {

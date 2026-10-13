@@ -10,6 +10,8 @@ enum Reminders {
     static let requestPrefix = "taken.nudge.day."
     /// The one-off note that a TAKE ALL on an earlier day's nudge logged nothing.
     static let staleIdentifier = "taken.nudge.stale"
+    /// The one-off note that a nudge's TAKE ALL logged nothing because logging needs Taken Pro.
+    static let lockedIdentifier = "taken.pro.locked"
     /// userInfo key holding the logical day (DayKey ordinal) a nudge is for.
     static let dayKey = "day"
     static let horizonDays = 14
@@ -22,9 +24,10 @@ enum Reminders {
         let body: String
     }
 
-    /// Pure planning, unit tested: which nudges should exist right now.
-    static func plan(state: StackState, now: Date, timeZone: TimeZone = .current) -> [Plan] {
-        guard state.settings.reminderEnabled, !state.items.isEmpty else { return [] }
+    /// Pure planning, unit tested: which nudges should exist right now. Without Taken Pro there are none, and a
+    /// plan set not to renew is nudged only until it ends (PRO.md).
+    static func plan(state: StackState, now: Date, timeZone: TimeZone = .current, window: NudgeWindow = .open) -> [Plan] {
+        guard window != .closed, state.settings.reminderEnabled, !state.items.isEmpty else { return [] }
         let clock = DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone)
         let engine = StackEngine(state: state, clock: clock)
         let today = clock.day(for: now)
@@ -35,6 +38,7 @@ enum Reminders {
             let day = today.adding(offset)
             let fire = clock.date(on: day, hour: hour, minute: minute)
             guard fire > now else { continue }
+            if case .until(let end) = window, fire >= end { break }
             let summary = offset == 0 ? engine.todaySummary(now: now) : engine.summary(for: day)
             let pending = summary.items.filter { $0.isPending && !$0.item.archived }
             guard !pending.isEmpty else { continue }
@@ -70,7 +74,9 @@ enum Reminders {
         let today = clock.day(for: now)
         let todayDone = StackEngine(state: state, clock: clock).todaySummary(now: now).pendingItems.isEmpty
         return identifiers.filter { identifier in
-            guard let day = nudgeDay(identifier: identifier) else { return identifier == staleIdentifier }
+            guard let day = nudgeDay(identifier: identifier) else {
+                return identifier == staleIdentifier || identifier == lockedIdentifier
+            }
             return day < today || (day == today && todayDone)
         }
     }
@@ -124,7 +130,9 @@ enum Reminders {
         let stale = staleDelivered(delivered, state: state, now: now)
         if !stale.isEmpty { center.removeDeliveredNotifications(withIdentifiers: stale) }
 
-        let plans = plan(state: state, now: now)
+        let ledger = ProLedgerStore.shared.load()
+        let window = ProGate.nudgeWindow(access: ProGate.access(ledger: ledger, state: state, now: now), status: ledger?.status)
+        let plans = plan(state: state, now: now, window: window)
         guard !plans.isEmpty, await isAuthorized() else { return }
 
         for plan in plans {
@@ -138,6 +146,17 @@ enum Reminders {
             let request = UNNotificationRequest(identifier: plan.identifier, content: content, trigger: trigger)
             try? await center.add(request)
         }
+    }
+
+    /// TAKE ALL on a nudge logs nothing while logging needs Taken Pro. Say so; a tap opens Taken, which offers the
+    /// same TAKE ALL with the paywall.
+    static func explainLocked() async {
+        guard await isAuthorized() else { return }
+        let content = UNMutableNotificationContent()
+        content.body = ProCopy.lockedDialog
+        content.threadIdentifier = "taken.nudge"
+        let request = UNNotificationRequest(identifier: lockedIdentifier, content: content, trigger: nil)
+        try? await UNUserNotificationCenter.current().add(request)
     }
 
     /// TAKE ALL on an earlier day's nudge logs nothing. Say so quietly, and let a tap open that day.
