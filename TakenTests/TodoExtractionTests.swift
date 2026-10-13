@@ -149,6 +149,26 @@ final class TodoExtractionTests: XCTestCase {
         XCTAssertFalse(route.takePendingRecording(now: Date(timeIntervalSince1970: 111)), "taken once")
         route.requestRecording(at: Date(timeIntervalSince1970: 100))
         XCTAssertFalse(route.takePendingRecording(now: Date(timeIntervalSince1970: 400)), "a stale request never opens the mic")
+
+        let links = TodoCaptureRoute()
+        XCTAssertFalse(links.handle(url: ProRoute().url), "the paywall's link is not ours")
+        XCTAssertTrue(links.handle(url: TodoCaptureRoute.listURL))
+        XCTAssertNil(links.pendingRecording, "the list link opens the tab without listening")
+        XCTAssertTrue(links.takeTabRequest())
+        XCTAssertTrue(links.handle(url: TodoCaptureRoute.recordURL))
+        XCTAssertTrue(links.takePendingRecording(), "the Lock Screen mic opens the tab listening")
+    }
+
+    @MainActor
+    func testNewVoiceTodoOpensTheTabListening() async throws {
+        let route = TodoCaptureRoute.shared
+        let before = route.tabRequests
+        _ = try await NewVoiceTodoIntent(target: .recording).perform()
+        XCTAssertEqual(route.tabRequests, before + 1, "the tab bar is asked for the To-do tab")
+        XCTAssertNotNil(route.pendingRecording, "and the tab starts listening")
+        // The test host never opens the microphone.
+        _ = route.takePendingRecording()
+        _ = route.takeTabRequest()
     }
 
     func testInfoPlistDeclaresVoiceCaptureAndTheCopyKeepsTheRules() throws {
