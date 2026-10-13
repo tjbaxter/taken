@@ -179,7 +179,8 @@ final class TodoModel {
         guard phase == .idle else { return }
         whenAllowed(app) { [weak self] in
             guard let self else { return }
-            Task { await self.startListening() }
+            // Siri may still be handing the microphone back: a busy microphone gets two more tries.
+            Task { await self.startListening(busyRetries: 2) }
         }
     }
 
@@ -199,7 +200,7 @@ final class TodoModel {
         }
     }
 
-    private func startListening() async {
+    private func startListening(busyRetries: Int = 0) async {
         guard phase == .idle, !isDemo else { return }
         phase = .starting
         blocker = nil
@@ -228,7 +229,12 @@ final class TodoModel {
             // A call or another app has the microphone.
             self.extractor = nil
             phase = .idle
-            show(TodoCopy.microphoneBusy)
+            if busyRetries > 0 {
+                try? await Task.sleep(for: .milliseconds(700))
+                await startListening(busyRetries: busyRetries - 1)
+            } else {
+                show(TodoCopy.microphoneBusy)
+            }
             return
         }
         self.capture = capture
@@ -310,7 +316,7 @@ final class TodoModel {
             extractor = nil
             transcript = ""
             phase = .idle
-            show("Nothing heard. Tap the mic and try again.")
+            show(TodoCopy.nothingHeard)
             return
         }
         transcript = words
@@ -347,13 +353,8 @@ final class TodoModel {
         arrived = Set(added.map(\.id))
         TodoHaptics.success(hapticsOn)
         announce(added.count == 1 ? "1 to-do added: \(added[0].title)." : "\(added.count) to-dos added.")
-        switch extraction.sorting {
-        case .model:
-            break
-        case .needsAppleIntelligence:
-            show(TodoCopy.needsAppleIntelligence, for: .seconds(8))
-        case .couldNotSort:
-            show(TodoCopy.couldNotSort, for: .seconds(6))
+        if let line = TodoCopy.sortingNote(extraction.sorting) {
+            show(line, for: .seconds(8))
         }
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(1.6))
@@ -454,7 +455,7 @@ final class TodoModel {
             }
             return result.value
         } catch {
-            show("Could not save. Try again.")
+            show(TodoCopy.couldNotSave)
             return nil
         }
     }
@@ -503,16 +504,33 @@ enum TodoCopy {
     static let tapToFinish = "Tap to finish"
     static let needsAppleIntelligence = "Saved as one to-do. Automatic sorting needs Apple Intelligence."
     static let couldNotSort = "Saved as one to-do. Tap it to edit."
+    static let appleIntelligenceOff = "Saved as one to-do. Turn on Apple Intelligence in Settings to sort notes into to-dos."
+    static let modelNotReady = "Saved as one to-do. Apple Intelligence is still getting ready on this iPhone."
+
+    /// The line under the list after a note, when it was not sorted into separate to-dos.
+    static func sortingNote(_ sorting: TodoSorting) -> String? {
+        switch sorting {
+        case .model: return nil
+        case .needsAppleIntelligence: return needsAppleIntelligence
+        case .appleIntelligenceOff: return appleIntelligenceOff
+        case .modelNotReady: return modelNotReady
+        case .couldNotSort: return couldNotSort
+        }
+    }
     static let microphoneOff = "Microphone access is off for Taken."
     static let speechOff = "Speech recognition is off for Taken."
     static let unavailable = "Voice to-dos need on-device speech recognition, which this iPhone does not have for your language."
     static let microphoneBusy = "The microphone is busy. Try again in a moment."
+    static let nothingHeard = "Nothing heard. Tap the mic and try again."
+    static let couldNotSave = "Could not save. Try again."
     static let openSettings = "Open Settings"
     static let typeInstead = "Type it instead"
     static let doneToday = "Done today"
 
     static let all: [String] = [empty, listening, sorting, tapToFinish, needsAppleIntelligence, couldNotSort,
-                                microphoneOff, speechOff, unavailable, microphoneBusy, openSettings, typeInstead, doneToday]
+                                appleIntelligenceOff, modelNotReady,
+                                microphoneOff, speechOff, unavailable, microphoneBusy, nothingHeard, couldNotSave,
+                                openSettings, typeInstead, doneToday]
 }
 
 @MainActor

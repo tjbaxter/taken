@@ -19,7 +19,7 @@ struct GeneratedTodo {
     @Guide(description: "Short, starts with a verb, in the speaker's words, like: Call the dentist")
     var title: String
 
-    @Guide(description: "When it is due, as local ISO 8601 like 2026-10-13T16:00:00, or a date like 2026-10-14. Empty when no day or time was said for it.")
+    @Guide(description: "When it is due in local time, YYYY-MM-DDTHH:MM:00, or YYYY-MM-DD when only a day was said. Empty when no day or time was said for it.")
     var dueISO8601: String?
 
     @Guide(description: "True only when a clock time was said for it")
@@ -35,11 +35,14 @@ final class FoundationModelsExtractor: TaskExtractor, @unchecked Sendable {
 
     init() {}
 
-    /// The model can run now: an Apple Intelligence iPhone with it turned on and the model downloaded.
-    static var isAvailable: Bool {
+    /// Nil when the model can run now (an Apple Intelligence iPhone with it turned on and the model downloaded),
+    /// otherwise why not, for the one line under the list.
+    static var unavailableReason: TodoSorting? {
         switch SystemLanguageModel.default.availability {
-        case .available: return true
-        default: return false
+        case .available: return nil
+        case .unavailable(.appleIntelligenceNotEnabled): return .appleIntelligenceOff
+        case .unavailable(.modelNotReady): return .modelNotReady
+        default: return .needsAppleIntelligence
         }
     }
 

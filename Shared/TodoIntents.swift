@@ -25,20 +25,30 @@ final class TodoCaptureRoute {
     /// The Lock Screen widget (the mic and the open to-dos), reloaded whenever the tasks change.
     nonisolated static let widgetKind = "TakenVoiceTodo"
 
-    /// Goes up by one each time something asks for the To-do tab.
+    /// Goes up by one each time something asks for the To-do tab (the tab bar watches it).
     private(set) var tabRequests = 0
     /// A recording asked for and not started yet.
     private(set) var pendingRecording: Date?
+    /// The To-do tab was asked for and the tab bar has not switched yet (a cold launch asks before the tab bar exists).
+    @ObservationIgnored private var tabPending = false
 
     /// Opens the To-do tab listening.
     func requestRecording(at date: Date = Date()) {
         pendingRecording = date
+        tabPending = true
         tabRequests += 1
     }
 
     /// Opens the To-do tab.
     func showList() {
+        tabPending = true
         tabRequests += 1
+    }
+
+    /// For the tab bar, on appear and whenever `tabRequests` changes: true once per request.
+    func takeTabRequest() -> Bool {
+        defer { tabPending = false }
+        return tabPending
     }
 
     /// The recording asked for in the last `maxAge` seconds, once.

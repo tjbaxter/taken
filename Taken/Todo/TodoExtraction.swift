@@ -54,8 +54,12 @@ struct RawTodo: Codable, Hashable, Sendable {
 enum TodoSorting: Equatable, Sendable {
     /// The on-device model sorted it.
     case model
-    /// Saved as one task: automatic sorting needs Apple Intelligence (an older iPhone, or it is off).
+    /// Saved as one task: automatic sorting needs Apple Intelligence, which this iPhone (or iOS version) does not have.
     case needsAppleIntelligence
+    /// Saved as one task: Apple Intelligence is turned off in Settings.
+    case appleIntelligenceOff
+    /// Saved as one task: Apple Intelligence is still downloading or getting ready.
+    case modelNotReady
     /// Saved as one task: the model was there but could not sort this note.
     case couldNotSort
 }
@@ -92,20 +96,14 @@ enum TodoExtractors {
     @MainActor
     static func best() -> any TaskExtractor {
         #if canImport(FoundationModels)
-        if #available(iOS 26.0, *), FoundationModelsExtractor.isAvailable {
+        if #available(iOS 26.0, *) {
+            if let reason = FoundationModelsExtractor.unavailableReason {
+                return FallbackExtractor(sorting: reason)
+            }
             return FoundationModelsExtractor()
         }
         #endif
         return FallbackExtractor()
-    }
-
-    /// Whether automatic sorting can run here (for the one-line note when it cannot).
-    @MainActor
-    static var modelAvailable: Bool {
-        #if canImport(FoundationModels)
-        if #available(iOS 26.0, *) { return FoundationModelsExtractor.isAvailable }
-        #endif
-        return false
     }
 }
 
@@ -118,7 +116,8 @@ enum TodoPrompt {
         - Make one task for each separate thing the speaker needs to do. Split lists like "X, Y and Z" into separate tasks.
         - Each title is short and starts with a verb, in the speaker's own words and language, at most 8 words. Drop filler such as "I need to", "um" or "also".
         - Never add a task that was not said. Leave out chat that is not a task.
-        - dueISO8601: only when the speaker gave a day or a clock time for that task. Write local time like 2026-10-13T16:00:00, or only the date like 2026-10-14 when no clock time was said. "By 4" or "at 4 pm" means 16:00. Otherwise leave it empty.
+        - dueISO8601: only when the speaker gave a day or a clock time for that task, in local time as YYYY-MM-DDTHH:MM:00, or YYYY-MM-DD when only a day was said. Use the dates listed with the note. Otherwise leave it empty.
+        - Clock times: "by 4" or "at 4 pm" is 16:00. A bare hour from 1 to 6 is in the afternoon, 7 to 11 in the morning unless they say tonight or evening, 12 is noon.
         - A day or time said once for a list ("today by 4 I need to do X, Y and Z") applies to every task in that list.
         - hasTime is true only when a clock time was said.
         """

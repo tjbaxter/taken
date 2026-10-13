@@ -140,8 +140,11 @@ final class TodoExtractionTests: XCTestCase {
         XCTAssertNil(TodoCaptureRoute.route(for: URL(string: "https://example.com/todo")!))
 
         let route = TodoCaptureRoute()
+        XCTAssertFalse(route.takeTabRequest())
         route.requestRecording(at: Date(timeIntervalSince1970: 100))
         XCTAssertEqual(route.tabRequests, 1)
+        XCTAssertTrue(route.takeTabRequest(), "the tab bar switches to To-do")
+        XCTAssertFalse(route.takeTabRequest(), "once")
         XCTAssertTrue(route.takePendingRecording(now: Date(timeIntervalSince1970: 110)))
         XCTAssertFalse(route.takePendingRecording(now: Date(timeIntervalSince1970: 111)), "taken once")
         route.requestRecording(at: Date(timeIntervalSince1970: 100))
