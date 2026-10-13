@@ -39,26 +39,31 @@ struct PaywallView: View {
 
     var body: some View {
         GeometryReader { geo in
-            // Every plan above the button on a 6.9 inch iPhone; smaller ones drop the ruler and tighten up.
+            // Every plan sits above the button: with room to spare on a 6.9 inch iPhone; 6.1 and 6.3 inch ones drop
+            // the ruler and tighten up; the smallest scroll, with the button and terms always in view.
             let compact = geo.size.height < 820
             VStack(spacing: 0) {
                 topBar
-                ScrollView {
-                    VStack(alignment: .leading, spacing: 0) {
-                        header(compact: compact)
-                        features
-                            .padding(.top, compact ? 16 : 22)
-                        planHeader
-                            .padding(.top, compact ? 18 : 22)
-                            .padding(.bottom, 12)
-                        plans
+                GeometryReader { area in
+                    ScrollView {
+                        VStack(alignment: .leading, spacing: 0) {
+                            header(compact: compact)
+                            features(compact: compact)
+                                .padding(.top, compact ? 14 : 22)
+                            // Spare height goes here, so the plans sit right above the button.
+                            Spacer(minLength: compact ? 14 : 22)
+                            planHeader
+                                .padding(.bottom, compact ? 10 : 12)
+                            plans(compact: compact)
+                        }
+                        .padding(.horizontal, 20)
+                        .padding(.bottom, compact ? 10 : 14)
+                        .frame(minHeight: area.size.height, alignment: .top)
                     }
-                    .padding(.horizontal, 20)
-                    .padding(.bottom, 14)
+                    .scrollIndicators(.hidden)
+                    .scrollBounceBehavior(.basedOnSize)
                 }
-                .scrollIndicators(.hidden)
-                .scrollBounceBehavior(.basedOnSize)
-                dock
+                dock(compact: compact)
             }
         }
         .background(Palette.bg.ignoresSafeArea())
@@ -144,8 +149,8 @@ struct PaywallView: View {
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, compact ? 18 : 22)
-        .padding(.bottom, compact ? 18 : 16)
+        .padding(.top, compact ? 16 : 22)
+        .padding(.bottom, 16)
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             ZStack(alignment: .topLeading) {
@@ -188,8 +193,8 @@ struct PaywallView: View {
         }
     }
 
-    private var features: some View {
-        VStack(alignment: .leading, spacing: 11) {
+    private func features(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: compact ? 9 : 11) {
             ForEach(ProCopy.features, id: \.self) { line in
                 HStack(spacing: 12) {
                     Rectangle()
@@ -219,10 +224,10 @@ struct PaywallView: View {
         .accessibilityAddTraits(.isHeader)
     }
 
-    private var plans: some View {
-        VStack(spacing: 10) {
+    private func plans(compact: Bool) -> some View {
+        VStack(spacing: compact ? 8 : 10) {
             ForEach(ProPlan.allCases) { plan in
-                planCard(plan)
+                planCard(plan, compact: compact)
             }
         }
         // Room for the brackets on the chosen plan.
@@ -230,7 +235,7 @@ struct PaywallView: View {
         .padding(.vertical, 3)
     }
 
-    private func planCard(_ plan: ProPlan) -> some View {
+    private func planCard(_ plan: ProPlan, compact: Bool) -> some View {
         let offer = pro.offers[plan]
         let isOn = selected == plan
         let tag = ProCopy.introTag(ProCopy.liveIntro(offer, eligible: eligible))
@@ -258,8 +263,8 @@ struct PaywallView: View {
                 priceBlock(offer, isOn: isOn)
             }
             .padding(.horizontal, 16)
-            .padding(.vertical, 12)
-            .frame(minHeight: 58)
+            .padding(.vertical, compact ? 10 : 12)
+            .frame(minHeight: compact ? 54 : 58)
             .background(isOn ? Palette.signalWash : Palette.bgRaised, in: RoundedRectangle(cornerRadius: 4))
             .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(isOn ? Palette.signalEdge : Palette.line, lineWidth: 1))
             .overlay {
@@ -347,14 +352,14 @@ struct PaywallView: View {
 
     // MARK: Dock
 
-    private var dock: some View {
+    private func dock(compact: Bool) -> some View {
         VStack(spacing: 0) {
             Rectangle().fill(Palette.line).frame(height: 1)
-            VStack(alignment: .leading, spacing: 12) {
+            VStack(alignment: .leading, spacing: compact ? 10 : 12) {
                 if let note { noteView(note) }
-                cta
+                cta(height: compact ? 52 : 56)
                 Text(termsLine)
-                    .font(.sans(12.5, relativeTo: .footnote))
+                    .font(.sans(compact ? 12 : 12.5, relativeTo: .footnote))
                     .foregroundStyle(Palette.fgMuted)
                     .lineSpacing(1.5)
                     .fixedSize(horizontal: false, vertical: true)
@@ -362,7 +367,7 @@ struct PaywallView: View {
                 links
             }
             .padding(.horizontal, 20)
-            .padding(.top, 14)
+            .padding(.top, compact ? 12 : 14)
             .padding(.bottom, 2)
         }
         .background(Palette.bg)
@@ -390,7 +395,7 @@ struct PaywallView: View {
         !unlocked && busy == nil && (offer != nil || pro.offersPhase == .failed)
     }
 
-    private var cta: some View {
+    private func cta(height: CGFloat) -> some View {
         Button(action: primaryAction) {
             HStack(spacing: 10) {
                 if busy == .buying || busy == .restoring {
@@ -412,7 +417,7 @@ struct PaywallView: View {
             }
             .foregroundStyle(Palette.buttonText)
             .frame(maxWidth: .infinity)
-            .frame(height: 56)
+            .frame(height: height)
             .background(unlocked ? Palette.signal : Palette.button.opacity(ctaEnabled || busy != nil ? 1 : 0.35),
                         in: RoundedRectangle(cornerRadius: 4))
             .shadow(color: unlocked ? Palette.signal.opacity(0.5) : .clear, radius: 12)

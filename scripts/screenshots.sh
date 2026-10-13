@@ -1,24 +1,31 @@
 #!/usr/bin/env bash
 # Capture App Store screenshots from the simulator with demo data.
-# Usage: scripts/screenshots.sh <simulator-udid> <path/to/Taken.app> <output-dir> [diagnostics-dir]
+# Usage: scripts/screenshots.sh <simulator-udid> <path/to/Taken.app> <output-dir> [diagnostics-dir] [6.3-inch-udid]
 set -euo pipefail
 
 udid="$1"
 app="$2"
 out="$3"
 diag="${4:-$out-diagnostics}"
+small="${5:-}"
 bundle_id="com.tombaxter.taken"
 
 mkdir -p "$out" "$diag"
-xcrun simctl boot "$udid" 2>/dev/null || true
-xcrun simctl bootstatus "$udid" -b
-xcrun simctl ui "$udid" appearance dark || true
-xcrun simctl status_bar "$udid" override \
-  --time "9:41" \
-  --dataNetwork wifi --wifiMode active --wifiBars 3 \
-  --cellularMode active --cellularBars 4 --operatorName "" \
-  --batteryState discharging --batteryLevel 100
-xcrun simctl install "$udid" "$app"
+
+prepare() {
+  local device="$1"
+  xcrun simctl boot "$device" 2>/dev/null || true
+  xcrun simctl bootstatus "$device" -b
+  xcrun simctl ui "$device" appearance dark || true
+  xcrun simctl status_bar "$device" override \
+    --time "9:41" \
+    --dataNetwork wifi --wifiMode active --wifiBars 3 \
+    --cellularMode active --cellularBars 4 --operatorName "" \
+    --batteryState discharging --batteryLevel 100
+  xcrun simctl install "$device" "$app"
+}
+
+prepare "$udid"
 
 # Warm launch so first-run work (font registration, caches) does not land in a screenshot.
 xcrun simctl launch "$udid" "$bundle_id" -demo -screen today >/dev/null
@@ -82,6 +89,17 @@ shoot 08-empty empty
 shoot 09-paywall paywall
 shoot 10-locked locked
 shoot 11-widgets-locked widgets-locked
+
+# The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
+if [ -n "$small" ] && [ "$small" != "$udid" ]; then
+  xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+  xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+  prepare "$small"
+  udid="$small"
+  xcrun simctl launch "$udid" "$bundle_id" -demo -screen today >/dev/null
+  sleep 6
+  shoot 12-paywall-6.3in paywall
+fi
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
 ls -la "$out"

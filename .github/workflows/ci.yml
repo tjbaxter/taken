@@ -150,6 +150,9 @@ jobs:
           udid="$(scripts/pick-simulator.sh "iPhone 17 Pro Max" "iPhone 16 Pro Max")"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
           xcrun simctl list devices | grep "$udid"
+          small="$(scripts/pick-simulator.sh "iPhone 17 Pro" "iPhone 17" "iPhone 16 Pro")"
+          echo "small=$small" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices | grep "$small"
 
       - name: Build app for the simulator
         run: |
@@ -165,7 +168,7 @@ jobs:
             2>&1 | tee build/xcodebuild-build.log | xcbeautify --renderer github-actions
 
       - name: Capture screenshots
-        run: scripts/screenshots.sh "${{ steps.sim.outputs.udid }}" build/DerivedData/Build/Products/Debug-iphonesimulator/Taken.app screenshots build/screenshot-diagnostics
+        run: scripts/screenshots.sh "${{ steps.sim.outputs.udid }}" build/DerivedData/Build/Products/Debug-iphonesimulator/Taken.app screenshots build/screenshot-diagnostics "${{ steps.sim.outputs.small }}"
 
       - name: Upload screenshots
         uses: actions/upload-artifact@v7
