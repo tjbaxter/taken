@@ -124,6 +124,21 @@ for look in blush phosphor ice; do
 done
 shoot 32-todo-recording-blush todo-recording blush
 shoot 33-todo-empty todo-empty
+# Links still reach SwiftUI with the quick action's scene delegate in place: taken://pro over TODAY locked opens the
+# paywall, and taken://todo opens the To-do tab.
+link() {
+  local name="$1" screen="$2" url="$3"
+  xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+  sleep 1
+  xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" >/dev/null
+  sleep 6
+  xcrun simctl openurl "$udid" "$url" || echo "::warning::openurl $url failed"
+  sleep 4
+  xcrun simctl io "$udid" screenshot --type=png "$out/$name.png" >/dev/null
+  echo "captured $out/$name.png after $url"
+}
+link 34-link-pro locked "taken://pro"
+link 35-link-todo today "taken://todo"
 
 # The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
 if [ -n "$small" ] && [ "$small" != "$udid" ]; then
