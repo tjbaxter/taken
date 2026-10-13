@@ -321,6 +321,7 @@ struct TodoCheck: View {
 /// The big round mic. Listening, it becomes a stop square with a ring that breathes with the voice.
 struct TodoMicButton: View {
     @Environment(\.theme) private var theme
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let phase: TodoModel.Phase
     let level: Double
     let action: () -> Void
@@ -335,11 +336,12 @@ struct TodoMicButton: View {
         Button(action: action) {
             ZStack {
                 if phase == .listening {
+                    // The ring breathes with the voice; with Reduce Motion it stays still.
                     Circle()
                         .stroke(theme.signalEdge, lineWidth: 2)
-                        .scaleEffect(1.08 + 0.3 * level)
-                        .opacity(0.4 + 0.6 * level)
-                        .animation(.easeOut(duration: 0.12), value: level)
+                        .scaleEffect(reduceMotion ? 1.12 : 1.08 + 0.3 * level)
+                        .opacity(reduceMotion ? 0.8 : 0.4 + 0.6 * level)
+                        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: level)
                 }
                 Circle()
                     .fill(theme.signal)
