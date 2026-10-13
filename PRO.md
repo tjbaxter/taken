@@ -7,7 +7,7 @@ Owner's brief (Tom, 2026-10-13): "Your job is to make as much money as possible 
 - Hard paywall with an opt-in App Store trial beats freemium by a wide margin: median download-to-paid by day 35 is 10.7% vs 2.1%, revenue per install at day 60 is $3.09 vs $0.38, and 12-month retention is the same (RevenueCat State of Subscription Apps 2026, 115k apps).
 - Trials of 4 days or fewer convert about 30% worse than longer ones; 7 days is the common sweet spot (RevenueCat trial-length analysis, Superwall 2025 benchmark). Health & Fitness trial-to-paid median is 37.7% to 42% and annual plans dominate (about 60% of plan mix) (RevenueCat 2026, Adapty 2026).
 - 82% of trial starts happen on day 0, so the offer appears in the first session, right after the first "aha" (the first dose logged).
-- So: no ads ever, no crippled free tier. Everyone gets the whole app; continuing to log after the first session needs Pro, starting with 7 days on us.
+- So: no ads ever, no crippled free tier. Everyone gets the whole app; continuing to log after the first session needs Pro, with 7 days on us on the yearly plan for new subscribers.
 
 ## Products (App Store Connect; product ids are fixed)
 

@@ -10,7 +10,7 @@ Taken is a source of truth for a daily pill and supplement stack. Tap when taken
 - Five-week log, streak and 30-day adherence. Backfill any day from the log.
 - Four looks in Settings: Signal (amber on black, the default), Blush (light, rose on warm off-white), Phosphor (green) and Ice (cyan). The widgets, the Control Center control and the app icon follow the look.
 
-- Taken Pro (1.1): the first dose needs nothing; logging after it needs Pro, starting with 7 days on us, then yearly, monthly or lifetime through StoreKit 2. Everyone whose first download was 1.0 keeps Pro for life. The log, history and CSV export always stay readable.
+- Taken Pro (1.1): the first dose needs nothing; logging after it needs Pro: yearly (7 days on us for new subscribers), monthly or lifetime through StoreKit 2. Everyone whose first download was 1.0 keeps Pro for life. The log, history and CSV export always stay readable.
 
 The product, design and release contract is [SPEC.md](SPEC.md); how Taken makes money is [PRO.md](PRO.md).
 
