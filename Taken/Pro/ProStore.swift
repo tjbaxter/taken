@@ -92,7 +92,7 @@ final class ProStore {
     func start() {
         guard !isDemo, updates == nil else { return }
         updates = Task.detached { [weak self] in
-            for await result in Transaction.updates {
+            for await result in StoreKit.Transaction.updates {
                 if case .verified(let transaction) = result {
                     await transaction.finish()
                 }
@@ -184,7 +184,7 @@ final class ProStore {
 
     private nonisolated static func entitlementFacts() async -> [PurchaseFact] {
         var facts: [PurchaseFact] = []
-        for await result in Transaction.currentEntitlements {
+        for await result in StoreKit.Transaction.currentEntitlements {
             facts.append(await PurchaseFact.make(from: result))
         }
         return facts
@@ -206,7 +206,7 @@ final class ProStore {
     }
 
     private nonisolated static func finishUnfinished() async {
-        for await result in Transaction.unfinished {
+        for await result in StoreKit.Transaction.unfinished {
             if case .verified(let transaction) = result {
                 await transaction.finish()
             }
@@ -329,8 +329,8 @@ final class ProStore {
 // MARK: - StoreKit to plain values
 
 extension PurchaseFact {
-    static func make(from result: VerificationResult<Transaction>) async -> PurchaseFact {
-        let transaction: Transaction
+    static func make(from result: VerificationResult<StoreKit.Transaction>) async -> PurchaseFact {
+        let transaction: StoreKit.Transaction
         let verified: Bool
         switch result {
         case .verified(let value):
@@ -352,7 +352,7 @@ extension PurchaseFact {
     }
 }
 
-private extension Transaction {
+private extension StoreKit.Transaction {
     /// The current period is the introductory offer.
     var isIntroductoryOffer: Bool {
         if #available(iOS 17.2, *) {
