@@ -97,19 +97,22 @@ Comma separated with no spaces, and no word that already appears in the name or 
 The first release of Taken. Tap to log, take all, exact times, widgets for the Home Screen and Lock Screen, a Control Center control and Siri. Your log stays on your iPhone.
 ```
 
-## App Review notes (1168 / 4000 characters)
+## App Review notes (1929 / 4000 characters)
 
 ```
 No login, account or network connection is needed, and there are no in-app purchases. Taken stores everything on the device and makes no network requests.
 
 How to try it:
-1. On first launch tap ADD TO STACK, tap a few chips (for example Vitamin D3, Fish Oil, Finasteride) and tap ADD.
-2. Tap a row to log a dose with the current time. With 2 or more pending, TAKE ALL logs the rest. Touch and hold a row for Undo last dose and Set time.
-3. Tap any day in the history grid to see or fix that day.
-4. Widgets: touch and hold the Home Screen, tap Edit, Add Widget, choose Taken, add the small or medium widget, then tap a row or TAKE ALL on the widget. Lock Screen: touch and hold the Lock Screen, Customize, Lock Screen, then add a Taken widget.
-5. Control Center (iOS 18 and later): open Control Center, tap +, Add a Control, choose Taken, Take all.
-6. Siri: say "Did I take my pills in Taken" or "Log my stack in Taken". The same actions are in the Shortcuts app under Taken.
-7. Reminder: tap the gear, turn on Reminder and pick a time. Notification permission is requested only at that moment. The notification appears only if something is still pending at that time.
+1. On first launch tap ADD TO STACK, tap three chips (for example Vitamin D3, Fish Oil and Finasteride) and tap ADD (3). TODAY shows 0/3 and TAKE ALL (3).
+2. Tap the Vitamin D3 row. It lights up with the current time, and a toast offers UNDO. Leave the other two pending for the steps below. Touch and hold any row for Undo last dose, Set time and Edit item.
+3. Tap today's outlined cell in the history grid to see the day, log a dose at a chosen time or remove one.
+
+Steps 4 to 8 each log what is still pending. If nothing is pending before one of them, touch and hold a taken row in the app and choose Undo last dose.
+4. Home Screen: touch and hold the Home Screen, tap Edit, Add Widget, choose Taken, and add the small and the medium widget. Tap a pending row on the medium widget to log that item, or TAKE ALL on the small widget to log everything pending. The count changes on the widget and in the app.
+5. Lock Screen: touch and hold the Lock Screen, tap Customize, Lock Screen, and add a Taken widget. It shows the count, for example 2/3.
+6. Control Center (iOS 18 and later): open Control Center, tap +, Add a Control, choose Taken, Take all. Tapping it logs everything pending.
+7. Siri: say "Did I take my pills in Taken" to hear what is taken and what is pending, or "Log my stack in Taken" to log everything pending. The same actions are in the Shortcuts app under Taken.
+8. Reminder: tap the gear, turn on NUDGE under REMINDER (notification permission is requested at that moment), tap the time next to TIME, set it 2 minutes ahead and tap SET. With something still pending, the notification arrives at that time: touch and hold it and tap TAKE ALL to log everything pending without opening the app. With nothing pending, no notification is sent.
 ```
 
 Sign-in required: No. Contact details for App Review come from the account holder.
@@ -124,7 +127,7 @@ Sign-in required: No. Contact details for App Review come from the account holde
 | description | 1837 | 4000 |
 | keywords | 97 | 100 |
 | whats_new | 173 | 4000 |
-| review_notes | 1168 | 4000 |
+| review_notes | 1929 | 4000 |
 
 ## Screenshots
 
