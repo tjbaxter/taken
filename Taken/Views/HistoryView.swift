@@ -2,15 +2,21 @@ import SwiftUI
 
 /// Five weeks, Monday first, today in the last row. Lit = everything due was taken.
 struct HistoryGrid: View {
+    @Environment(\.theme) private var theme
     let rows: [[HistoryCell]]
     let onSelect: (DayKey) -> Void
+
+    init(rows: [[HistoryCell]], onSelect: @escaping (DayKey) -> Void) {
+        self.rows = rows
+        self.onSelect = onSelect
+    }
 
     var body: some View {
         VStack(spacing: 6) {
             HStack(spacing: 6) {
                 ForEach(0..<7, id: \.self) { index in
                     Text(Fmt.weekdayLetters[index])
-                        .hudFixed(10, Palette.fgFaint, tracking: 0.1)
+                        .hudFixed(10, theme.fgFaint, tracking: 0.1)
                         .frame(maxWidth: .infinity)
                 }
             }
@@ -45,7 +51,12 @@ struct HistoryGrid: View {
 }
 
 struct DayCell: View {
+    @Environment(\.theme) private var theme
     let cell: HistoryCell
+
+    init(cell: HistoryCell) {
+        self.cell = cell
+    }
 
     var body: some View {
         ZStack(alignment: .topLeading) {
@@ -61,8 +72,8 @@ struct DayCell: View {
         .aspectRatio(1, contentMode: .fit)
         .overlay {
             if cell.isToday {
-                RoundedRectangle(cornerRadius: 3)
-                    .strokeBorder(Palette.fg, lineWidth: 1.5)
+                RoundedRectangle(cornerRadius: theme.radius.control)
+                    .strokeBorder(theme.fg, lineWidth: 1.5)
             }
         }
         .frame(maxWidth: .infinity)
@@ -70,18 +81,19 @@ struct DayCell: View {
 
     @ViewBuilder
     private var background: some View {
+        let shape = RoundedRectangle(cornerRadius: theme.radius.control)
         switch cell.status {
         case .complete:
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Palette.signalWash)
-                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.signalEdge, lineWidth: 1))
+            shape
+                .fill(theme.signalWash)
+                .overlay(shape.strokeBorder(theme.signalEdge, lineWidth: 1))
         case .partial, .missed, .nothingDue:
-            RoundedRectangle(cornerRadius: 3)
-                .fill(Palette.bgRaised)
-                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.line, lineWidth: 1))
+            shape
+                .fill(theme.bgRaised)
+                .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
         case .future:
-            RoundedRectangle(cornerRadius: 3)
-                .strokeBorder(Palette.lineDash, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+            shape
+                .strokeBorder(theme.lineDash, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
         }
     }
 
@@ -91,18 +103,18 @@ struct DayCell: View {
         switch cell.status {
         case .complete:
             CheckShape()
-                .stroke(Palette.signal, style: StrokeStyle(lineWidth: 2.2, lineCap: .square, lineJoin: .miter))
+                .stroke(theme.signalInk, style: StrokeStyle(lineWidth: 2.2, lineCap: .square, lineJoin: .miter))
                 .frame(width: 18, height: 18)
-                .shadow(color: Palette.signal.opacity(0.75), radius: 5)
+                .shadow(color: theme.glow(0.75), radius: 5)
                 .offset(y: 3)
         case .partial:
             Rectangle()
-                .fill(Palette.signal.opacity(0.7))
+                .fill(theme.signalInk.opacity(0.7))
                 .frame(width: 11, height: 2)
                 .offset(y: 3)
         case .missed, .nothingDue:
             Rectangle()
-                .fill(Palette.tick)
+                .fill(theme.tick)
                 .frame(width: 6, height: 1.5)
                 .offset(y: 3)
         case .future:
@@ -111,20 +123,26 @@ struct DayCell: View {
     }
 
     private var numberColor: Color {
-        if cell.isToday { return Palette.fg }
+        if cell.isToday { return theme.fg }
         switch cell.status {
-        case .complete: return Palette.signal.opacity(0.85)
-        case .partial: return Palette.fgSubtle
-        case .missed, .nothingDue: return Palette.fgFaint
-        case .future: return Palette.fgFaint.opacity(0.6)
+        case .complete: return theme.signalInk.opacity(0.85)
+        case .partial: return theme.fgSubtle
+        case .missed, .nothingDue: return theme.fgFaint
+        case .future: return theme.fgFaint.opacity(0.6)
         }
     }
 }
 
 /// STREAK 14D and 30D 97%.
 struct StatsRow: View {
+    @Environment(\.theme) private var theme
     let streak: Int
     let adherence: Adherence
+
+    init(streak: Int, adherence: Adherence) {
+        self.streak = streak
+        self.adherence = adherence
+    }
 
     var body: some View {
         HStack(spacing: 10) {
@@ -137,18 +155,18 @@ struct StatsRow: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 7) {
                 Lamp(on: lit, size: 5)
-                Text(label).hud(10.5, Palette.fgSubtle)
+                Text(label).hud(10.5, theme.fgSubtle)
             }
             Text(value)
                 .font(.monoFixed(28, .monoMedium))
                 .tracking(-0.5)
-                .foregroundStyle(Palette.fg)
+                .foregroundStyle(theme.fg)
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.bgRaised, in: RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.line, lineWidth: 1))
+        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.line, lineWidth: 1))
         .accessibilityElement(children: .combine)
     }
 }

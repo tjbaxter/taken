@@ -492,8 +492,11 @@ extension StackState {
         }
     }
 
+    /// Removes the stack, every dose and the settings. The look stays: it is how the phone shows Taken, not data.
     mutating func eraseAll() {
+        let look = settings.theme
         self = StackState()
+        settings.theme = look
     }
 }
 

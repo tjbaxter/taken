@@ -6,14 +6,21 @@ grid (default 4x, so 4096 px for a 1024 icon) and box-filtered down, which
 gives exact, crisp anti-aliasing. Colours come from the Taken design tokens
 (SPEC.md section 4). Run from the repo root:
 
-    python3 brand/icon.py                      # final icon set (asset catalog), brand/*.svg, site icons in docs/
+    python3 brand/icon.py                      # final icon sets (asset catalog), brand/*.svg, site icons in docs/
     python3 brand/icon.py --concept reticle --out /tmp/x.png --variant default
     python3 brand/icon.py --concepts brand/concepts   # render every concept
+    python3 brand/icon.py --look blush --out /tmp/blush.png   # one look's icon
+    python3 brand/icon.py --looks-sheet brand/looks.png       # every look, large and at Home Screen sizes
 
 Variants:
     default  opaque sRGB, no alpha (App Store marketing icon rule)
     dark     artwork on a transparent background (the system draws its own dark backdrop)
     tinted   grayscale artwork on a transparent background (the system applies the tint)
+
+Looks (SPEC.md section 4): every look has its own icon. Signal is the primary icon (AppIcon); Blush, Phosphor and
+Ice are alternate icons (AppIcon-Blush, AppIcon-Phosphor, AppIcon-Ice) that Taken switches to with the look.
+Phosphor and Ice are the Signal composition recoloured; Blush is the capsule in rose on off-white with delicate
+brackets.
 """
 import argparse
 import math
@@ -24,7 +31,8 @@ from PIL import Image, ImageCms
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 REPO = os.path.dirname(HERE)
-APPICON_DIR = os.path.join(REPO, "Taken", "Assets.xcassets", "AppIcon.appiconset")
+ASSETS_DIR = os.path.join(REPO, "Taken", "Assets.xcassets")
+APPICON_DIR = os.path.join(ASSETS_DIR, "AppIcon.appiconset")
 FINAL_K = 1.08  # capsule scale in the shipped icon (1.0 felt small at 60 px, 1.15 crowded the brackets)
 
 
@@ -76,6 +84,116 @@ PALETTES = {
         "cut": None,
     },
 }
+
+
+# ---------------------------------------------------------------- looks
+# Each look's canvas and role colours, from its Theme tokens in Shared/Theme.swift. Signal is PALETTES above, exactly.
+
+LOOKS = {
+    "signal": {
+        "name": "Signal",
+        "light": False,
+        "bg": BG,
+        "raised": RAISED,
+        "palettes": PALETTES,
+    },
+    "phosphor": {
+        "name": "Phosphor",
+        "light": False,
+        "bg": hexrgb("#060908"),
+        "raised": hexrgb("#0C110E"),
+        "palettes": {
+            "default": {
+                "lit": hexrgb("#3DFF8A"),
+                "lit_hi": hexrgb("#8CFFBA"),
+                "line": hexrgb("#86948C"),
+                "line_dim": hexrgb("#344039"),
+                "fill": hexrgb("#131915"),
+                "fill_deep": hexrgb("#0C110E"),
+                "fg": hexrgb("#EFF5F1"),
+                "cut": hexrgb("#060908"),
+            },
+            "dark": {
+                "lit": hexrgb("#38F07F"),
+                "lit_hi": hexrgb("#7CF8AE"),
+                "line": hexrgb("#96A49C"),
+                "line_dim": hexrgb("#45524A"),
+                "fill": hexrgb("#19201C"),
+                "fill_deep": hexrgb("#121815"),
+                "fg": hexrgb("#EFF5F1"),
+                "cut": None,
+            },
+            "tinted": PALETTES["tinted"],
+        },
+    },
+    "ice": {
+        "name": "Ice",
+        "light": False,
+        "bg": hexrgb("#07090C"),
+        "raised": hexrgb("#0D1015"),
+        "palettes": {
+            "default": {
+                "lit": hexrgb("#8FD3E8"),
+                "lit_hi": hexrgb("#C2EBF6"),
+                "line": hexrgb("#88919C"),
+                "line_dim": hexrgb("#363D46"),
+                "fill": hexrgb("#14181E"),
+                "fill_deep": hexrgb("#0D1015"),
+                "fg": hexrgb("#F0F3F7"),
+                "cut": hexrgb("#07090C"),
+            },
+            "dark": {
+                "lit": hexrgb("#86CCE2"),
+                "lit_hi": hexrgb("#B6E4F2"),
+                "line": hexrgb("#98A1AC"),
+                "line_dim": hexrgb("#47505A"),
+                "fill": hexrgb("#1A1F26"),
+                "fill_deep": hexrgb("#13171D"),
+                "fg": hexrgb("#F0F3F7"),
+                "cut": None,
+            },
+            "tinted": PALETTES["tinted"],
+        },
+    },
+    "blush": {
+        "name": "Blush",
+        "light": True,
+        "bg": hexrgb("#FBF6F3"),
+        "raised": hexrgb("#FFFFFF"),
+        "palettes": {
+            "default": {
+                "lit": hexrgb("#D9667F"),
+                "lit_hi": hexrgb("#E8889C"),
+                "line": hexrgb("#C9A3AD"),      # the shell's outline: rose taken toward warm grey
+                "line_dim": hexrgb("#E2D3D6"),
+                "fill": hexrgb("#FFFDFB"),
+                "fill_deep": hexrgb("#FFFDFB"),
+                "fg": hexrgb("#2A2224"),
+                "cut": hexrgb("#FBF6F3"),
+                "frame": hexrgb("#BDB0B4"),     # the delicate brackets
+            },
+            "dark": {
+                "lit": hexrgb("#E0748C"),
+                "lit_hi": hexrgb("#EC98AA"),
+                "line": hexrgb("#D9B8C0"),
+                "line_dim": hexrgb("#5A4A4F"),
+                "fill": hexrgb("#2A2224"),
+                "fill_deep": hexrgb("#221B1D"),
+                "fg": hexrgb("#FBF6F3"),
+                "cut": None,
+                "frame": hexrgb("#8E7F84"),
+            },
+            "tinted": dict(PALETTES["tinted"], frame=np.array([0.62, 0.62, 0.62], np.float32)),
+        },
+    },
+}
+
+LOOK_ORDER = ("signal", "blush", "phosphor", "ice")
+
+
+def icon_set_name(look):
+    """The asset catalog app icon set: AppIcon for Signal (the primary icon), AppIcon-<Name> for the others."""
+    return "AppIcon" if look == "signal" else f"AppIcon-{LOOKS[look]['name']}"
 
 
 # ---------------------------------------------------------------- SDF kit
@@ -143,9 +261,13 @@ def op_stroke(d, w):
 # ---------------------------------------------------------------- renderer
 
 class Renderer:
-    def __init__(self, variant="default", size=1024, ss=4):
+    def __init__(self, variant="default", size=1024, ss=4, look="signal"):
         self.variant = variant
-        self.pal = PALETTES[variant]
+        self.look = look
+        self.light = LOOKS[look]["light"]
+        self.bg = LOOKS[look]["bg"]
+        self.raised = LOOKS[look]["raised"]
+        self.pal = LOOKS[look]["palettes"][variant]
         self.size = size
         self.ss = ss
         n = size * ss
@@ -198,16 +320,21 @@ class Renderer:
         r = np.hypot(self.ox - cx, self.oy - cy) / lift_radius
         t = np.clip(1.0 - r, 0.0, 1.0)
         t = t * t * (3 - 2 * t)  # smoothstep
-        col = BG[None, None, :] + (RAISED - BG)[None, None, :] * (t[..., None] * lift)
+        col = self.bg[None, None, :] + (self.raised - self.bg)[None, None, :] * (t[..., None] * lift)
         self.rgb = np.broadcast_to(col, (self.size, self.size, 3)).astype(np.float32).copy()
         self.a = np.ones((self.size, self.size), np.float32)
 
     def glow(self, m, radius, strength, role="lit"):
-        """Soft additive bloom from a coverage mask. Default variant only."""
+        """Soft bloom from a coverage mask. Default variant only. Dark looks add light (screen blend); on a light
+        canvas light cannot glow, so there the colour settles into the paper instead (a multiply halo)."""
         if self.variant != "default" or strength <= 0:
             return
         g = gaussian_blur(m, radius * self.size / 1024.0)
         col = self.pal[role]
+        if self.light:
+            tint = g[..., None] * (1.0 - col[None, None, :]) * strength
+            self.rgb = self.rgb * (1.0 - tint)
+            return
         add = g[..., None] * col[None, None, :] * strength
         # screen blend so it never clips harshly
         self.rgb = 1.0 - (1.0 - self.rgb) * (1.0 - add)
@@ -630,6 +757,45 @@ def concept_reticle2(r):
     r.grain(0.9)
 
 
+def round_viewfinder(r, half=322.0, arm=86.0, t=10.0, corner=44.0, role="frame", opacity=1.0, cx=512.0, cy=512.0):
+    """Delicate corner brackets that follow a rounded square: at each corner a quarter arc of radius `corner`
+    and two straight arms of length `arm`, a thin stroke with round ends (Blush's HUD brackets)."""
+    k = half - corner - arm  # each bracket lives in the corner square beyond this distance from the centre
+
+    def fn(x, y):
+        dx, dy = x - cx, y - cy
+        outline = op_stroke(sd_box(x, y, cx, cy, half, half, corner), t)
+        corners = np.maximum(k - np.abs(dx), k - np.abs(dy))
+        d = op_intersect(outline, corners)
+        caps = []
+        for sx in (-1, 1):
+            for sy in (-1, 1):
+                caps.append(sd_circle(x, y, cx + sx * k, cy + sy * half, t / 2.0))
+                caps.append(sd_circle(x, y, cx + sx * half, cy + sy * k, t / 2.0))
+        return op_union(d, *caps)
+    return r.fill(fn, role, opacity)
+
+
+def concept_blush(r, k=FINAL_K):
+    """Blush: the split capsule in rose on an off-white canvas, the unlit half a white shell with a rose-grey
+    outline, inside thin rounded brackets. No tick marks: calm, light and exact."""
+    r.background(lift=1.0, lift_radius=700.0)
+    round_viewfinder(r, half=322.0, arm=78.0, t=11.0, corner=46.0, role="frame")
+    cx = cy = 512.0
+    hl, rad, gap, stroke = 156.0 * k, 116.0 * k, 20.0, 13.0
+    cap, near, far = capsule_halves(cx, cy, 45.0, hl, rad, gap)
+    if r.variant == "default":
+        # a soft rose halo settles under the lit half, the paper's version of the phosphor glow
+        r.glow(r.cov(near), radius=58.0, strength=0.16)
+    r.fill(far, "fill_deep")
+    r.fill(lambda x, y: op_inner_stroke(far(x, y), stroke), "line")
+    m = r.fill(near, "lit")
+    if r.variant != "tinted":
+        inner = gaussian_blur(r.cov(lambda x, y: near(x, y) + 44.0), 38.0 * r.size / 1024.0)
+        r.over(r.pal["lit_hi"], np.clip(inner, 0, 1) * m * 0.35)
+    r.grain(0.6)
+
+
 def concept_glyph(r, k=1.62, stroke=34.0, gap=30.0):
     """Favicon / small-size glyph: the capsule alone, scaled up, no brackets."""
     r.background(lift=1.0)
@@ -653,15 +819,23 @@ CONCEPTS = {
     "monogram": concept_monogram,
     "grid": concept_grid,
     "checkpills": concept_checkpills,
+    "blush": concept_blush,
 }
 
 FINAL = "taken"  # the shipped icon: split2, capsule at FINAL_K scale, faint phosphor core
 
+# The composition each look's icon uses: Signal's, recoloured, except Blush.
+LOOK_CONCEPT = {"signal": FINAL, "phosphor": FINAL, "ice": FINAL, "blush": "blush"}
 
-def render(concept, variant="default", size=1024, ss=4, **kw):
-    r = Renderer(variant=variant, size=size, ss=ss)
+
+def render(concept, variant="default", size=1024, ss=4, look="signal", **kw):
+    r = Renderer(variant=variant, size=size, ss=ss, look=look)
     CONCEPTS[concept](r, **kw)
     return r.image()
+
+
+def render_look(look, variant="default", size=1024, ss=4):
+    return render(LOOK_CONCEPT[look], variant, size, ss, look=look)
 
 
 def save_png(img, path):
@@ -670,14 +844,68 @@ def save_png(img, path):
     img.save(path, "PNG", optimize=True, icc_profile=icc)
 
 
-def write_asset_catalog(concept, ss=4):
-    os.makedirs(APPICON_DIR, exist_ok=True)
+APPEARANCES = (("default", "", None), ("dark", "-dark", "dark"), ("tinted", "-tinted", "tinted"))
+
+
+def appiconset_contents(set_name):
+    """Contents.json for a 1024 single-size app icon set with its dark and tinted appearances, in Xcode's format."""
+    lines = ['{', '  "images" : [']
+    entries = []
+    for _, suffix, appearance in APPEARANCES:
+        e = ['    {']
+        if appearance:
+            e += ['      "appearances" : [', '        {', '          "appearance" : "luminosity",',
+                  f'          "value" : "{appearance}"', '        }', '      ],']
+        e += [f'      "filename" : "{set_name}{suffix}.png",', '      "idiom" : "universal",',
+              '      "platform" : "ios",', '      "size" : "1024x1024"', '    }']
+        entries.append("\n".join(e))
+    lines.append(",\n".join(entries))
+    lines += ['  ],', '  "info" : {', '    "author" : "xcode",', '    "version" : 1', '  }', '}']
+    return "\n".join(lines)
+
+
+def write_asset_catalog(concept, ss=4, looks=LOOK_ORDER):
+    """Every look's icon set: AppIcon (Signal, the primary icon) and the alternates AppIcon-<Name>."""
     out = {}
-    for variant, name in (("default", "AppIcon.png"), ("dark", "AppIcon-dark.png"), ("tinted", "AppIcon-tinted.png")):
-        img = render(concept, variant, 1024, ss)
-        save_png(img, os.path.join(APPICON_DIR, name))
-        out[variant] = img
-    save_png(out["default"], os.path.join(HERE, "icon-1024.png"))
+    for look in looks:
+        set_name = icon_set_name(look)
+        folder = os.path.join(ASSETS_DIR, f"{set_name}.appiconset")
+        os.makedirs(folder, exist_ok=True)
+        imgs = {}
+        for variant, suffix, _ in APPEARANCES:
+            img = render(concept if look == "signal" else LOOK_CONCEPT[look], variant, 1024, ss, look=look)
+            save_png(img, os.path.join(folder, f"{set_name}{suffix}.png"))
+            imgs[variant] = img
+        contents = os.path.join(folder, "Contents.json")
+        if look != "signal" or not os.path.exists(contents):
+            with open(contents, "w") as f:
+                f.write(appiconset_contents(set_name))
+        out[look] = imgs
+    if "signal" in out:
+        save_png(out["signal"]["default"], os.path.join(HERE, "icon-1024.png"))
+    return out.get("signal", {})
+
+
+def looks_sheet(out, ss=4):
+    """Every look's icon large, then at Home Screen sizes on a dark and a light wallpaper, for review."""
+    tile, pad = 440, 32
+    W = pad + len(LOOK_ORDER) * (tile + pad)
+    H = 1000
+    sheet = Image.new("RGB", (W, H), (20, 21, 24))
+    from PIL import ImageDraw, ImageFont
+    font = ImageFont.truetype(os.path.join(HERE, "fonts", "GeistMono-Medium.ttf"), 22)
+    draw = ImageDraw.Draw(sheet)
+    for k, look in enumerate(LOOK_ORDER):
+        img = render_look(look, "default", 1024, ss)
+        x = pad + k * (tile + pad)
+        draw.text((x, 24), LOOKS[look]["name"].upper(), fill=(161, 161, 170), font=font)
+        sheet.paste(img.resize((tile, tile), Image.LANCZOS), (x, 64), squircle_mask(tile))
+        for row, wall in enumerate(((46, 50, 58), (226, 222, 216))):
+            y = 540 + row * 230
+            sheet.paste(Image.new("RGB", (tile, 210), wall), (x, y))
+            for sz, ox in ((180, 20), (120, 220), (60, 360)):
+                sheet.paste(img.resize((sz, sz), Image.LANCZOS), (x + ox, y + (210 - sz) // 2), squircle_mask(sz))
+    sheet.save(out)
     return out
 
 
@@ -861,7 +1089,17 @@ def main():
     ap.add_argument("--ss", type=int, default=4)
     ap.add_argument("--concepts", help="render every concept (default variant) into this folder")
     ap.add_argument("--web-only", action="store_true", help="only the SVG marks and the site icons")
+    ap.add_argument("--look", choices=LOOK_ORDER, help="with --out: that look's icon")
+    ap.add_argument("--looks-sheet", help="write every look's icon, large and at Home Screen sizes, to this PNG")
+    ap.add_argument("--icons-only", action="store_true", help="only the asset catalog icon sets")
     a = ap.parse_args()
+    if a.looks_sheet:
+        print("wrote", looks_sheet(a.looks_sheet, ss=a.ss))
+        return
+    if a.out and a.look:
+        save_png(render_look(a.look, a.variant, a.size, a.ss), a.out)
+        print("wrote", a.out)
+        return
     if a.sheet:
         names = a.names.split(",") if a.names else sorted(CONCEPTS)
         print("wrote", contact_sheet(names, a.sheet, ss=a.ss))
@@ -879,7 +1117,9 @@ def main():
         return
     if not a.web_only:
         write_asset_catalog(a.concept, a.ss)
-        print("wrote asset catalog icons for", a.concept)
+        print("wrote asset catalog icon sets for", ", ".join(LOOK_ORDER))
+        if a.icons_only:
+            return
     write_svgs()
     write_web_assets(os.path.join(REPO, "docs"))
     print("wrote brand/mark.svg, brand/glyph.svg and the site icons in docs/")

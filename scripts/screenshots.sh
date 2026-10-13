@@ -52,10 +52,10 @@ diagnose() {
 }
 
 shoot() {
-  local name="$1" screen="$2"
+  local name="$1" screen="$2" look="${3:-signal}"
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
   sleep 1
-  xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" >/dev/null
+  xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" >/dev/null
   sleep 6
   local attempt size
   for attempt in 1 2 3 4; do
@@ -68,7 +68,7 @@ shoot() {
     if [ "$attempt" -eq 2 ]; then
       xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
       sleep 1
-      xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" >/dev/null
+      xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" >/dev/null
     fi
     sleep 4
   done
@@ -89,6 +89,23 @@ shoot 08-empty empty
 shoot 09-paywall paywall
 shoot 10-locked locked
 shoot 11-widgets-locked widgets-locked
+
+# The four looks (SPEC section 4), each chosen with -theme. Names end in the look, never in a state, so the store-shots
+# matcher (tools/store-shots/generate.mjs) keeps finding the Signal captures above by their state.
+shoot 13-look-signal look signal
+for look in blush phosphor ice; do
+  shoot "14-today-$look" today "$look"
+  shoot "15-today-done-$look" today-done "$look"
+  shoot "16-paywall-$look" paywall "$look"
+  shoot "17-widgets-$look" widgets "$look"
+  shoot "18-look-$look" look "$look"
+done
+# Blush is the light look: the sheets and system controls get a capture too.
+shoot 19-settings-blush settings blush
+shoot 20-add-blush add blush
+shoot 21-day-blush day blush
+shoot 22-locked-blush locked blush
+shoot 23-empty-blush empty blush
 
 # The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
 if [ -n "$small" ] && [ "$small" != "$udid" ]; then

@@ -131,15 +131,20 @@ struct StackSettings: Codable, Hashable, Sendable {
     /// Minutes after midnight for the nudge. Default 21:00.
     var reminderMinutes: Int = 21 * 60
     var hapticsEnabled: Bool = true
+    /// The look (Settings > LOOK). The app, the widgets, the Control Center control and the app icon follow it, so it
+    /// lives here in the App Group store with everything else. Files from before 1.1 have none: Signal.
+    var theme: ThemeID = .signal
 
-    init(dayStartHour: Int = 4, reminderEnabled: Bool = false, reminderMinutes: Int = 21 * 60, hapticsEnabled: Bool = true) {
+    init(dayStartHour: Int = 4, reminderEnabled: Bool = false, reminderMinutes: Int = 21 * 60, hapticsEnabled: Bool = true,
+         theme: ThemeID = .signal) {
         self.dayStartHour = dayStartHour
         self.reminderEnabled = reminderEnabled
         self.reminderMinutes = reminderMinutes
         self.hapticsEnabled = hapticsEnabled
+        self.theme = theme
     }
 
-    private enum CodingKeys: String, CodingKey { case dayStartHour, reminderEnabled, reminderMinutes, hapticsEnabled }
+    private enum CodingKeys: String, CodingKey { case dayStartHour, reminderEnabled, reminderMinutes, hapticsEnabled, theme }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -147,6 +152,8 @@ struct StackSettings: Codable, Hashable, Sendable {
         reminderEnabled = try c.decodeIfPresent(Bool.self, forKey: .reminderEnabled) ?? false
         reminderMinutes = min(max(try c.decodeIfPresent(Int.self, forKey: .reminderMinutes) ?? 21 * 60, 0), 24 * 60 - 1)
         hapticsEnabled = try c.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
+        // A look this version does not know (or a malformed one) reads as Signal and never costs the rest of the file.
+        theme = (try? c.decodeIfPresent(ThemeID.self, forKey: .theme)) ?? .signal
     }
 }
 

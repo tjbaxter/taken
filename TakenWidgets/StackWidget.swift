@@ -19,7 +19,7 @@ struct StackProvider: TimelineProvider {
         let now = Date()
         let state = TakenStore.shared.load()
         if context.isPreview && state.items.isEmpty {
-            completion(StackEntry(date: now, snapshot: .demo(now: now)))
+            completion(StackEntry(date: now, snapshot: .demo(now: now, theme: state.settings.theme)))
         } else {
             let ledger = ProLedgerStore.shared.load()
             completion(StackEntry(date: now, snapshot: Self.snapshot(state: state, ledger: ledger, at: now)))
@@ -76,8 +76,12 @@ struct StackWidgetView: View {
         self.entry = entry
     }
 
+    /// The look chosen in the app, read from the App Group store with the stack.
+    private var theme: Theme { entry.snapshot.theme.theme }
+
     var body: some View {
         content
+            .environment(\.theme, theme)
             .widgetURL(entry.snapshot.url)
     }
 
@@ -86,7 +90,7 @@ struct StackWidgetView: View {
         switch family {
         case .systemMedium:
             MediumStackView(snapshot: entry.snapshot)
-                .containerBackground(for: .widget) { Palette.bg }
+                .containerBackground(for: .widget) { theme.bg }
         case .accessoryCircular:
             CircularStackView(snapshot: entry.snapshot)
                 .containerBackground(for: .widget) { Color.clear }
@@ -98,7 +102,7 @@ struct StackWidgetView: View {
                 .containerBackground(for: .widget) { Color.clear }
         default:
             SmallStackView(snapshot: entry.snapshot)
-                .containerBackground(for: .widget) { Palette.bg }
+                .containerBackground(for: .widget) { theme.bg }
         }
     }
 }

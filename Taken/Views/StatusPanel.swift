@@ -10,6 +10,7 @@ struct StatusPanel: View {
     let streak: Int
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.theme) private var theme
     @State private var sweep: CGFloat = 0
     @State private var sweeping = false
     @State private var snap = false
@@ -25,6 +26,7 @@ struct StatusPanel: View {
     private var locked: Bool { summary.allTaken }
 
     var body: some View {
+        let frame = RoundedRectangle(cornerRadius: theme.radius.frame)
         VStack(alignment: .leading, spacing: 18) {
             topLine
             if locked { lockedReadout } else { counterReadout }
@@ -35,16 +37,15 @@ struct StatusPanel: View {
         .padding(.horizontal, 20)
         .padding(.top, 18)
         .padding(.bottom, 16)
-        .background(locked ? Palette.signalWash.opacity(0.35) : Palette.bgRaised.opacity(0.6))
+        .background(locked ? theme.signalWash.opacity(0.35) : theme.bgRaised.opacity(0.6), in: frame)
         .overlay {
-            CornerBrackets(length: snap ? 26 : 14)
-                .stroke(locked ? Palette.signal : Palette.fgSubtle,
-                        style: StrokeStyle(lineWidth: 1.5, lineCap: .square))
-                .shadow(color: locked ? Palette.signal.opacity(0.55) : .clear, radius: 6)
-                .padding(0.75)
+            CornerBrackets(length: (snap ? 26 : 14) * theme.brackets.scale, radius: theme.bracketRadius(theme.radius.frame))
+                .stroke(locked ? theme.signal : theme.bracket, style: theme.brackets.style)
+                .shadow(color: locked ? theme.glow(0.55) : .clear, radius: 6)
+                .padding(theme.brackets.width / 2)
         }
         .overlay(alignment: .top) { scanline }
-        .clipped()
+        .clipShape(frame)
         .animation(.snappy(duration: 0.3), value: locked)
         .onAppear { snap = locked }
         .onChange(of: locked) { _, isLocked in
@@ -60,9 +61,9 @@ struct StatusPanel: View {
     private var topLine: some View {
         HStack(spacing: 8) {
             Lamp(on: locked)
-            Text(locked ? "LOCKED IN" : "TAKEN TODAY").hud(11, locked ? Palette.signal : Palette.fgSubtle)
+            Text(locked ? "LOCKED IN" : "TAKEN TODAY").hud(11, locked ? theme.signalInk : theme.fgSubtle)
             Spacer(minLength: 8)
-            Text(rightLabel).hud(11, Palette.fgSubtle, tracking: 0.12)
+            Text(rightLabel).hud(11, theme.fgSubtle, tracking: 0.12)
         }
     }
 
@@ -77,10 +78,10 @@ struct StatusPanel: View {
         HStack(alignment: .bottom, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("\(summary.takenDueDoses)")
-                    .foregroundStyle(Palette.fg)
+                    .foregroundStyle(theme.fg)
                     .contentTransition(.numericText())
                 Text("/\(summary.dueDoses)")
-                    .foregroundStyle(Palette.fgSubtle)
+                    .foregroundStyle(theme.fgSubtle)
             }
             .font(.monoFixed(68, .monoMedium))
             .tracking(-2)
@@ -98,29 +99,30 @@ struct StatusPanel: View {
                 Text("ALL TAKEN")
                     .font(.monoFixed(44, .monoSemibold))
                     .tracking(-0.5)
-                    .foregroundStyle(Palette.signal)
-                    .shadow(color: Palette.signal.opacity(0.45), radius: 16)
+                    .foregroundStyle(theme.signalInk)
+                    .shadow(color: theme.glow(0.45), radius: 16)
                     .lineLimit(1)
                     .minimumScaleFactor(0.6)
                 Spacer(minLength: 0)
                 ZStack {
-                    Rectangle()
-                        .fill(Palette.signal)
+                    // Square in the HUD looks, a soft square in Blush.
+                    RoundedRectangle(cornerRadius: 8 * theme.radius.lampRoundness)
+                        .fill(theme.signal)
                         .frame(width: 34, height: 34)
-                        .shadow(color: Palette.signal.opacity(0.6), radius: 10)
+                        .shadow(color: theme.glow(0.6), radius: 10)
                     CheckShape()
-                        .stroke(Palette.bg, style: StrokeStyle(lineWidth: 3.2, lineCap: .square, lineJoin: .miter))
+                        .stroke(theme.onSignal, style: StrokeStyle(lineWidth: 3.2, lineCap: .square, lineJoin: .miter))
                         .frame(width: 22, height: 22)
                 }
                 .scaleEffect(snap ? 1 : 0.6)
             }
             HStack(spacing: 12) {
                 if streak > 0 {
-                    Text("STREAK \(streak)D").hud(11, Palette.signal, tracking: 0.12)
+                    Text("STREAK \(streak)D").hud(11, theme.signalInk, tracking: 0.12)
                 }
                 if let last = summary.lastDose {
                     Text("LAST DOSE \(Fmt.clock(last.takenAt, clock)) \u{00B7} \(Fmt.ago(last.takenAt, now: now))")
-                        .hud(11, Palette.fgMuted, tracking: 0.12)
+                        .hud(11, theme.fgMuted, tracking: 0.12)
                 }
             }
             .lineLimit(1)
@@ -133,19 +135,19 @@ struct StatusPanel: View {
     private var lastDoseBlock: some View {
         if let last = summary.lastDose {
             VStack(alignment: .trailing, spacing: 5) {
-                Text("LAST DOSE").hud(10, Palette.fgSubtle)
+                Text("LAST DOSE").hud(10, theme.fgSubtle)
                 Text(Fmt.clock(last.takenAt, clock))
                     .font(.monoFixed(20, .monoMedium))
-                    .foregroundStyle(Palette.signal)
-                Text(Fmt.ago(last.takenAt, now: now)).hud(10, Palette.fgSubtle, tracking: 0.12)
+                    .foregroundStyle(theme.signalInk)
+                Text(Fmt.ago(last.takenAt, now: now)).hud(10, theme.fgSubtle, tracking: 0.12)
             }
         } else {
             VStack(alignment: .trailing, spacing: 5) {
-                Text("LAST DOSE").hud(10, Palette.fgSubtle)
+                Text("LAST DOSE").hud(10, theme.fgSubtle)
                 Text("--:--")
                     .font(.monoFixed(20, .monoMedium))
-                    .foregroundStyle(Palette.fgSubtle)
-                Text("NONE TODAY").hud(10, Palette.fgSubtle, tracking: 0.12)
+                    .foregroundStyle(theme.fgSubtle)
+                Text("NONE TODAY").hud(10, theme.fgSubtle, tracking: 0.12)
             }
         }
     }
@@ -155,9 +157,9 @@ struct StatusPanel: View {
         if sweeping {
             GeometryReader { geo in
                 Rectangle()
-                    .fill(Palette.signal)
+                    .fill(theme.signal)
                     .frame(height: 2)
-                    .shadow(color: Palette.signal.opacity(0.9), radius: 8)
+                    .shadow(color: theme.glow(0.9), radius: 8)
                     .offset(y: sweep * geo.size.height)
             }
             .allowsHitTesting(false)
@@ -185,18 +187,25 @@ struct StatusPanel: View {
 
 /// One segment per due dose. Lit segments glow.
 struct SegmentBar: View {
+    @Environment(\.theme) private var theme
     let total: Int
     let lit: Int
 
+    init(total: Int, lit: Int) {
+        self.total = total
+        self.lit = lit
+    }
+
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: theme.radius.segment)
         HStack(spacing: 4) {
             ForEach(0..<max(total, 1), id: \.self) { index in
                 let on = total > 0 && index < lit
-                Rectangle()
-                    .fill(on ? Palette.signal : Palette.bgInset)
-                    .overlay(Rectangle().strokeBorder(on ? Color.clear : Palette.line, lineWidth: 1))
+                shape
+                    .fill(on ? theme.signal : theme.bgInset)
+                    .overlay(shape.strokeBorder(on ? Color.clear : theme.line, lineWidth: 1))
                     .frame(height: 6)
-                    .shadow(color: on ? Palette.signal.opacity(0.55) : .clear, radius: 5)
+                    .shadow(color: on ? theme.glow(0.55) : .clear, radius: 5)
             }
         }
         .animation(.snappy(duration: 0.25), value: lit)
@@ -206,13 +215,23 @@ struct SegmentBar: View {
 
 /// A 24-hour tick ruler from day start to day start, with a mark at every dose and a NOW cursor.
 struct DayRuler: View {
+    @Environment(\.theme) private var theme
     let dayStart: Date
     let dayEnd: Date
     let doses: [Date]
     let now: Date
     let dayStartHour: Int
 
+    init(dayStart: Date, dayEnd: Date, doses: [Date], now: Date, dayStartHour: Int) {
+        self.dayStart = dayStart
+        self.dayEnd = dayEnd
+        self.doses = doses
+        self.now = now
+        self.dayStartHour = dayStartHour
+    }
+
     var body: some View {
+        let theme = self.theme
         VStack(spacing: 5) {
             Canvas { context, size in
                 let span = max(dayEnd.timeIntervalSince(dayStart), 1)
@@ -222,28 +241,28 @@ struct DayRuler: View {
                     let major = hour % 6 == 0
                     let height: CGFloat = major ? size.height : 4
                     context.fill(Path(CGRect(x: x, y: size.height - height, width: 1, height: height)),
-                                 with: .color(major ? Palette.tick : Palette.lineDash))
+                                 with: .color(major ? theme.tick : theme.lineDash))
                 }
                 let nowFraction = now.timeIntervalSince(dayStart) / span
                 if nowFraction >= 0 && nowFraction <= 1 {
                     let x = min(max(width * CGFloat(nowFraction), 3), width - 3)
                     context.fill(Path(CGRect(x: x - 0.75, y: 3, width: 1.5, height: size.height - 3)),
-                                 with: .color(Palette.fg))
+                                 with: .color(theme.fg))
                     var cap = Path()
                     cap.move(to: CGPoint(x: x - 3.5, y: 0))
                     cap.addLine(to: CGPoint(x: x + 3.5, y: 0))
                     cap.addLine(to: CGPoint(x: x, y: 4.5))
                     cap.closeSubpath()
-                    context.fill(cap, with: .color(Palette.fg))
+                    context.fill(cap, with: .color(theme.fg))
                 }
                 for dose in doses {
                     let fraction = dose.timeIntervalSince(dayStart) / span
                     guard fraction >= 0 && fraction <= 1 else { continue }
                     let x = width * CGFloat(fraction)
                     context.drawLayer { layer in
-                        layer.addFilter(.shadow(color: Palette.signal.opacity(0.8), radius: 3))
+                        layer.addFilter(.shadow(color: theme.glow(0.8), radius: 3))
                         layer.fill(Path(CGRect(x: x - 1.5, y: 4, width: 3, height: size.height - 4)),
-                                   with: .color(Palette.signal))
+                                   with: .color(theme.signal))
                     }
                 }
             }
@@ -252,7 +271,7 @@ struct DayRuler: View {
                 ForEach(0..<5, id: \.self) { index in
                     if index > 0 { Spacer(minLength: 0) }
                     Text(String(format: "%02d", (dayStartHour + index * 6) % 24))
-                        .hudFixed(9.5, Palette.fgFaint, tracking: 0.06)
+                        .hudFixed(9.5, theme.fgFaint, tracking: 0.06)
                 }
             }
         }

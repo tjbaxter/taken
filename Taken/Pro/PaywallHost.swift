@@ -58,7 +58,8 @@ private struct PaywallHost: ViewModifier {
             .sheet(item: binding, onDismiss: { model.paywallDidDismiss() }) { request in
                 PaywallView(request: request)
                     .environment(model)
-                    .preferredColorScheme(.dark)
+                    .environment(\.theme, model.theme)
+                    .preferredColorScheme(model.theme.scheme)
             }
     }
 

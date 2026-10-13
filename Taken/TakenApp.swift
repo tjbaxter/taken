@@ -9,9 +9,13 @@ struct TakenApp: App {
 
     var body: some Scene {
         WindowGroup {
-            RootView()
+            // The look (Settings > LOOK) is the environment's theme; its colour scheme drives the status bar, sheets,
+            // menus and system controls, and a light look fades in from the dark launch screen.
+            RootView(veiled: model.theme.isLight)
                 .environment(model)
-                .preferredColorScheme(.dark)
+                .environment(\.theme, model.theme)
+                .preferredColorScheme(model.theme.scheme)
+                .tint(model.theme.signalInk)
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .onOpenURL { model.handle(url: $0) }
         }

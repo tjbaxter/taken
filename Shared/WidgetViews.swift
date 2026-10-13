@@ -2,7 +2,9 @@ import AppIntents
 import SwiftUI
 import WidgetKit
 
-// Widget content, shared by the widget extension and the app's preview gallery (`-demo -screen widgets`).
+// Widget content, shared by the widget extension and the app's preview gallery (`-demo -screen widgets`). Every colour
+// comes from `@Environment(\.theme)`: the widget extension sets it from the look in the App Group store, the gallery
+// from the app's.
 
 // MARK: - Snapshot
 
@@ -33,6 +35,8 @@ struct WidgetSnapshot: Sendable {
     let nextReady: Date?
     /// Logging needs Taken Pro: the stack shows read-only with a small PRO glyph, and a tap opens the paywall.
     let locked: Bool
+    /// The look chosen in the app (Settings > LOOK).
+    let theme: ThemeID
 
     var allTaken: Bool { dueDoses > 0 && takenDue >= dueDoses }
 
@@ -59,17 +63,26 @@ struct WidgetSnapshot: Sendable {
         lastDose = summary.lastDose?.takenAt
         hasStack = !summary.isEmpty
         self.locked = locked && !summary.isEmpty
+        theme = state.settings.theme
     }
 
-    static func demo(now: Date) -> WidgetSnapshot {
-        WidgetSnapshot(state: DemoData.state(now: now, allTaken: false), now: now)
+    /// The widget gallery's preview, in the look chosen in the app.
+    static func demo(now: Date, theme: ThemeID = .signal) -> WidgetSnapshot {
+        var state = DemoData.state(now: now, allTaken: false)
+        state.settings.theme = theme
+        return WidgetSnapshot(state: state, now: now)
     }
 }
 
 // MARK: - Home Screen
 
 private struct WidgetHeader: View {
+    @Environment(\.theme) private var theme
     let snapshot: WidgetSnapshot
+
+    init(snapshot: WidgetSnapshot) {
+        self.snapshot = snapshot
+    }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -77,7 +90,7 @@ private struct WidgetHeader: View {
                 .frame(width: 13, height: 13)
                 .widgetAccentable()
             Text("TAKEN")
-                .hudFixed(10, Palette.fg, face: .monoSemibold, tracking: 0.24)
+                .hudFixed(10, theme.fg, face: .monoSemibold, tracking: 0.24)
             Spacer(minLength: 0)
             if snapshot.locked { ProLockGlyph() }
         }
@@ -86,6 +99,10 @@ private struct WidgetHeader: View {
 
 /// The small PRO lock glyph on a locked widget.
 struct ProLockGlyph: View {
+    @Environment(\.theme) private var theme
+
+    init() {}
+
     var body: some View {
         HStack(spacing: 3) {
             Image(systemName: "lock.fill")
@@ -94,10 +111,10 @@ struct ProLockGlyph: View {
                 .font(.monoFixed(8.5, .monoSemibold))
                 .tracking(8.5 * 0.14)
         }
-        .foregroundStyle(Palette.signal)
+        .foregroundStyle(theme.signalInk)
         .padding(.horizontal, 5)
         .frame(height: 15)
-        .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Palette.signalEdge, lineWidth: 1))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.mark).strokeBorder(theme.signalEdge, lineWidth: 1))
         .widgetAccentable()
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Logging needs Taken Pro")
@@ -108,6 +125,7 @@ private struct MiniBar: View {
     let total: Int
     let lit: Int
     @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.theme) private var theme
 
     init(total: Int, lit: Int) {
         self.total = total
@@ -115,15 +133,16 @@ private struct MiniBar: View {
     }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: min(theme.radius.segment, 2))
         HStack(spacing: 3) {
             ForEach(0..<max(total, 1), id: \.self) { index in
                 if total > 0 && index < lit {
-                    Rectangle().fill(Palette.signal).frame(height: 4).widgetAccentable()
+                    shape.fill(theme.signal).frame(height: 4).widgetAccentable()
                 } else {
                     // Tinted and clear Home Screens draw every opaque fill white: an unlit segment
                     // keeps its meaning only as a faint one.
-                    Rectangle().fill(renderingMode == .fullColor ? Palette.bgInset : Color.white.opacity(0.2))
-                        .overlay(Rectangle().strokeBorder(Palette.line, lineWidth: 1))
+                    shape.fill(renderingMode == .fullColor ? theme.bgInset : theme.accentedFaint)
+                        .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
                         .frame(height: 4)
                 }
             }
@@ -135,6 +154,7 @@ private struct Counter: View {
     let snapshot: WidgetSnapshot
     let size: CGFloat
     @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.theme) private var theme
 
     init(snapshot: WidgetSnapshot, size: CGFloat) {
         self.snapshot = snapshot
@@ -143,9 +163,9 @@ private struct Counter: View {
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
-            Text("\(snapshot.takenDue)").foregroundStyle(Palette.fg)
+            Text("\(snapshot.takenDue)").foregroundStyle(theme.fg)
             Text("/\(snapshot.dueDoses)")
-                .foregroundStyle(renderingMode == .fullColor ? Palette.fgFaint : Palette.fg.opacity(0.45))
+                .foregroundStyle(renderingMode == .fullColor ? theme.fgFaint : theme.fg.opacity(0.45))
         }
         .font(.monoFixed(size, .monoMedium))
         .tracking(-1)
@@ -157,18 +177,21 @@ private struct Counter: View {
 private struct TakeAllWidgetButton: View {
     let pending: Int
     @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.theme) private var theme
 
     init(pending: Int) {
         self.pending = pending
     }
 
     var body: some View {
-        // Full colour: the light button. Tinted and clear Home Screens draw every opaque fill and label
+        // Full colour: the solid button. Tinted and clear Home Screens draw every opaque fill and label
         // white, so there the button is an outline and the label stays readable.
         let fullColor = renderingMode == .fullColor
+        let shape = RoundedRectangle(cornerRadius: min(theme.radius.panel, 10))
         Button(intent: TakeAllIntent()) {
             HStack(spacing: 6) {
-                Rectangle().fill(Palette.signal).frame(width: 5, height: 5).widgetAccentable()
+                LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 5, height: 5)
+                    .widgetAccentable()
                 Text("TAKE ALL")
                     .font(.monoFixed(11, .monoSemibold))
                     .tracking(11 * 0.1)
@@ -178,16 +201,16 @@ private struct TakeAllWidgetButton: View {
                         .opacity(0.6)
                 }
             }
-            .foregroundStyle(fullColor ? Palette.buttonText : Palette.fg)
+            .foregroundStyle(fullColor ? theme.buttonText : theme.fg)
             .frame(maxWidth: .infinity)
             .frame(height: 34)
             .background {
                 if fullColor {
-                    RoundedRectangle(cornerRadius: 4).fill(Palette.button)
+                    shape.fill(theme.button)
                 } else {
-                    RoundedRectangle(cornerRadius: 4)
-                        .fill(Color.white.opacity(0.12))
-                        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Color.white.opacity(0.6), lineWidth: 1))
+                    shape
+                        .fill(theme.accentedFill)
+                        .overlay(shape.strokeBorder(theme.accentedStroke, lineWidth: 1))
                 }
             }
         }
@@ -197,14 +220,21 @@ private struct TakeAllWidgetButton: View {
 
 /// The small widget's bottom line when there is no TAKE ALL to show.
 private struct StatusLine: View {
+    @Environment(\.theme) private var theme
     let text: String
     var lit: Bool = true
 
+    init(text: String, lit: Bool = true) {
+        self.text = text
+        self.lit = lit
+    }
+
     var body: some View {
         HStack(spacing: 6) {
-            Rectangle().fill(lit ? Palette.signal : Palette.fgFaint).frame(width: 5, height: 5).widgetAccentable()
+            LampShape(roundness: theme.radius.lampRoundness).fill(lit ? theme.signal : theme.fgFaint)
+                .frame(width: 5, height: 5).widgetAccentable()
             Text(text)
-                .hudFixed(9.5, Palette.fgMuted, tracking: 0.12)
+                .hudFixed(9.5, theme.fgMuted, tracking: 0.12)
         }
         .frame(height: 34, alignment: .leading)
     }
@@ -213,22 +243,35 @@ private struct StatusLine: View {
 private struct LockedLine: View {
     let snapshot: WidgetSnapshot
 
+    init(snapshot: WidgetSnapshot) {
+        self.snapshot = snapshot
+    }
+
     var body: some View {
         StatusLine(text: snapshot.lastDose.map { "LOCKED \(Fmt.clock($0, snapshot.clock))" } ?? "LOCKED")
     }
 }
 
 private struct EmptyWidgetLine: View {
+    @Environment(\.theme) private var theme
+
+    init() {}
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("NO STACK YET").hudFixed(10, Palette.fgMuted, tracking: 0.12)
-            Text("OPEN TAKEN TO ADD").hudFixed(9, Palette.fgFaint, tracking: 0.12)
+            Text("NO STACK YET").hudFixed(10, theme.fgMuted, tracking: 0.12)
+            Text("OPEN TAKEN TO ADD").hudFixed(9, theme.fgFaint, tracking: 0.12)
         }
     }
 }
 
 struct SmallStackView: View {
+    @Environment(\.theme) private var theme
     let snapshot: WidgetSnapshot
+
+    init(snapshot: WidgetSnapshot) {
+        self.snapshot = snapshot
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -240,7 +283,7 @@ struct SmallStackView: View {
             } else if snapshot.allTaken {
                 Text("ALL\nTAKEN")
                     .font(.monoFixed(24, .monoSemibold))
-                    .foregroundStyle(Palette.signal)
+                    .foregroundStyle(theme.signalInk)
                     .widgetAccentable()
                 Spacer(minLength: 6)
                 MiniBar(total: snapshot.dueDoses, lit: snapshot.takenDue)
@@ -268,30 +311,35 @@ struct SmallStackView: View {
 }
 
 struct MediumStackView: View {
+    @Environment(\.theme) private var theme
     let snapshot: WidgetSnapshot
+
+    init(snapshot: WidgetSnapshot) {
+        self.snapshot = snapshot
+    }
 
     var body: some View {
         HStack(spacing: 14) {
             SmallStackView(snapshot: snapshot)
                 .frame(width: 124)
-            Rectangle().fill(Palette.line).frame(width: 1)
+            Rectangle().fill(theme.line).frame(width: 1)
             VStack(alignment: .leading, spacing: 0) {
                 if snapshot.rows.isEmpty {
                     Text(snapshot.hasStack ? "NOTHING DUE TODAY" : "ADD YOUR STACK IN TAKEN")
-                        .hudFixed(10, Palette.fgSubtle, tracking: 0.12)
+                        .hudFixed(10, theme.fgSubtle, tracking: 0.12)
                     Spacer(minLength: 0)
                 } else {
                     ForEach(Array(snapshot.rows.prefix(4).enumerated()), id: \.element.id) { index, row in
                         if index > 0 {
                             HLine()
-                                .stroke(Palette.lineDash, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                                .stroke(theme.lineDash, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
                                 .frame(height: 1)
                         }
                         MediumRow(row: row, clock: snapshot.clock, locked: snapshot.locked)
                     }
                     if snapshot.rows.count > 4 {
                         Text("+\(snapshot.rows.count - 4) MORE")
-                            .hudFixed(9, Palette.fgFaint, tracking: 0.12)
+                            .hudFixed(9, theme.fgFaint, tracking: 0.12)
                             .padding(.top, 2)
                     }
                     Spacer(minLength: 0)
@@ -302,9 +350,16 @@ struct MediumStackView: View {
 }
 
 private struct MediumRow: View {
+    @Environment(\.theme) private var theme
     let row: WidgetRow
     let clock: DayClock
     let locked: Bool
+
+    init(row: WidgetRow, clock: DayClock, locked: Bool) {
+        self.row = row
+        self.clock = clock
+        self.locked = locked
+    }
 
     var body: some View {
         if locked && !row.done {
@@ -324,21 +379,21 @@ private struct MediumRow: View {
             Text(row.code)
                 .font(.monoFixed(11, .monoSemibold))
                 .tracking(0.8)
-                .foregroundStyle(row.done ? Palette.signal : Palette.fgMuted)
+                .foregroundStyle(row.done ? theme.signalInk : theme.fgMuted)
                 .frame(width: 30, alignment: .leading)
             Text(row.name)
                 .font(.custom(Face.sans.rawValue, fixedSize: 12))
-                .foregroundStyle(row.done ? Palette.fg : Palette.fgMuted)
+                .foregroundStyle(row.done ? theme.fg : theme.fgMuted)
                 .lineLimit(1)
             Spacer(minLength: 4)
             if let last = row.lastTime {
                 Text(row.due > 1 && !row.done ? "\(row.taken)/\(row.due)" : Fmt.clock(last, clock))
                     .font(.monoFixed(11, .monoMedium))
-                    .foregroundStyle(Palette.signal)
+                    .foregroundStyle(theme.signalInk)
                     .widgetAccentable()
             } else {
                 Text(row.ready && !locked ? "TAP" : "--:--")
-                    .hudFixed(9, Palette.fgFaint, tracking: 0.14)
+                    .hudFixed(9, theme.fgFaint, tracking: 0.14)
             }
         }
         .frame(maxHeight: .infinity)
@@ -348,10 +403,10 @@ private struct MediumRow: View {
     @ViewBuilder
     private var mark: some View {
         if row.done {
-            Circle().fill(Palette.signal).frame(width: 9, height: 9).widgetAccentable()
+            Circle().fill(theme.signal).frame(width: 9, height: 9).widgetAccentable()
         } else {
             Circle()
-                .strokeBorder(Palette.fgFaint, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
+                .strokeBorder(theme.fgFaint, style: StrokeStyle(lineWidth: 1, dash: [2, 2]))
                 .frame(width: 9, height: 9)
         }
     }
@@ -359,8 +414,15 @@ private struct MediumRow: View {
 
 // MARK: - Lock Screen
 
+// The system draws Lock Screen widgets in its own vibrant white (and the accent on `widgetAccentable` parts), so
+// these name no colours: they look the same in every look.
+
 struct CircularStackView: View {
     let snapshot: WidgetSnapshot
+
+    init(snapshot: WidgetSnapshot) {
+        self.snapshot = snapshot
+    }
 
     var body: some View {
         if !snapshot.hasStack || snapshot.dueDoses == 0 {
@@ -416,6 +478,10 @@ struct CircularStackView: View {
 
 struct RectangularStackView: View {
     let snapshot: WidgetSnapshot
+
+    init(snapshot: WidgetSnapshot) {
+        self.snapshot = snapshot
+    }
 
     var body: some View {
         if !snapshot.hasStack {
@@ -474,6 +540,10 @@ struct RectangularStackView: View {
 
 struct InlineStackView: View {
     let snapshot: WidgetSnapshot
+
+    init(snapshot: WidgetSnapshot) {
+        self.snapshot = snapshot
+    }
 
     var body: some View {
         if !snapshot.hasStack {

@@ -12,6 +12,7 @@ struct ItemRowView: View {
     let onTap: () -> Void
 
     @Environment(\.dynamicTypeSize) private var typeSize
+    @Environment(\.theme) private var theme
 
     init(row: ItemDay, now: Date, clock: DayClock, expanded: Bool, notDueLabel: String? = nil, locked: Bool = false,
          onTap: @escaping () -> Void) {
@@ -87,11 +88,11 @@ struct ItemRowView: View {
     private var nameText: some View {
         Text(row.item.name)
             .font(.sans(17, .sansMedium))
-            .foregroundStyle(notDueLabel != nil && row.doses.isEmpty ? Palette.fgMuted : Palette.fg)
+            .foregroundStyle(notDueLabel != nil && row.doses.isEmpty ? theme.fgMuted : theme.fg)
     }
 
     private var frequencyText: some View {
-        Text(Fmt.frequency(row.frequency)).hud(10.5, Palette.fgSubtle, tracking: 0.12)
+        Text(Fmt.frequency(row.frequency)).hud(10.5, theme.fgSubtle, tracking: 0.12)
     }
 
     private func agoText(_ last: Dose) -> String {
@@ -104,14 +105,14 @@ struct ItemRowView: View {
             VStack(alignment: .trailing, spacing: 5) {
                 Text(Fmt.clock(last.takenAt, clock))
                     .font(.monoFixed(15, .monoMedium))
-                    .foregroundStyle(Palette.signal)
+                    .foregroundStyle(theme.signalInk)
                 Text(agoText(last))
-                    .hud(10, Palette.fgSubtle, tracking: 0.1)
+                    .hud(10, theme.fgSubtle, tracking: 0.1)
             }
         } else if let notDueLabel {
-            Text(notDueLabel).hud(10, Palette.fgSubtle, tracking: 0.1)
+            Text(notDueLabel).hud(10, theme.fgSubtle, tracking: 0.1)
         } else {
-            Text("PENDING").hud(10.5, Palette.fgSubtle, tracking: 0.14)
+            Text("PENDING").hud(10.5, theme.fgSubtle, tracking: 0.14)
         }
     }
 
@@ -121,14 +122,14 @@ struct ItemRowView: View {
             HStack(spacing: 8) {
                 Text(Fmt.clock(last.takenAt, clock))
                     .font(.monoFixed(15, .monoMedium))
-                    .foregroundStyle(Palette.signal)
+                    .foregroundStyle(theme.signalInk)
                 Text(agoText(last))
-                    .hud(10, Palette.fgSubtle, tracking: 0.1)
+                    .hud(10, theme.fgSubtle, tracking: 0.1)
             }
         } else if let notDueLabel {
-            Text(notDueLabel).hud(10, Palette.fgSubtle, tracking: 0.1)
+            Text(notDueLabel).hud(10, theme.fgSubtle, tracking: 0.1)
         } else {
-            Text("PENDING").hud(10.5, Palette.fgSubtle, tracking: 0.14)
+            Text("PENDING").hud(10.5, theme.fgSubtle, tracking: 0.14)
         }
     }
 
@@ -136,8 +137,8 @@ struct ItemRowView: View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(row.doses.enumerated()), id: \.element.id) { index, dose in
                 HStack(spacing: 8) {
-                    Rectangle().fill(Palette.signal).frame(width: 5, height: 5)
-                    Text(detailText(index: index, dose: dose)).hud(11, Palette.fgMuted, tracking: 0.1)
+                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 5, height: 5)
+                    Text(detailText(index: index, dose: dose)).hud(11, theme.fgMuted, tracking: 0.1)
                 }
             }
         }
@@ -171,6 +172,10 @@ struct ItemRowView: View {
 struct StateMark: View {
     let row: ItemDay
 
+    init(row: ItemDay) {
+        self.row = row
+    }
+
     var body: some View {
         if row.dosesPerDay > 1 && row.isDue {
             HStack(spacing: 5) {
@@ -188,6 +193,7 @@ struct StateMark: View {
 struct Pip: View {
     let lit: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.theme) private var theme
 
     init(lit: Bool) {
         self.lit = lit
@@ -196,12 +202,12 @@ struct Pip: View {
     var body: some View {
         ZStack {
             Circle()
-                .strokeBorder(Palette.fgFaint, style: StrokeStyle(lineWidth: 1.2, dash: [2.5, 2.5]))
+                .strokeBorder(theme.fgFaint, style: StrokeStyle(lineWidth: 1.2, dash: [2.5, 2.5]))
                 .opacity(lit ? 0 : 1)
             if lit {
                 Circle()
-                    .fill(Palette.signal)
-                    .shadow(color: Palette.signal.opacity(0.6), radius: 4)
+                    .fill(theme.signal)
+                    .shadow(color: theme.glow(0.6), radius: 4)
                     .transition(reduceMotion ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
             }
         }
@@ -213,6 +219,7 @@ struct Pip: View {
 struct Disc: View {
     let lit: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.theme) private var theme
 
     init(lit: Bool) {
         self.lit = lit
@@ -221,15 +228,15 @@ struct Disc: View {
     var body: some View {
         ZStack {
             Circle()
-                .strokeBorder(Palette.fgFaint, style: StrokeStyle(lineWidth: 1.4, dash: [3, 3]))
+                .strokeBorder(theme.fgFaint, style: StrokeStyle(lineWidth: 1.4, dash: [3, 3]))
                 .opacity(lit ? 0 : 1)
             if lit {
                 ZStack {
                     Circle()
-                        .fill(Palette.signal)
-                        .shadow(color: Palette.signal.opacity(0.6), radius: 6)
+                        .fill(theme.signal)
+                        .shadow(color: theme.glow(0.6), radius: 6)
                     CheckShape()
-                        .stroke(Palette.bg, style: StrokeStyle(lineWidth: 2.4, lineCap: .square, lineJoin: .miter))
+                        .stroke(theme.onSignal, style: StrokeStyle(lineWidth: 2.4, lineCap: .square, lineJoin: .miter))
                         .frame(width: 15, height: 15)
                 }
                 .transition(reduceMotion ? .opacity : .scale(scale: 0.5).combined(with: .opacity))

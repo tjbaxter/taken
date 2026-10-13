@@ -52,7 +52,10 @@ targets:
         TARGETED_DEVICE_FAMILY: "1"
         INFOPLIST_FILE: Taken/Info.plist
         CODE_SIGN_ENTITLEMENTS: Taken/Taken.entitlements
+        # Signal's icon is the primary; each other look has its own alternate icon (Taken switches with
+        # UIApplication.setAlternateIconName when the look changes). The names match ThemeID.alternateIconName.
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        ASSETCATALOG_COMPILER_ALTERNATE_APPICON_NAMES: "AppIcon-Blush AppIcon-Phosphor AppIcon-Ice"
         ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME: AccentColor
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: NO
         ENABLE_PREVIEWS: YES

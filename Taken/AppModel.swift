@@ -45,6 +45,9 @@ final class AppModel {
     private let clockNow: @Sendable () -> Date
 
     private(set) var state: StackState
+    /// The look (Settings > LOOK): set at launch and whenever the stored one changes, so views that only need the
+    /// look redraw only when it does.
+    private(set) var theme: Theme
     private(set) var now: Date
     private(set) var engine: StackEngine
     private(set) var today: DaySummary
@@ -70,6 +73,7 @@ final class AppModel {
     @ObservationIgnored private var darwinObserver: DarwinObserver?
     @ObservationIgnored private var introTask: Task<Void, Never>?
     @ObservationIgnored private var introWaitsForSheet = false
+    @ObservationIgnored private var iconTask: Task<Void, Never>?
     /// What the paywall was opened for, run once Pro is on and the sheet has closed.
     @ObservationIgnored private var afterPaywall: (@MainActor () -> Void)?
 
@@ -85,6 +89,7 @@ final class AppModel {
         let engine = StackEngine(state: state, clock: DayClock(dayStartHour: state.settings.dayStartHour))
         self.pro = pro ?? ProStore(ledger: .shared, hasLogged: !state.doses.isEmpty)
         self.state = state
+        self.theme = Theme.look(state.settings.theme)
         self.now = now
         self.engine = engine
         self.today = engine.todaySummary(now: now)
@@ -111,12 +116,18 @@ final class AppModel {
         guard arguments.contains("-demo") else {
             return AppModel(store: .shared, isDemo: false, launchScreen: nil, clockNow: { Date() })
         }
+        // `-theme blush` (signal, blush, phosphor, ice): the screenshots of every look.
+        var look = ThemeID.signal
+        if let index = arguments.firstIndex(of: "-theme"), index + 1 < arguments.count {
+            look = ThemeID(stored: arguments[index + 1])
+        }
         let demoNow = DemoData.referenceNow()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("taken-demo-\(UUID().uuidString).json")
         let store = TakenStore(fileURL: url, postsChangeNotifications: false)
-        let seeded = screen == "add" || screen == "empty"
+        var seeded = screen == "add" || screen == "empty"
             ? StackState(settings: StackSettings(reminderEnabled: true))
             : DemoData.state(now: demoNow, allTaken: screen == "today-done")
+        seeded.settings.theme = look
         try? store.replace(with: seeded)
         // Store screenshots show Taken with Pro; -screen paywall and -screen locked show it without.
         let pro = ProStore(demoLocked: screen == "paywall" || screen == "locked", now: demoNow)
@@ -200,6 +211,8 @@ final class AppModel {
         consumePendingLog()
         // A first dose logged from a widget, or an app closed before the sheet came up, still gets its one paywall.
         if !state.doses.isEmpty && !pro.introShown { scheduleIntro() }
+        // An icon change that could not finish (the app left the foreground first) is finished now.
+        scheduleIconSync(after: .milliseconds(900))
     }
 
     func applyLaunchScreen() async {
@@ -209,6 +222,7 @@ final class AppModel {
         case "add": sheet = .add
         case "settings": sheet = .settings
         case "day": sheet = .day(DemoData.sheetDay(now: now))
+        case "look": sheet = .settings
         case "log": scrollTarget = "log"
         case "paywall": presentPaywall(origin: .intro)
         default: break
@@ -248,6 +262,10 @@ final class AppModel {
 
     private func apply(_ fresh: StackState) {
         state = fresh
+        if fresh.settings.theme != theme.id {
+            theme = Theme.look(fresh.settings.theme)
+            scheduleIconSync()
+        }
         now = clockNow()
         engine = StackEngine(state: fresh, clock: DayClock(dayStartHour: fresh.settings.dayStartHour))
         today = engine.todaySummary(now: now)
@@ -573,6 +591,38 @@ final class AppModel {
     func setHaptics(_ enabled: Bool) {
         write { $0.settings.hapticsEnabled = enabled }
         Haptics.selection(enabled)
+    }
+
+    // MARK: Look
+
+    /// One tap in Settings > LOOK. The app recolours at once; the widgets and the control reload with the write, and
+    /// the app icon follows a moment later (iOS confirms an icon change with its own alert).
+    func setLook(_ look: ThemeID) {
+        guard look != theme.id else { return }
+        Haptics.selection(hapticsOn)
+        withAnimation(.easeInOut(duration: 0.3)) {
+            _ = write { $0.settings.theme = look }
+        }
+    }
+
+    /// Switches the app icon to the look's own after a short pause, so a few quick taps through the looks end in one
+    /// icon change and one system alert. Signal is the primary icon.
+    private func scheduleIconSync(after delay: Duration = .milliseconds(600)) {
+        guard !isDemo else { return }
+        iconTask?.cancel()
+        iconTask = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled, let self else { return }
+            await self.syncAppIcon()
+        }
+    }
+
+    private func syncAppIcon() async {
+        let app = UIApplication.shared
+        guard app.supportsAlternateIcons, app.applicationState == .active else { return }
+        let wanted = theme.id.alternateIconName
+        guard app.alternateIconName != wanted else { return }
+        try? await app.setAlternateIconName(wanted)
     }
 
     func eraseAll() {

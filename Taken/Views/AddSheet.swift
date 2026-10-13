@@ -53,6 +53,7 @@ struct AddSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     @Environment(\.paywallAnchor) private var paywallAnchor
+    @Environment(\.theme) private var theme
 
     @State private var selected: [String] = []
     @State private var choice: FrequencyChoice = .daily
@@ -80,7 +81,7 @@ struct AddSheet: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
                     SectionHeader(index: "01", title: "PICK", trailing: String(format: "%02d SELECTED", count),
-                                  trailingColor: count > 0 ? Palette.signal : Palette.fgSubtle)
+                                  trailingColor: count > 0 ? theme.signalInk : theme.fgSubtle)
                     FlowLayout(spacing: 8, lineSpacing: 8) {
                         ForEach(Catalog.presets) { preset in
                             chip(preset)
@@ -96,7 +97,7 @@ struct AddSheet: View {
                     FrequencyPicker(choice: $choice, includeDays: false)
                     Text("Change any item later in settings.")
                         .font(.sans(13))
-                        .foregroundStyle(Palette.fgSubtle)
+                        .foregroundStyle(theme.fgSubtle)
                         .padding(.top, 10)
                 }
                 .padding(.horizontal, 20)
@@ -104,7 +105,7 @@ struct AddSheet: View {
             }
             .scrollDismissesKeyboard(.interactively)
             VStack(spacing: 0) {
-                Rectangle().fill(Palette.line).frame(height: 1)
+                Rectangle().fill(theme.line).frame(height: 1)
                 PrimaryButton(title: count > 0 ? "ADD (\(count))" : "ADD", enabled: count > 0) {
                     add()
                 }
@@ -112,12 +113,12 @@ struct AddSheet: View {
                 .padding(.top, 12)
                 .padding(.bottom, 8)
             }
-            .background(Palette.bg)
+            .background(theme.bg)
         }
-        .background(Palette.bg.ignoresSafeArea())
+        .background(theme.bg.ignoresSafeArea())
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
-        .presentationBackground(Palette.bg)
+        .presentationBackground(theme.bg)
         .animation(.snappy(duration: 0.22), value: showCustom)
         .onAppear {
             if selected.isEmpty && !model.demoPreselect.isEmpty { selected = model.demoPreselect }
@@ -135,20 +136,20 @@ struct AddSheet: View {
                     Image(systemName: "checkmark")
                         .font(.system(size: 9, weight: .bold))
                 } else if isOn {
-                    Rectangle().fill(Palette.signal).frame(width: 6, height: 6)
-                        .shadow(color: Palette.signal.opacity(0.7), radius: 3)
+                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 6, height: 6)
+                        .shadow(color: theme.glow(0.7), radius: 3)
                 }
                 Text(preset.name.uppercased())
                     .font(.monoFixed(12, .monoMedium))
                     .tracking(12 * 0.08)
             }
-            .foregroundStyle(owned ? Palette.fgFaint : (isOn ? Palette.signal : Palette.fg))
+            .foregroundStyle(owned ? theme.fgFaint : (isOn ? theme.signalInk : theme.fg))
             .padding(.horizontal, 13)
             .frame(height: 44)
-            .background(isOn ? Palette.signalWash : Palette.bgRaised, in: RoundedRectangle(cornerRadius: 3))
+            .background(isOn ? theme.signalWash : theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.control))
             .overlay(
-                RoundedRectangle(cornerRadius: 3)
-                    .strokeBorder(isOn ? Palette.signalEdge : Palette.line, lineWidth: 1)
+                RoundedRectangle(cornerRadius: theme.radius.control)
+                    .strokeBorder(isOn ? theme.signalEdge : theme.line, lineWidth: 1)
             )
             .contentShape(Rectangle())
         }
@@ -167,12 +168,12 @@ struct AddSheet: View {
             Text(showCustom ? "\u{2212} CUSTOM" : "+ CUSTOM")
                 .font(.monoFixed(12, .monoMedium))
                 .tracking(12 * 0.08)
-                .foregroundStyle(showCustom ? Palette.signal : Palette.fgMuted)
+                .foregroundStyle(showCustom ? theme.signalInk : theme.fgMuted)
                 .padding(.horizontal, 13)
                 .frame(height: 44)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 3)
-                        .strokeBorder(showCustom ? Palette.signalEdge : Palette.lineDash,
+                    RoundedRectangle(cornerRadius: theme.radius.control)
+                        .strokeBorder(showCustom ? theme.signalEdge : theme.lineDash,
                                       style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
                 )
                 .contentShape(Rectangle())
@@ -183,23 +184,23 @@ struct AddSheet: View {
 
     private var customField: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("NAME").hud(10.5, Palette.fgSubtle)
-            TextField("", text: $customName, prompt: Text("e.g. Lion's Mane").foregroundStyle(Palette.fgFaint))
+            Text("NAME").hud(10.5, theme.fgSubtle)
+            TextField("", text: $customName, prompt: Text("e.g. Lion's Mane").foregroundStyle(theme.fgFaint))
                 .font(.sans(17))
-                .foregroundStyle(Palette.fg)
+                .foregroundStyle(theme.fg)
                 .textInputAutocapitalization(.words)
                 .autocorrectionDisabled()
                 .submitLabel(.done)
                 .focused($customFocused)
                 .padding(.horizontal, 14)
                 .frame(height: 50)
-                .background(Palette.bgRaised, in: RoundedRectangle(cornerRadius: 3))
+                .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.control))
                 .overlay(
-                    RoundedRectangle(cornerRadius: 3)
-                        .strokeBorder(customFocused ? Palette.signalEdge : Palette.line, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: theme.radius.control)
+                        .strokeBorder(customFocused ? theme.signalEdge : theme.line, lineWidth: 1)
                 )
             if !customTrimmed.isEmpty {
-                Text("CODE \(Catalog.code(for: customTrimmed))").hud(10.5, Palette.fgFaint)
+                Text("CODE \(Catalog.code(for: customTrimmed))").hud(10.5, theme.fgFaint)
             }
         }
     }
@@ -234,6 +235,7 @@ struct AddSheet: View {
 /// Compact segmented control in mono caps.
 struct FrequencyPicker: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
     @Binding var choice: FrequencyChoice
     var includeDays: Bool
 
@@ -250,7 +252,7 @@ struct FrequencyPicker: View {
         HStack(spacing: 0) {
             ForEach(Array(options.enumerated()), id: \.element) { index, option in
                 if index > 0 {
-                    Rectangle().fill(Palette.line).frame(width: 1)
+                    Rectangle().fill(theme.line).frame(width: 1)
                 }
                 Button {
                     if choice != option { Haptics.selection(model.hapticsOn) }
@@ -261,24 +263,25 @@ struct FrequencyPicker: View {
                         .tracking(11 * 0.08)
                         .lineLimit(1)
                         .minimumScaleFactor(0.7)
-                        .foregroundStyle(choice == option ? Palette.buttonText : Palette.fgMuted)
+                        .foregroundStyle(choice == option ? theme.buttonText : theme.fgMuted)
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
-                        .background(choice == option ? Palette.button : Color.clear)
+                        .background(choice == option ? theme.button : Color.clear)
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityAddTraits(choice == option ? .isSelected : [])
             }
         }
-        .background(Palette.bgRaised)
-        .clipShape(RoundedRectangle(cornerRadius: 3))
-        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.line, lineWidth: 1))
+        .background(theme.bgRaised)
+        .clipShape(RoundedRectangle(cornerRadius: theme.radius.control))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.control).strokeBorder(theme.line, lineWidth: 1))
     }
 }
 
 /// Weekday toggles, Monday first.
 struct WeekdayPicker: View {
+    @Environment(\.theme) private var theme
     @Binding var selection: Set<Int>
 
     private let order = [2, 3, 4, 5, 6, 7, 1]
@@ -296,11 +299,11 @@ struct WeekdayPicker: View {
                 } label: {
                     Text(Fmt.weekdayLetters[index])
                         .font(.monoFixed(12, .monoSemibold))
-                        .foregroundStyle(on ? Palette.buttonText : Palette.fgMuted)
+                        .foregroundStyle(on ? theme.buttonText : theme.fgMuted)
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
-                        .background(on ? Palette.button : Palette.bgRaised, in: RoundedRectangle(cornerRadius: 3))
-                        .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.line, lineWidth: 1))
+                        .background(on ? theme.button : theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.control))
+                        .overlay(RoundedRectangle(cornerRadius: theme.radius.control).strokeBorder(theme.line, lineWidth: 1))
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][index])

@@ -2,19 +2,27 @@ import SwiftUI
 
 /// "[02] STACK - - - - - - - - 05 DUE"
 struct SectionHeader: View {
+    @Environment(\.theme) private var theme
     let index: String
     let title: String
     var trailing: String? = nil
-    var trailingColor: Color = Palette.fgSubtle
+    var trailingColor: Color? = nil
+
+    init(index: String, title: String, trailing: String? = nil, trailingColor: Color? = nil) {
+        self.index = index
+        self.title = title
+        self.trailing = trailing
+        self.trailingColor = trailingColor
+    }
 
     var body: some View {
         HStack(spacing: 10) {
-            Text("[\(index)]").hud(11, Palette.fgFaint, tracking: 0.06)
-            Text(title).hud(11, Palette.fgMuted, tracking: 0.16)
+            Text("[\(index)]").hud(11, theme.fgFaint, tracking: 0.06)
+            Text(title).hud(11, theme.fgMuted, tracking: 0.16)
             DashedRule()
                 .frame(maxWidth: .infinity)
             if let trailing {
-                Text(trailing).hud(11, trailingColor, tracking: 0.12)
+                Text(trailing).hud(11, trailingColor ?? theme.fgSubtle, tracking: 0.12)
             }
         }
         .padding(.top, 26)
@@ -24,28 +32,43 @@ struct SectionHeader: View {
     }
 }
 
-/// Small square status lamp, lit = signal.
+/// Small status lamp, lit = signal. Square in the HUD looks, round in Blush.
 struct Lamp: View {
+    @Environment(\.theme) private var theme
     var on: Bool
     var size: CGFloat = 6
 
+    init(on: Bool, size: CGFloat = 6) {
+        self.on = on
+        self.size = size
+    }
+
     var body: some View {
-        Rectangle()
-            .fill(on ? Palette.signal : Palette.fgFaint)
+        LampShape(roundness: theme.radius.lampRoundness)
+            .fill(on ? theme.signal : theme.fgFaint)
             .frame(width: size, height: size)
-            .shadow(color: on ? Palette.signal.opacity(0.7) : .clear, radius: on ? 4 : 0)
+            .shadow(color: on ? theme.glow(0.7) : .clear, radius: on ? 4 : 0)
             .accessibilityHidden(true)
     }
 }
 
-/// Solid light button, the badline primary.
+/// Solid button, the badline primary: light on the dark looks, ink on Blush.
 struct PrimaryButton: View {
+    @Environment(\.theme) private var theme
     let title: String
     var lamp: Bool = false
     /// Locked mode: a small lock where the lamp sits, because the tap opens Taken Pro.
     var locked: Bool = false
     var enabled: Bool = true
     let action: () -> Void
+
+    init(title: String, lamp: Bool = false, locked: Bool = false, enabled: Bool = true, action: @escaping () -> Void) {
+        self.title = title
+        self.lamp = lamp
+        self.locked = locked
+        self.enabled = enabled
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
@@ -54,16 +77,16 @@ struct PrimaryButton: View {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 11, weight: .semibold))
                 } else if lamp {
-                    Rectangle().fill(Palette.signal).frame(width: 7, height: 7)
+                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 7, height: 7)
                 }
                 Text(title)
                     .font(.monoFixed(14, .monoSemibold))
                     .tracking(14 * 0.12)
             }
-            .foregroundStyle(Palette.buttonText)
+            .foregroundStyle(theme.buttonText)
             .frame(maxWidth: .infinity)
             .frame(height: 56)
-            .background(Palette.button.opacity(enabled ? 1 : 0.28), in: RoundedRectangle(cornerRadius: 4))
+            .background(theme.button.opacity(enabled ? 1 : 0.28), in: RoundedRectangle(cornerRadius: theme.radius.panel))
         }
         .buttonStyle(PressStyle())
         .disabled(!enabled)
@@ -72,12 +95,21 @@ struct PrimaryButton: View {
 
 /// Outline button for secondary actions.
 struct OutlineButton: View {
+    @Environment(\.theme) private var theme
     let title: String
-    var color: Color = Palette.fg
+    var color: Color? = nil
     var height: CGFloat = 44
     let action: () -> Void
 
+    init(title: String, color: Color? = nil, height: CGFloat = 44, action: @escaping () -> Void) {
+        self.title = title
+        self.color = color
+        self.height = height
+        self.action = action
+    }
+
     var body: some View {
+        let color = self.color ?? theme.fg
         Button(action: action) {
             Text(title)
                 .font(.monoFixed(12, .monoSemibold))
@@ -85,7 +117,7 @@ struct OutlineButton: View {
                 .foregroundStyle(color)
                 .padding(.horizontal, 14)
                 .frame(height: height)
-                .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(color.opacity(0.45), lineWidth: 1))
+                .overlay(RoundedRectangle(cornerRadius: theme.radius.control).strokeBorder(color.opacity(0.45), lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -104,17 +136,39 @@ struct PressStyle: ButtonStyle {
 /// Row press: a flat inset highlight, no scaling.
 struct RowPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .background(configuration.isPressed ? Palette.bgInset : Color.clear)
+        RowPressLabel(label: configuration.label, isPressed: configuration.isPressed)
+    }
+}
+
+private struct RowPressLabel: View {
+    @Environment(\.theme) private var theme
+    let label: ButtonStyleConfiguration.Label
+    let isPressed: Bool
+
+    init(label: ButtonStyleConfiguration.Label, isPressed: Bool) {
+        self.label = label
+        self.isPressed = isPressed
+    }
+
+    var body: some View {
+        label.background(isPressed ? theme.bgInset : Color.clear)
     }
 }
 
 /// Title bar for sheets.
 struct SheetHeader: View {
+    @Environment(\.theme) private var theme
     let title: String
     var subtitle: String? = nil
-    var subtitleColor: Color = Palette.fgSubtle
+    var subtitleColor: Color? = nil
     let onClose: () -> Void
+
+    init(title: String, subtitle: String? = nil, subtitleColor: Color? = nil, onClose: @escaping () -> Void) {
+        self.title = title
+        self.subtitle = subtitle
+        self.subtitleColor = subtitleColor
+        self.onClose = onClose
+    }
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
@@ -122,9 +176,9 @@ struct SheetHeader: View {
                 Text(title)
                     .font(.monoFixed(16, .monoSemibold))
                     .tracking(16 * 0.14)
-                    .foregroundStyle(Palette.fg)
+                    .foregroundStyle(theme.fg)
                 if let subtitle {
-                    Text(subtitle).hud(11, subtitleColor)
+                    Text(subtitle).hud(11, subtitleColor ?? theme.fgSubtle)
                 }
             }
             .accessibilityElement(children: .combine)
@@ -133,7 +187,7 @@ struct SheetHeader: View {
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Palette.fgMuted)
+                    .foregroundStyle(theme.fgMuted)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -144,29 +198,36 @@ struct SheetHeader: View {
         .padding(.top, 18)
         .padding(.bottom, 12)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Palette.line).frame(height: 1)
+            Rectangle().fill(theme.line).frame(height: 1)
         }
     }
 }
 
 /// The code tag box: "VD3".
 struct CodeTag: View {
+    @Environment(\.theme) private var theme
     let code: String
     var lit: Bool = false
     var dim: Bool = false
+
+    init(code: String, lit: Bool = false, dim: Bool = false) {
+        self.code = code
+        self.lit = lit
+        self.dim = dim
+    }
 
     var body: some View {
         Text(code)
             .font(.monoFixed(12, .monoSemibold))
             .tracking(12 * 0.08)
-            .foregroundStyle(lit ? Palette.signal : (dim ? Palette.fgFaint : Palette.fgMuted))
+            .foregroundStyle(lit ? theme.signalInk : (dim ? theme.fgFaint : theme.fgMuted))
             .lineLimit(1)
             .minimumScaleFactor(0.7)
             .frame(width: 46, height: 28)
-            .background(Palette.bgInset, in: RoundedRectangle(cornerRadius: 3))
+            .background(theme.bgInset, in: RoundedRectangle(cornerRadius: theme.radius.control))
             .overlay(
-                RoundedRectangle(cornerRadius: 3)
-                    .strokeBorder(lit ? Palette.signalEdge : Palette.line, lineWidth: 1)
+                RoundedRectangle(cornerRadius: theme.radius.control)
+                    .strokeBorder(lit ? theme.signalEdge : theme.line, lineWidth: 1)
             )
             .accessibilityHidden(true)
     }
@@ -174,17 +235,24 @@ struct CodeTag: View {
 
 /// A panel: raised surface, hairline border, and a second offset outline behind it (the badline stack).
 struct Panel<Content: View>: View {
+    @Environment(\.theme) private var theme
     var stacked: Bool = true
-    @ViewBuilder var content: Content
+    var content: Content
+
+    init(stacked: Bool = true, @ViewBuilder content: () -> Content) {
+        self.stacked = stacked
+        self.content = content()
+    }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: theme.radius.panel)
         content
-            .background(Palette.bgRaised, in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.line, lineWidth: 1))
+            .background(theme.bgRaised, in: shape)
+            .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
             .background(alignment: .topLeading) {
                 if stacked {
-                    RoundedRectangle(cornerRadius: 4)
-                        .strokeBorder(Palette.line, lineWidth: 1)
+                    shape
+                        .strokeBorder(theme.line, lineWidth: 1)
                         .offset(x: 5, y: 5)
                 }
             }
@@ -197,6 +265,7 @@ struct Panel<Content: View>: View {
 /// A time setting in Geist Mono with a chevron, like the day-start control. A tap opens a wheel in a small
 /// sheet, so every time on screen stays in one type system.
 struct MonoTimeButton: View {
+    @Environment(\.theme) private var theme
     let title: String
     let minutes: Int
     let onSet: (Int) -> Void
@@ -216,10 +285,10 @@ struct MonoTimeButton: View {
             HStack(spacing: 8) {
                 Text(Fmt.minutes(minutes))
                     .font(.monoFixed(15, .monoMedium))
-                    .foregroundStyle(Palette.fg)
+                    .foregroundStyle(theme.fg)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Palette.fgSubtle)
+                    .foregroundStyle(theme.fgSubtle)
             }
             .frame(minWidth: 44, minHeight: 44)
             .contentShape(Rectangle())
@@ -229,12 +298,14 @@ struct MonoTimeButton: View {
         .accessibilityHint("Double tap to change.")
         .sheet(isPresented: $editing) {
             TimeWheelSheet(title: title, minutes: minutes, onSet: onSet)
+                .environment(\.theme, theme)
         }
     }
 }
 
 /// One time of day on a wheel, in a small sheet.
 struct TimeWheelSheet: View {
+    @Environment(\.theme) private var theme
     let title: String
     let minutes: Int
     let onSet: (Int) -> Void
@@ -265,10 +336,10 @@ struct TimeWheelSheet: View {
             .padding(.top, 8)
             Spacer(minLength: 0)
         }
-        .background(Palette.bg.ignoresSafeArea())
+        .background(theme.bg.ignoresSafeArea())
         .presentationDetents([.height(400)])
-        .presentationBackground(Palette.bg)
-        .preferredColorScheme(.dark)
+        .presentationBackground(theme.bg)
+        .preferredColorScheme(theme.scheme)
         .onAppear {
             time = Calendar.current.date(bySettingHour: minutes / 60, minute: minutes % 60, second: 0, of: Date()) ?? Date()
         }

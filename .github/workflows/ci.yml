@@ -119,6 +119,20 @@ jobs:
             fi
           done
           test -f "$app/Metadata.appintents/extract.actionsdata" && echo "App Intents metadata present"
+          # The looks (SPEC 4): Signal is the primary icon, every other look ships an alternate icon, and the app is no
+          # longer forced dark (Blush is light; each look sets its own colour scheme).
+          for icon in AppIcon-Blush AppIcon-Phosphor AppIcon-Ice; do
+            if ! /usr/libexec/PlistBuddy -c "Print :CFBundleIcons:CFBundleAlternateIcons:$icon" "$app/Info.plist"; then
+              echo "::error::Alternate icon $icon is missing from CFBundleIcons"
+              exit 1
+            fi
+          done
+          style="$(/usr/libexec/PlistBuddy -c 'Print :UIUserInterfaceStyle' "$app/Info.plist" 2>/dev/null || echo unset)"
+          echo "UIUserInterfaceStyle: $style"
+          if [ "$style" = "Dark" ] || [ "$style" = "Light" ]; then
+            echo "::error::UIUserInterfaceStyle forces $style; the looks need Automatic"
+            exit 1
+          fi
           ls "$app" | head -50
 
       - name: Upload build log

@@ -7,6 +7,7 @@ struct SettingsView: View {
     @Environment(\.dismiss) private var dismiss
     @Environment(\.openURL) private var openURL
     @Environment(\.paywallAnchor) private var paywallAnchor
+    @Environment(\.theme) private var theme
 
     @State private var editMode: EditMode = .inactive
     @State private var pendingDelete: Item?
@@ -19,28 +20,40 @@ struct SettingsView: View {
 
     init() {}
 
+    /// The LOOK row, which `-demo -screen look` scrolls to.
+    static let lookAnchor = "look"
+
     var body: some View {
         NavigationStack {
-            List {
-                stackSection
-                reminderSection
-                dayStartSection
-                hapticsSection
-                proSection
-                dataSection
-                aboutSection
+            ScrollViewReader { proxy in
+                List {
+                    stackSection
+                    reminderSection
+                    dayStartSection
+                    lookSection
+                    hapticsSection
+                    proSection
+                    dataSection
+                    aboutSection
+                }
+                .listStyle(.plain)
+                .scrollContentBackground(.hidden)
+                .background(theme.bg)
+                .environment(\.editMode, $editMode)
+                .task {
+                    // `-demo -screen look`: the LOOK section in view, for the screenshots.
+                    guard model.isDemo && model.launchScreen == "look" else { return }
+                    try? await Task.sleep(for: .milliseconds(500))
+                    proxy.scrollTo(Self.lookAnchor, anchor: .center)
+                }
             }
-            .listStyle(.plain)
-            .scrollContentBackground(.hidden)
-            .background(Palette.bg)
-            .environment(\.editMode, $editMode)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .principal) {
                     Text("SETTINGS")
                         .font(.monoFixed(14, .monoSemibold))
                         .tracking(14 * 0.2)
-                        .foregroundStyle(Palette.fg)
+                        .foregroundStyle(theme.fg)
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button {
@@ -49,11 +62,11 @@ struct SettingsView: View {
                         Text("DONE")
                             .font(.monoFixed(13, .monoSemibold))
                             .tracking(13 * 0.12)
-                            .foregroundStyle(Palette.fg)
+                            .foregroundStyle(theme.fg)
                     }
                 }
             }
-            .toolbarBackground(Palette.bg, for: .navigationBar)
+            .toolbarBackground(theme.bg, for: .navigationBar)
             .toolbarBackground(.visible, for: .navigationBar)
             .navigationDestination(for: UUID.self) { id in
                 ItemEditorView(itemID: id, isSheet: false)
@@ -62,7 +75,8 @@ struct SettingsView: View {
                 AddSheet()
                     .paywallHost(.nested)
                     .environment(model)
-                    .preferredColorScheme(.dark)
+                    .environment(\.theme, model.theme)
+                    .preferredColorScheme(model.theme.scheme)
             }
             .offerCodeRedemption(isPresented: $redeeming) { _ in
                 Task { await model.pro.refresh() }
@@ -93,8 +107,9 @@ struct SettingsView: View {
                 Text("This removes your stack and every logged dose from this iPhone. It cannot be undone.")
             }
         }
-        .tint(Palette.signal)
-        .presentationBackground(Palette.bg)
+        // Links, menus and dialogs take the readable signal; the toggles below take the lit one.
+        .tint(theme.signalInk)
+        .presentationBackground(theme.bg)
         .presentationDetents([.large])
     }
 
@@ -118,7 +133,7 @@ struct SettingsView: View {
             HStack(spacing: 10) {
                 Lamp(on: proActive)
                 Text(proStatusLine)
-                    .hud(12, proActive ? Palette.signal : Palette.fg, tracking: 0.1)
+                    .hud(12, proActive ? theme.signalInk : theme.fg, tracking: 0.1)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
             }
@@ -171,11 +186,11 @@ struct SettingsView: View {
             if let proNote {
                 Text(proNote)
                     .font(.sans(14))
-                    .foregroundStyle(Palette.fgSubtle)
+                    .foregroundStyle(theme.fgSubtle)
                     .settingsRow()
             }
         } header: {
-            SettingsHeader(index: "05", title: "PRO") { EmptyView() }
+            SettingsHeader(index: "06", title: "PRO") { EmptyView() }
         }
     }
 
@@ -201,7 +216,7 @@ struct SettingsView: View {
     private var stackSection: some View {
         Section {
             if model.activeItems.isEmpty {
-                Text("NOTHING IN YOUR STACK").hud(11, Palette.fgFaint)
+                Text("NOTHING IN YOUR STACK").hud(11, theme.fgFaint)
                     .settingsRow()
             }
             ForEach(model.activeItems) { item in
@@ -228,9 +243,9 @@ struct SettingsView: View {
             } label: {
                 HStack(spacing: 10) {
                     Image(systemName: "plus").font(.system(size: 12, weight: .semibold))
-                    Text("ADD").hud(12, Palette.fg, face: .monoSemibold)
+                    Text("ADD").hud(12, theme.fg, face: .monoSemibold)
                 }
-                .foregroundStyle(Palette.fg)
+                .foregroundStyle(theme.fg)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
@@ -250,7 +265,7 @@ struct SettingsView: View {
                         withAnimation { editMode = editMode.isEditing ? .inactive : .active }
                     } label: {
                         Text(editMode.isEditing ? "DONE" : "REORDER")
-                            .hudFixed(10.5, editMode.isEditing ? Palette.signal : Palette.fgMuted, tracking: 0.12)
+                            .hudFixed(10.5, editMode.isEditing ? theme.signalInk : theme.fgMuted, tracking: 0.12)
                             .frame(minHeight: 32)
                     }
                     .buttonStyle(.plain)
@@ -265,13 +280,14 @@ struct SettingsView: View {
                 get: { model.settings.reminderEnabled },
                 set: { enabled in Task { await model.setReminderEnabled(enabled) } }
             )) {
-                Text("NUDGE").hud(12, Palette.fg)
+                Text("NUDGE").hud(12, theme.fg)
             }
+            .tint(theme.signal)
             .settingsRow()
 
             if model.settings.reminderEnabled {
                 HStack {
-                    Text("TIME").hud(12, Palette.fg)
+                    Text("TIME").hud(12, theme.fg)
                     Spacer()
                     MonoTimeButton(title: "NUDGE TIME", minutes: model.settings.reminderMinutes) { minutes in
                         model.setReminderMinutes(minutes)
@@ -282,7 +298,7 @@ struct SettingsView: View {
 
             Text("If anything is still pending at this time, nudge me.")
                 .font(.sans(14))
-                .foregroundStyle(Palette.fgSubtle)
+                .foregroundStyle(theme.fgSubtle)
                 .settingsRow()
 
             if model.notificationsDenied {
@@ -290,7 +306,7 @@ struct SettingsView: View {
                     if let url = URL(string: UIApplication.openNotificationSettingsURLString) { openURL(url) }
                 } label: {
                     Text("NOTIFICATIONS ARE OFF FOR TAKEN. OPEN SETTINGS")
-                        .hud(10.5, Palette.signal, tracking: 0.1)
+                        .hud(10.5, theme.signalInk, tracking: 0.1)
                         .frame(minHeight: 44)
                 }
                 .settingsRow()
@@ -303,7 +319,7 @@ struct SettingsView: View {
     private var dayStartSection: some View {
         Section {
             HStack {
-                Text("DAY STARTS AT").hud(12, Palette.fg)
+                Text("DAY STARTS AT").hud(12, theme.fg)
                 Spacer()
                 Menu {
                     Picker("Day starts at", selection: Binding(get: { model.settings.dayStartHour },
@@ -316,10 +332,10 @@ struct SettingsView: View {
                     HStack(spacing: 8) {
                         Text(Fmt.hour(model.settings.dayStartHour))
                             .font(.monoFixed(15, .monoMedium))
-                            .foregroundStyle(Palette.fg)
+                            .foregroundStyle(theme.fg)
                         Image(systemName: "chevron.up.chevron.down")
                             .font(.system(size: 11, weight: .semibold))
-                            .foregroundStyle(Palette.fgSubtle)
+                            .foregroundStyle(theme.fgSubtle)
                     }
                     .frame(minHeight: 44)
                     .contentShape(Rectangle())
@@ -330,21 +346,44 @@ struct SettingsView: View {
 
             Text("A dose before this time counts for the day before, so a late night stays on the right day.")
                 .font(.sans(14))
-                .foregroundStyle(Palette.fgSubtle)
+                .foregroundStyle(theme.fgSubtle)
                 .settingsRow()
         } header: {
             SettingsHeader(index: "03", title: "DAY") { EmptyView() }
         }
     }
 
+    /// Four looks, one tap each. The swatches are live miniatures drawn in each look's own tokens; the app, the
+    /// widgets, the Control Center control and the app icon follow the one chosen.
+    private var lookSection: some View {
+        Section {
+            LookPicker(selection: model.theme.id) { look in
+                model.setLook(look)
+            }
+            .settingsRow()
+            .id(Self.lookAnchor)
+
+            Text("The widgets and the app icon follow it.")
+                .font(.sans(14))
+                .foregroundStyle(theme.fgSubtle)
+                .settingsRow()
+        } header: {
+            SettingsHeader(index: "04", title: "LOOK") {
+                Text(model.theme.label)
+                    .hudFixed(10.5, theme.signalInk, tracking: 0.12)
+            }
+        }
+    }
+
     private var hapticsSection: some View {
         Section {
             Toggle(isOn: Binding(get: { model.settings.hapticsEnabled }, set: { model.setHaptics($0) })) {
-                Text("HAPTICS").hud(12, Palette.fg)
+                Text("HAPTICS").hud(12, theme.fg)
             }
+            .tint(theme.signal)
             .settingsRow()
         } header: {
-            SettingsHeader(index: "04", title: "FEEL") { EmptyView() }
+            SettingsHeader(index: "05", title: "FEEL") { EmptyView() }
         }
     }
 
@@ -359,13 +398,13 @@ struct SettingsView: View {
                 confirmErase = true
             } label: {
                 Text("ERASE ALL DATA")
-                    .hud(12, Palette.danger)
+                    .hud(12, theme.danger)
                     .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
                     .contentShape(Rectangle())
             }
             .settingsRow()
         } header: {
-            SettingsHeader(index: "06", title: "DATA") { EmptyView() }
+            SettingsHeader(index: "07", title: "DATA") { EmptyView() }
         }
     }
 
@@ -373,13 +412,13 @@ struct SettingsView: View {
         Section {
             Text("Everything stays on this iPhone. No accounts. No ads. No tracking.")
                 .font(.sans(15))
-                .foregroundStyle(Palette.fgMuted)
+                .foregroundStyle(theme.fgMuted)
                 .padding(.vertical, 6)
                 .settingsRow()
             HStack {
-                Text("VERSION").hud(12, Palette.fg)
+                Text("VERSION").hud(12, theme.fg)
                 Spacer()
-                Text("\(AppInfo.version) (\(AppInfo.build))").hud(12, Palette.fgSubtle, tracking: 0.08)
+                Text("\(AppInfo.version) (\(AppInfo.build))").hud(12, theme.fgSubtle, tracking: 0.08)
             }
             .frame(minHeight: 44)
             .settingsRow()
@@ -388,10 +427,10 @@ struct SettingsView: View {
             }
             .settingsRow()
         } header: {
-            SettingsHeader(index: "07", title: "ABOUT") { EmptyView() }
+            SettingsHeader(index: "08", title: "ABOUT") { EmptyView() }
         } footer: {
             Text("TAKEN \(AppInfo.versionLine)")
-                .hudFixed(9.5, Palette.fgFaint)
+                .hudFixed(9.5, theme.fgFaint)
                 .padding(.top, 18)
                 .padding(.bottom, 30)
         }
@@ -400,14 +439,21 @@ struct SettingsView: View {
 }
 
 private struct SettingsHeader<Trailing: View>: View {
+    @Environment(\.theme) private var theme
     let index: String
     let title: String
-    @ViewBuilder var trailing: Trailing
+    var trailing: Trailing
+
+    init(index: String, title: String, @ViewBuilder trailing: () -> Trailing) {
+        self.index = index
+        self.title = title
+        self.trailing = trailing()
+    }
 
     var body: some View {
         HStack(spacing: 10) {
-            Text("[\(index)]").hudFixed(11, Palette.fgFaint, tracking: 0.06)
-            Text(title).hudFixed(11, Palette.fgMuted, tracking: 0.16)
+            Text("[\(index)]").hudFixed(11, theme.fgFaint, tracking: 0.06)
+            Text(title).hudFixed(11, theme.fgMuted, tracking: 0.16)
             DashedRule().frame(maxWidth: .infinity)
             trailing
         }
@@ -415,14 +461,20 @@ private struct SettingsHeader<Trailing: View>: View {
         .padding(.bottom, 8)
         .padding(.horizontal, 20)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(Palette.bg)
+        .background(theme.bg)
         .listRowInsets(EdgeInsets())
     }
 }
 
 private struct StackSettingsRow: View {
+    @Environment(\.theme) private var theme
     let item: Item
     let archived: Bool
+
+    init(item: Item, archived: Bool) {
+        self.item = item
+        self.archived = archived
+    }
 
     var body: some View {
         HStack(spacing: 12) {
@@ -430,10 +482,10 @@ private struct StackSettingsRow: View {
             VStack(alignment: .leading, spacing: 4) {
                 Text(item.name)
                     .font(.sans(16, .sansMedium))
-                    .foregroundStyle(archived ? Palette.fgSubtle : Palette.fg)
+                    .foregroundStyle(archived ? theme.fgSubtle : theme.fg)
                     .lineLimit(1)
                 Text(archived ? "ARCHIVED" : Fmt.frequency(item.frequency))
-                    .hud(10, Palette.fgSubtle, tracking: 0.12)
+                    .hud(10, theme.fgSubtle, tracking: 0.12)
             }
         }
         .padding(.vertical, 6)
@@ -441,28 +493,45 @@ private struct StackSettingsRow: View {
 }
 
 private struct SettingsLinkRow: View {
+    @Environment(\.theme) private var theme
     let title: String
     let symbol: String
 
+    init(title: String, symbol: String) {
+        self.title = title
+        self.symbol = symbol
+    }
+
     var body: some View {
         HStack {
-            Text(title).hud(12, Palette.fg)
+            Text(title).hud(12, theme.fg)
             Spacer()
             Image(systemName: symbol)
                 .font(.system(size: 12, weight: .semibold))
-                .foregroundStyle(Palette.fgSubtle)
+                .foregroundStyle(theme.fgSubtle)
         }
         .frame(minHeight: 44)
         .contentShape(Rectangle())
     }
 }
 
+/// A Settings row on the look's canvas, with its hairline separators.
+private struct SettingsRow: ViewModifier {
+    @Environment(\.theme) private var theme
+
+    init() {}
+
+    func body(content: Content) -> some View {
+        content
+            .listRowBackground(theme.bg)
+            .listRowSeparatorTint(theme.line)
+            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+    }
+}
+
 private extension View {
     func settingsRow() -> some View {
-        self
-            .listRowBackground(Palette.bg)
-            .listRowSeparatorTint(Palette.line)
-            .listRowInsets(EdgeInsets(top: 4, leading: 20, bottom: 4, trailing: 20))
+        modifier(SettingsRow())
     }
 }
 
@@ -483,6 +552,7 @@ struct CSVFile: Transferable {
 struct ItemEditorView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.theme) private var theme
 
     let itemID: UUID
     let isSheet: Bool
@@ -521,16 +591,16 @@ struct ItemEditorView: View {
                 SectionHeader(index: "04", title: "STATUS")
                 Toggle(isOn: $archived) {
                     VStack(alignment: .leading, spacing: 4) {
-                        Text("ARCHIVED").hud(12, Palette.fg)
+                        Text("ARCHIVED").hud(12, theme.fg)
                         Text("Hidden from today. History stays.")
                             .font(.sans(13))
-                            .foregroundStyle(Palette.fgSubtle)
+                            .foregroundStyle(theme.fgSubtle)
                     }
                 }
-                .tint(Palette.signal)
+                .tint(theme.signal)
                 .padding(.vertical, 4)
 
-                OutlineButton(title: "DELETE ITEM", color: Palette.danger, height: 48) {
+                OutlineButton(title: "DELETE ITEM", color: theme.danger, height: 48) {
                     confirmDelete = true
                 }
                 .padding(.top, 30)
@@ -539,14 +609,14 @@ struct ItemEditorView: View {
             .padding(.bottom, 40)
         }
         .scrollDismissesKeyboard(.interactively)
-        .background(Palette.bg.ignoresSafeArea())
+        .background(theme.bg.ignoresSafeArea())
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .principal) {
                 Text("EDIT \u{00B7} \(code.isEmpty ? "ITEM" : code)")
                     .font(.monoFixed(14, .monoSemibold))
                     .tracking(14 * 0.16)
-                    .foregroundStyle(Palette.fg)
+                    .foregroundStyle(theme.fg)
             }
             if isSheet {
                 ToolbarItem(placement: .topBarTrailing) {
@@ -557,12 +627,12 @@ struct ItemEditorView: View {
                         Text("DONE")
                             .font(.monoFixed(13, .monoSemibold))
                             .tracking(13 * 0.12)
-                            .foregroundStyle(Palette.fg)
+                            .foregroundStyle(theme.fg)
                     }
                 }
             }
         }
-        .toolbarBackground(Palette.bg, for: .navigationBar)
+        .toolbarBackground(theme.bg, for: .navigationBar)
         .toolbarBackground(.visible, for: .navigationBar)
         .onAppear(perform: load)
         .onDisappear(perform: save)
@@ -579,16 +649,16 @@ struct ItemEditorView: View {
     }
 
     private func field(text: Binding<String>, prompt: String, mono: Bool) -> some View {
-        TextField("", text: text, prompt: Text(prompt).foregroundStyle(Palette.fgFaint))
+        TextField("", text: text, prompt: Text(prompt).foregroundStyle(theme.fgFaint))
             .font(mono ? .monoFixed(17, .monoMedium) : .sans(17))
-            .foregroundStyle(Palette.fg)
+            .foregroundStyle(theme.fg)
             .textInputAutocapitalization(mono ? .characters : .words)
             .autocorrectionDisabled()
             .submitLabel(.done)
             .padding(.horizontal, 14)
             .frame(height: 50)
-            .background(Palette.bgRaised, in: RoundedRectangle(cornerRadius: 3))
-            .overlay(RoundedRectangle(cornerRadius: 3).strokeBorder(Palette.line, lineWidth: 1))
+            .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.control))
+            .overlay(RoundedRectangle(cornerRadius: theme.radius.control).strokeBorder(theme.line, lineWidth: 1))
     }
 
     private func load() {

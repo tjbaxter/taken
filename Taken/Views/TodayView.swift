@@ -2,14 +2,35 @@ import SwiftUI
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+    /// A light look fades in from the launch screen's dark canvas instead of cutting to it.
+    @State private var veiled: Bool
+
+    init(veiled: Bool = false) {
+        _veiled = State(initialValue: veiled)
+    }
 
     var body: some View {
-        if model.isDemo && model.launchScreen == "widgets" {
-            WidgetGallery()
-        } else if model.isDemo && model.launchScreen == "widgets-locked" {
-            WidgetGallery(locked: true)
-        } else {
-            main
+        Group {
+            if model.isDemo && model.launchScreen == "widgets" {
+                WidgetGallery()
+            } else if model.isDemo && model.launchScreen == "widgets-locked" {
+                WidgetGallery(locked: true)
+            } else {
+                main
+            }
+        }
+        .overlay {
+            if veiled {
+                Theme.launchCanvas
+                    .ignoresSafeArea()
+                    .allowsHitTesting(false)
+                    .transition(.opacity)
+            }
+        }
+        .task {
+            guard veiled else { return }
+            withAnimation(.easeOut(duration: 0.4)) { veiled = false }
         }
     }
 
@@ -20,7 +41,8 @@ struct RootView: View {
                 sheetContent(route)
                     .paywallHost(.sheet)
                     .environment(model)
-                    .preferredColorScheme(.dark)
+                    .environment(\.theme, model.theme)
+                    .preferredColorScheme(model.theme.scheme)
             }
             .task { await model.applyLaunchScreen() }
     }
@@ -46,7 +68,7 @@ struct RootView: View {
             NavigationStack {
                 ItemEditorView(itemID: id, isSheet: true)
             }
-            .presentationBackground(Palette.bg)
+            .presentationBackground(theme.bg)
         }
     }
 }
@@ -54,6 +76,9 @@ struct RootView: View {
 /// The single main screen.
 struct TodayView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+
+    init() {}
 
     var body: some View {
         ScrollViewReader { proxy in
@@ -69,7 +94,7 @@ struct TodayView: View {
                 .padding(.bottom, 28)
             }
             .scrollIndicators(.hidden)
-            .background(Palette.bg.ignoresSafeArea())
+            .background(theme.bg.ignoresSafeArea())
             .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
             .safeAreaInset(edge: .bottom, spacing: 0) { BottomDock() }
             .onChange(of: model.scrollTarget) { _, target in
@@ -84,7 +109,7 @@ struct TodayView: View {
     private var stackContent: some View {
         let today = model.today
         SectionHeader(index: "01", title: "STATUS", trailing: today.allTaken ? "LOCKED" : "LIVE",
-                      trailingColor: today.allTaken ? Palette.signal : Palette.fgSubtle)
+                      trailingColor: today.allTaken ? theme.signalInk : theme.fgSubtle)
         StatusPanel(summary: today, now: model.now, clock: model.clock, lockInCount: model.lockInCount,
                     streak: model.streak)
         if model.isLocked {
@@ -99,7 +124,7 @@ struct TodayView: View {
         if today.due.isEmpty {
             Panel {
                 Text("NOTHING DUE TODAY")
-                    .hud(11, Palette.fgSubtle)
+                    .hud(11, theme.fgSubtle)
                     .frame(maxWidth: .infinity, minHeight: 64)
             }
         } else {
@@ -110,7 +135,7 @@ struct TodayView: View {
 
         if !today.notDue.isEmpty {
             HStack(spacing: 10) {
-                Text("NOT DUE").hud(10.5, Palette.fgSubtle)
+                Text("NOT DUE").hud(10.5, theme.fgSubtle)
                 DashedRule()
             }
             .padding(.top, 18)
@@ -188,6 +213,9 @@ struct TodayView: View {
 
 struct TopBar: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+
+    init() {}
 
     var body: some View {
         HStack(spacing: 10) {
@@ -196,17 +224,17 @@ struct TopBar: View {
             Text("TAKEN")
                 .font(.monoFixed(15, .monoSemibold))
                 .tracking(15 * 0.3)
-                .foregroundStyle(Palette.fg)
+                .foregroundStyle(theme.fg)
                 .accessibilityAddTraits(.isHeader)
             Spacer()
             Text(Fmt.dayHeader(model.today.day))
-                .hudFixed(11.5, Palette.fgMuted, tracking: 0.14)
+                .hudFixed(11.5, theme.fgMuted, tracking: 0.14)
             Button {
                 model.sheet = .settings
             } label: {
                 Image(systemName: "gearshape")
                     .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(Palette.fgMuted)
+                    .foregroundStyle(theme.fgMuted)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -215,9 +243,9 @@ struct TopBar: View {
         .padding(.leading, 20)
         .padding(.trailing, 8)
         .frame(height: 52)
-        .background(Palette.bg)
+        .background(theme.bg)
         .overlay(alignment: .bottom) {
-            Rectangle().fill(Palette.line).frame(height: 1)
+            Rectangle().fill(theme.line).frame(height: 1)
         }
     }
 }
@@ -225,6 +253,9 @@ struct TopBar: View {
 /// TAKE ALL and the undo toast, pinned above the home indicator.
 struct BottomDock: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+
+    init() {}
 
     var body: some View {
         // Counts what TAKE ALL logs right now, so the number on the button is the number it takes.
@@ -251,8 +282,8 @@ struct BottomDock: View {
         .frame(maxWidth: .infinity)
         .background {
             if showTakeAll {
-                Palette.bg
-                    .overlay(alignment: .top) { Rectangle().fill(Palette.line).frame(height: 1) }
+                theme.bg
+                    .overlay(alignment: .top) { Rectangle().fill(theme.line).frame(height: 1) }
                     .ignoresSafeArea(edges: .bottom)
             }
         }
@@ -263,28 +294,34 @@ struct BottomDock: View {
 
 /// Locked mode: the slim bar under the status panel. The log stays readable; a tap opens Taken Pro.
 struct LockedBar: View {
+    @Environment(\.theme) private var theme
     let text: String
     let action: () -> Void
+
+    init(text: String, action: @escaping () -> Void) {
+        self.text = text
+        self.action = action
+    }
 
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: "lock.fill")
                     .font(.system(size: 10, weight: .semibold))
-                    .foregroundStyle(Palette.signal)
+                    .foregroundStyle(theme.signalInk)
                 Text(text)
-                    .hudFixed(11, Palette.fg, face: .monoSemibold, tracking: 0.14)
+                    .hudFixed(11, theme.fg, face: .monoSemibold, tracking: 0.14)
                     .lineLimit(1)
                     .minimumScaleFactor(0.75)
                 Spacer(minLength: 8)
                 Image(systemName: "arrow.right")
                     .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(Palette.fgMuted)
+                    .foregroundStyle(theme.fgMuted)
             }
             .padding(.horizontal, 14)
             .frame(maxWidth: .infinity, minHeight: 44)
-            .background(Palette.signalWash.opacity(0.55), in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.signalEdge, lineWidth: 1))
+            .background(theme.signalWash.opacity(0.55), in: RoundedRectangle(cornerRadius: theme.radius.panel))
+            .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.signalEdge, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -294,14 +331,20 @@ struct LockedBar: View {
 }
 
 struct ToastView: View {
+    @Environment(\.theme) private var theme
     let toast: Toast
     let onUndo: () -> Void
 
+    init(toast: Toast, onUndo: @escaping () -> Void) {
+        self.toast = toast
+        self.onUndo = onUndo
+    }
+
     var body: some View {
         HStack(spacing: 10) {
-            Rectangle().fill(Palette.signal).frame(width: 6, height: 6)
+            LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 6, height: 6)
             Text(toast.message)
-                .hudFixed(12, Palette.fg, tracking: 0.1)
+                .hudFixed(12, theme.fg, tracking: 0.1)
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
             Spacer(minLength: 8)
@@ -310,7 +353,7 @@ struct ToastView: View {
                     Text("\u{00B7} UNDO")
                         .font(.monoFixed(12, .monoSemibold))
                         .tracking(12 * 0.12)
-                        .foregroundStyle(Palette.signal)
+                        .foregroundStyle(theme.signalInk)
                         .frame(minWidth: 64, minHeight: 44)
                         .contentShape(Rectangle())
                 }
@@ -320,35 +363,38 @@ struct ToastView: View {
         .padding(.leading, 14)
         .padding(.trailing, 4)
         .frame(minHeight: 48)
-        .background(Palette.bgRaised, in: RoundedRectangle(cornerRadius: 4))
-        .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(Palette.lineStrong, lineWidth: 1))
+        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.lineStrong, lineWidth: 1))
     }
 }
 
 /// First run: no onboarding, just the way in.
 struct EmptyStackView: View {
     @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+
+    init() {}
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             SectionHeader(index: "01", title: "STATUS", trailing: "EMPTY")
             VStack(spacing: 26) {
-                CapsuleGlyph(fill: Palette.fgFaint, stroke: Palette.fgSubtle)
+                CapsuleGlyph(fill: theme.fgFaint, stroke: theme.fgSubtle)
                     .frame(width: 72, height: 72)
                     .padding(.top, 12)
                 Text("NOTHING IN YOUR STACK")
-                    .hud(13, Palette.fgMuted, tracking: 0.16)
+                    .hud(13, theme.fgMuted, tracking: 0.16)
                 PrimaryButton(title: "ADD TO STACK", lamp: true, locked: model.isLocked) {
                     model.requirePro { [weak model = model] in model?.sheet = .add }
                 }
             }
             .padding(24)
             .frame(maxWidth: .infinity)
-            .background(Palette.bgRaised.opacity(0.6))
+            .background(theme.bgRaised.opacity(0.6), in: RoundedRectangle(cornerRadius: theme.radius.frame))
             .overlay {
-                CornerBrackets(length: 14)
-                    .stroke(Palette.fgSubtle, style: StrokeStyle(lineWidth: 1.5, lineCap: .square))
-                    .padding(0.75)
+                CornerBrackets(length: 14 * theme.brackets.scale, radius: theme.bracketRadius(theme.radius.frame))
+                    .stroke(theme.bracket, style: theme.brackets.style)
+                    .padding(theme.brackets.width / 2)
             }
             FooterLine()
                 .padding(.top, 26)
@@ -357,12 +403,16 @@ struct EmptyStackView: View {
 }
 
 struct FooterLine: View {
+    @Environment(\.theme) private var theme
+
+    init() {}
+
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text("LOCAL ONLY \u{00B7} NO ACCOUNTS \u{00B7} NO ADS \u{00B7} NO TRACKING")
-                .hudFixed(9.5, Palette.fgFaint, tracking: 0.14)
+                .hudFixed(9.5, theme.fgFaint, tracking: 0.14)
             Text("TAKEN \(AppInfo.versionLine)")
-                .hudFixed(9.5, Palette.fgFaint, tracking: 0.14)
+                .hudFixed(9.5, theme.fgFaint, tracking: 0.14)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)

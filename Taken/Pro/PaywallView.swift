@@ -7,6 +7,7 @@ struct PaywallView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.purchase) private var purchase
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.theme) private var theme
 
     let request: PaywallRequest
 
@@ -67,10 +68,10 @@ struct PaywallView: View {
                 dock(compact: compact)
             }
         }
-        .background(Palette.bg.ignoresSafeArea())
+        .background(theme.bg.ignoresSafeArea())
         .presentationDetents([.large])
         .presentationDragIndicator(.hidden)
-        .presentationBackground(Palette.bg)
+        .presentationBackground(theme.bg)
         .offerCodeRedemption(isPresented: $redeeming) { _ in
             Task { await pro.refresh() }
         }
@@ -93,10 +94,10 @@ struct PaywallView: View {
         HStack(spacing: 10) {
             CapsuleGlyph()
                 .frame(width: 20, height: 20)
-                .shadow(color: Palette.signal.opacity(0.5), radius: 6)
+                .shadow(color: theme.glow(0.5), radius: 6)
             HStack(spacing: 9) {
-                Text("TAKEN").foregroundStyle(Palette.fg)
-                Text("PRO").foregroundStyle(Palette.signal)
+                Text("TAKEN").foregroundStyle(theme.fg)
+                Text("PRO").foregroundStyle(theme.signalInk)
             }
             .font(.monoFixed(15, .monoSemibold))
             .tracking(15 * 0.3)
@@ -109,7 +110,7 @@ struct PaywallView: View {
             } label: {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .semibold))
-                    .foregroundStyle(Palette.fgMuted)
+                    .foregroundStyle(theme.fgMuted)
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
@@ -122,24 +123,25 @@ struct PaywallView: View {
 
     private func header(compact: Bool, ruler: Bool) -> some View {
         let today = model.today
+        let frame = RoundedRectangle(cornerRadius: theme.radius.frame)
         return VStack(alignment: .leading, spacing: 0) {
             Text(ProCopy.headline)
                 .font(.sans(compact ? 30 : 34, .sansSemibold, relativeTo: .largeTitle))
                 .tracking(-0.6)
-                .foregroundStyle(Palette.fg)
+                .foregroundStyle(theme.fg)
                 .fixedSize(horizontal: false, vertical: true)
             Text(ProCopy.sublineLines)
                 .font(.sans(compact ? 15 : 16, relativeTo: .body))
-                .foregroundStyle(Palette.fgMuted)
+                .foregroundStyle(theme.fgMuted)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
                 .padding(.top, 8)
             if ruler {
                 VStack(alignment: .leading, spacing: 8) {
                     HStack(spacing: 8) {
-                        Text("TODAY").hud(10, Palette.fgSubtle, tracking: 0.14)
+                        Text("TODAY").hud(10, theme.fgSubtle, tracking: 0.14)
                         Text(loggedLabel(today))
-                            .hud(10, today.allDoses.isEmpty ? Palette.fgFaint : Palette.signal, tracking: 0.12)
+                            .hud(10, today.allDoses.isEmpty ? theme.fgFaint : theme.signalInk, tracking: 0.12)
                     }
                     // The record so far, on the ruler TODAY uses: every dose at its minute.
                     DayRuler(dayStart: model.clock.start(of: today.day), dayEnd: model.clock.end(of: today.day),
@@ -155,20 +157,22 @@ struct PaywallView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .background {
             ZStack(alignment: .topLeading) {
-                (unlocked ? Palette.signalWash.opacity(0.35) : Palette.bgRaised.opacity(0.6))
+                (unlocked ? theme.signalWash.opacity(0.35) : theme.bgRaised.opacity(0.6))
                 // A faint signal glow behind the headline.
-                RadialGradient(colors: [Palette.signal.opacity(unlocked ? 0.16 : 0.08), Palette.signal.opacity(0)],
+                RadialGradient(colors: [theme.signal.opacity(unlocked ? 0.16 : 0.08), theme.signal.opacity(0)],
                                center: .topLeading, startRadius: 0, endRadius: 260)
             }
+            .clipShape(frame)
         }
         .overlay {
-            CornerBrackets(length: unlocked ? 30 : bracket)
-                .stroke(unlocked ? Palette.signal : Palette.fgSubtle, style: StrokeStyle(lineWidth: 1.5, lineCap: .square))
-                .shadow(color: unlocked ? Palette.signal.opacity(0.55) : .clear, radius: 6)
-                .padding(0.75)
+            CornerBrackets(length: (unlocked ? 30 : bracket) * theme.brackets.scale,
+                           radius: theme.bracketRadius(theme.radius.frame))
+                .stroke(unlocked ? theme.signal : theme.bracket, style: theme.brackets.style)
+                .shadow(color: unlocked ? theme.glow(0.55) : .clear, radius: 6)
+                .padding(theme.brackets.width / 2)
         }
         .overlay(alignment: .top) { scanline }
-        .clipped()
+        .clipShape(frame)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(ProCopy.headline) \(ProCopy.subline)")
     }
@@ -184,9 +188,9 @@ struct PaywallView: View {
         if sweeping {
             GeometryReader { geo in
                 Rectangle()
-                    .fill(Palette.signal)
+                    .fill(theme.signal)
                     .frame(height: 2)
-                    .shadow(color: Palette.signal.opacity(0.9), radius: 8)
+                    .shadow(color: theme.glow(0.9), radius: 8)
                     .offset(y: sweep * geo.size.height)
             }
             .allowsHitTesting(false)
@@ -198,12 +202,12 @@ struct PaywallView: View {
         VStack(alignment: .leading, spacing: compact ? 9 : 11) {
             ForEach(ProCopy.features, id: \.self) { line in
                 HStack(spacing: 12) {
-                    Rectangle()
-                        .fill(Palette.signal)
+                    LampShape(roundness: theme.radius.lampRoundness)
+                        .fill(theme.signal)
                         .frame(width: 6, height: 6)
-                        .shadow(color: Palette.signal.opacity(0.7), radius: 3)
+                        .shadow(color: theme.glow(0.7), radius: 3)
                     Text(line)
-                        .hud(12, Palette.fg, face: .monoMedium, tracking: 0.1)
+                        .hud(12, theme.fg, face: .monoMedium, tracking: 0.1)
                         .lineLimit(1)
                         .minimumScaleFactor(0.75)
                 }
@@ -217,8 +221,8 @@ struct PaywallView: View {
 
     private var planHeader: some View {
         HStack(spacing: 10) {
-            Text("[01]").hud(11, Palette.fgFaint, tracking: 0.06)
-            Text("PLAN").hud(11, Palette.fgMuted, tracking: 0.16)
+            Text("[01]").hud(11, theme.fgFaint, tracking: 0.06)
+            Text("PLAN").hud(11, theme.fgMuted, tracking: 0.16)
             DashedRule().frame(maxWidth: .infinity)
         }
         .accessibilityElement(children: .combine)
@@ -249,15 +253,15 @@ struct PaywallView: View {
                     Text(plan.title)
                         .font(.monoFixed(13, .monoSemibold))
                         .tracking(13 * 0.14)
-                        .foregroundStyle(isOn ? Palette.fg : Palette.fgMuted)
+                        .foregroundStyle(isOn ? theme.fg : theme.fgMuted)
                     if let tag {
                         Text(tag)
                             .font(.monoFixed(9.5, .monoSemibold))
                             .tracking(9.5 * 0.12)
-                            .foregroundStyle(Palette.signal)
+                            .foregroundStyle(theme.signalInk)
                             .padding(.horizontal, 6)
                             .padding(.vertical, 3)
-                            .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Palette.signalEdge, lineWidth: 1))
+                            .overlay(RoundedRectangle(cornerRadius: theme.radius.mark).strokeBorder(theme.signalEdge, lineWidth: 1))
                     }
                 }
                 Spacer(minLength: 8)
@@ -266,14 +270,14 @@ struct PaywallView: View {
             .padding(.horizontal, 16)
             .padding(.vertical, compact ? 10 : 12)
             .frame(minHeight: compact ? 54 : 58)
-            .background(isOn ? Palette.signalWash : Palette.bgRaised, in: RoundedRectangle(cornerRadius: 4))
-            .overlay(RoundedRectangle(cornerRadius: 4).strokeBorder(isOn ? Palette.signalEdge : Palette.line, lineWidth: 1))
+            .background(isOn ? theme.signalWash : theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
+            .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(isOn ? theme.signalEdge : theme.line, lineWidth: 1))
             .overlay {
                 // The viewfinder locks onto the chosen plan.
                 if isOn {
-                    CornerBrackets(length: 9)
-                        .stroke(Palette.signal, style: StrokeStyle(lineWidth: 1.5, lineCap: .square))
-                        .shadow(color: Palette.signal.opacity(0.6), radius: 4)
+                    CornerBrackets(length: 9 * theme.brackets.scale, radius: theme.bracketRadius(theme.radius.panel + 3))
+                        .stroke(theme.signal, style: theme.brackets.style)
+                        .shadow(color: theme.glow(0.6), radius: 4)
                         .padding(-3)
                         .transition(.opacity.combined(with: .scale(scale: 1.04)))
                 }
@@ -296,17 +300,17 @@ struct PaywallView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(price.amount)
                         .font(.monoFixed(20, .monoMedium))
-                        .foregroundStyle(Palette.fg)
+                        .foregroundStyle(theme.fg)
                     Text(price.unit)
                         .font(.monoFixed(12, .monoMedium))
-                        .foregroundStyle(isOn ? Palette.fgMuted : Palette.fgSubtle)
+                        .foregroundStyle(isOn ? theme.fgMuted : theme.fgSubtle)
                 }
                 .lineLimit(1)
                 .minimumScaleFactor(0.7)
                 if let monthly = ProCopy.monthlyEquivalent(offer) {
                     Text(monthly)
                         .font(.monoFixed(11, .monoMedium))
-                        .foregroundStyle(Palette.fgSubtle)
+                        .foregroundStyle(theme.fgSubtle)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
                 }
@@ -314,21 +318,21 @@ struct PaywallView: View {
         } else {
             Text(pro.offersPhase == .failed ? "--" : "\u{00B7}\u{00B7}\u{00B7}")
                 .font(.monoFixed(16, .monoMedium))
-                .foregroundStyle(Palette.fgFaint)
+                .foregroundStyle(theme.fgFaint)
         }
     }
 
-    /// Square radio, lit when chosen.
+    /// Square radio (round in Blush), lit when chosen.
     private func radio(_ on: Bool) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: 2)
-                .strokeBorder(on ? Palette.signal : Palette.fgFaint, lineWidth: 1.2)
+            RoundedRectangle(cornerRadius: max(theme.radius.mark, theme.lampRadius(16)))
+                .strokeBorder(on ? theme.signal : theme.fgFaint, lineWidth: 1.2)
                 .frame(width: 16, height: 16)
             if on {
-                Rectangle()
-                    .fill(Palette.signal)
+                LampShape(roundness: theme.radius.lampRoundness)
+                    .fill(theme.signal)
                     .frame(width: 8, height: 8)
-                    .shadow(color: Palette.signal.opacity(0.8), radius: 4)
+                    .shadow(color: theme.glow(0.8), radius: 4)
                     .transition(.scale(scale: 0.4).combined(with: .opacity))
             }
         }
@@ -355,13 +359,13 @@ struct PaywallView: View {
 
     private func dock(compact: Bool) -> some View {
         VStack(spacing: 0) {
-            Rectangle().fill(Palette.line).frame(height: 1)
+            Rectangle().fill(theme.line).frame(height: 1)
             VStack(alignment: .leading, spacing: compact ? 10 : 12) {
                 if let note { noteView(note) }
                 cta(height: compact ? 52 : 56)
                 Text(termsLine)
                     .font(.sans(compact ? 12 : 12.5, relativeTo: .footnote))
-                    .foregroundStyle(Palette.fgMuted)
+                    .foregroundStyle(theme.fgMuted)
                     .lineSpacing(1.5)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: .infinity, alignment: .leading)
@@ -371,7 +375,7 @@ struct PaywallView: View {
             .padding(.top, compact ? 12 : 14)
             .padding(.bottom, 2)
         }
-        .background(Palette.bg)
+        .background(theme.bg)
         .animation(.snappy(duration: 0.22), value: note)
     }
 
@@ -401,14 +405,14 @@ struct PaywallView: View {
             HStack(spacing: 10) {
                 if busy == .buying || busy == .restoring {
                     ProgressView()
-                        .tint(Palette.buttonText)
+                        .tint(theme.buttonText)
                         .controlSize(.small)
                 } else if unlocked {
                     CheckShape()
-                        .stroke(Palette.buttonText, style: StrokeStyle(lineWidth: 2.2, lineCap: .square, lineJoin: .miter))
+                        .stroke(theme.buttonText, style: StrokeStyle(lineWidth: 2.2, lineCap: .square, lineJoin: .miter))
                         .frame(width: 14, height: 14)
                 } else {
-                    Rectangle().fill(Palette.signal).frame(width: 7, height: 7)
+                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 7, height: 7)
                 }
                 Text(ctaTitle)
                     .font(.monoFixed(14, .monoSemibold))
@@ -416,12 +420,13 @@ struct PaywallView: View {
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
-            .foregroundStyle(Palette.buttonText)
+            .foregroundStyle(theme.buttonText)
             .frame(maxWidth: .infinity)
             .frame(height: height)
-            .background(unlocked ? Palette.signal : Palette.button.opacity(ctaEnabled || busy != nil ? 1 : 0.35),
-                        in: RoundedRectangle(cornerRadius: 4))
-            .shadow(color: unlocked ? Palette.signal.opacity(0.5) : .clear, radius: 12)
+            // Pro on: the button lights in the signal, the readable shade of it in Blush.
+            .background(unlocked ? theme.signalInk : theme.button.opacity(ctaEnabled || busy != nil ? 1 : 0.35),
+                        in: RoundedRectangle(cornerRadius: theme.radius.panel))
+            .shadow(color: unlocked ? theme.glow(0.5) : .clear, radius: 12)
         }
         .buttonStyle(PressStyle())
         .disabled(!ctaEnabled)
@@ -481,7 +486,7 @@ struct PaywallView: View {
 
     private func footerLabel(_ title: String) -> some View {
         Text(title)
-            .hudFixed(10, Palette.fgMuted, face: .monoMedium, tracking: 0.1)
+            .hudFixed(10, theme.fgMuted, face: .monoMedium, tracking: 0.1)
             .lineLimit(1)
             .fixedSize()
             .padding(.horizontal, 5)
@@ -491,19 +496,19 @@ struct PaywallView: View {
 
     private var separator: some View {
         Text("\u{00B7}")
-            .hudFixed(10, Palette.fgFaint, tracking: 0)
+            .hudFixed(10, theme.fgFaint, tracking: 0)
             .accessibilityHidden(true)
     }
 
     private func noteView(_ note: Note) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            Rectangle()
-                .fill(note.lit ? Palette.signal : Palette.fgSubtle)
+            LampShape(roundness: theme.radius.lampRoundness)
+                .fill(note.lit ? theme.signal : theme.fgSubtle)
                 .frame(width: 6, height: 6)
                 .padding(.top, 6)
             Text(note.text)
                 .font(.sans(14, relativeTo: .callout))
-                .foregroundStyle(Palette.fgMuted)
+                .foregroundStyle(theme.fgMuted)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
