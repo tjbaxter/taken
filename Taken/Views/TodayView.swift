@@ -1,5 +1,9 @@
 import SwiftUI
 
+/// The three tabs (REDESIGN.md): Today (the stack), To-do (voice to-dos) and History (the calendar and stats), in the
+/// system tab bar, which is Liquid Glass on iOS 26. Every sheet and the Taken Pro paywall are presented from here, above
+/// the tabs, so Siri, the Action button, the control, the Lock Screen, links, notifications and the quick action can
+/// close whatever is open and bring the To-do tab to the front.
 struct RootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
@@ -12,16 +16,8 @@ struct RootView: View {
 
     var body: some View {
         Group {
-            if model.isDemo && model.launchScreen == "widgets" {
-                WidgetGallery()
-            } else if model.isDemo && model.launchScreen == "widgets-locked" {
-                WidgetGallery(mode: .locked)
-            } else if model.isDemo && model.launchScreen == "widgets-standby" {
-                WidgetGallery(mode: .standBy)
-            } else if model.isDemo && TodoModel.opensOnTodo(model.launchScreen) {
-                // -screen todo and todo-recording (SPEC 3.10).
-                TodoRootView()
-                    .paywallHost(.root)
+            if model.isDemo, let gallery = WidgetGallery.Mode(screen: model.launchScreen) {
+                WidgetGallery(mode: gallery)
             } else {
                 main
             }
@@ -41,16 +37,36 @@ struct RootView: View {
     }
 
     private var main: some View {
-        TodayView()
-            .paywallHost(.root)
-            .sheet(item: sheetBinding, onDismiss: { model.rootSheetDidDismiss() }) { route in
-                sheetContent(route)
-                    .paywallHost(.sheet)
-                    .environment(model)
-                    .environment(\.theme, model.theme)
-                    .preferredColorScheme(model.theme.scheme)
-            }
-            .task { await model.applyLaunchScreen() }
+        TabView(selection: tabBinding) {
+            TodayView()
+                .tabItem { Label("Today", systemImage: "pills") }
+                .tag(AppTab.today)
+            TodoRootView()
+                .tabItem { Label("To-do", systemImage: "checklist") }
+                .tag(AppTab.todo)
+            HistoryScreen()
+                .tabItem { Label("History", systemImage: "calendar") }
+                .tag(AppTab.history)
+        }
+        .opensTodoTab { model.openTodoTab() }
+        .paywallHost(.root)
+        .sheet(item: sheetBinding, onDismiss: { model.rootSheetDidDismiss() }) { route in
+            sheetContent(route)
+                .paywallHost(.sheet)
+                .environment(model)
+                .environment(\.theme, model.theme)
+                .preferredColorScheme(model.theme.scheme)
+        }
+        .task { await model.applyLaunchScreen() }
+        // CI reads what is in front (`-demo` only), so a link check fails when the link lands on the wrong screen.
+        .onAppear { DemoProbe.record(model) }
+        .onChange(of: model.tab) { _, _ in DemoProbe.record(model) }
+        .onChange(of: model.sheet) { _, _ in DemoProbe.record(model) }
+        .onChange(of: model.paywall?.id) { _, _ in DemoProbe.record(model) }
+    }
+
+    private var tabBinding: Binding<AppTab> {
+        Binding(get: { model.tab }, set: { model.tab = $0 })
     }
 
     private var sheetBinding: Binding<SheetRoute?> {
@@ -63,7 +79,7 @@ struct RootView: View {
         case .add:
             AddSheet()
         case .settings:
-            SettingsView()
+            ProfileView()
         case .day(let day):
             DaySheet(day: day)
         case .setTime(let id):
@@ -74,12 +90,26 @@ struct RootView: View {
             NavigationStack {
                 ItemEditorView(itemID: id, isSheet: true)
             }
+            .presentationDetents([.medium, .large])
             .presentationBackground(theme.bg)
+        case .todoEdit(let id):
+            if let task = TodoModel.shared.state.task(id) {
+                TodoEditSheet(task: task, clock: TodoModel.shared.clock) { title, due in
+                    TodoModel.shared.edit(id, title: title, due: due)
+                } onDelete: {
+                    TodoModel.shared.delete(task)
+                }
+            }
+        case .todoType:
+            TodoTypeSheet { text in
+                TodoModel.shared.submitTyped(text, app: model)
+            }
         }
     }
 }
 
-/// The single main screen.
+/// Today: a large title with the date, one calm progress line, then the stack with a "+" beside its title. Items not
+/// due today sit in a quiet Not today group with the day they are next due.
 struct TodayView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
@@ -87,98 +117,77 @@ struct TodayView: View {
     init() {}
 
     var body: some View {
-        ScrollViewReader { proxy in
-            ScrollView {
-                VStack(alignment: .leading, spacing: 0) {
-                    if model.hasStack {
-                        stackContent
-                    } else {
-                        EmptyStackView()
-                    }
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                TabHeader(title: "Today", subtitle: Fmt.longDay(model.today.day))
+                if model.hasStack {
+                    stackContent
+                } else {
+                    EmptyStackView()
+                        .padding(.top, 28)
                 }
-                .padding(.horizontal, 20)
-                .padding(.bottom, 28)
             }
-            .scrollIndicators(.hidden)
-            .background(theme.bg.ignoresSafeArea())
-            .safeAreaInset(edge: .top, spacing: 0) { TopBar() }
-            .safeAreaInset(edge: .bottom, spacing: 0) { BottomDock() }
-            .onChange(of: model.scrollTarget) { _, target in
-                guard let target else { return }
-                withAnimation(.snappy(duration: 0.3)) { proxy.scrollTo(target, anchor: .top) }
-                model.scrollTarget = nil
-            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 28)
         }
+        .scrollIndicators(.hidden)
+        .background(theme.bg.ignoresSafeArea())
+        .safeAreaInset(edge: .bottom, spacing: 0) { BottomDock() }
     }
 
     @ViewBuilder
     private var stackContent: some View {
         let today = model.today
-        // A finished day locks in. Without Pro the lock means Taken Pro, so the finished day reads DONE.
-        SectionHeader(index: "01", title: "STATUS",
-                      trailing: today.allTaken ? (model.isLocked ? "DONE" : "LOCKED") : "LIVE",
-                      trailingColor: today.allTaken ? theme.signalInk : theme.fgSubtle)
-        StatusPanel(summary: today, now: model.now, clock: model.clock, lockInCount: model.lockInCount,
-                    streak: model.streak, proLocked: model.isLocked)
+        ProgressSummary(summary: today, clock: model.clock, lockInCount: model.lockInCount, streak: model.streak)
+            .padding(.top, 22)
         if model.isLocked {
             LockedBar(text: model.lockedBarText) {
                 model.presentPaywall(origin: .bar)
             }
-            .padding(.top, 12)
+            .padding(.top, 16)
             .transition(.opacity)
         }
 
-        SectionHeader(index: "02", title: "STACK", trailing: Fmt.stackProgress(today))
+        HStack(alignment: .center, spacing: 8) {
+            Text("Stack")
+                .font(.sans(20, .sansSemibold, relativeTo: .title3))
+                .foregroundStyle(theme.fg)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            AddToStackButton()
+        }
+        .padding(.top, 26)
+        .padding(.bottom, 8)
+
         if today.due.isEmpty {
-            Panel {
-                Text("NOTHING DUE TODAY")
-                    .hud(11, theme.fgSubtle)
+            Card {
+                Text("Nothing due today")
+                    .font(.sans(16, .sans, relativeTo: .body))
+                    .foregroundStyle(theme.fgMuted)
                     .frame(maxWidth: .infinity, minHeight: 64)
             }
         } else {
-            Panel {
-                rows(today.due, notDue: false)
-            }
+            Card { rows(today.due, notDue: false) }
         }
 
         if !today.notDue.isEmpty {
-            HStack(spacing: 10) {
-                Text("NOT DUE").hud(10.5, theme.fgSubtle)
-                DashedRule()
-            }
-            .padding(.top, 18)
-            .padding(.bottom, 10)
-            Panel(stacked: false) {
-                rows(today.notDue, notDue: true)
-            }
+            SectionHeader("Not today")
+            Card { rows(today.notDue, notDue: true) }
         }
-
-        SectionHeader(index: "03", title: "LOG", trailing: "5 WEEKS")
-            .id("log")
-        HistoryGrid(rows: model.history) { day in
-            model.sheet = .day(day)
-        }
-        StatsRow(streak: model.streak, adherence: model.adherence)
-            .padding(.top, 16)
-
-        FooterLine()
-            .padding(.top, 26)
     }
 
     private func rows(_ items: [ItemDay], notDue: Bool) -> some View {
         VStack(spacing: 0) {
             ForEach(Array(items.enumerated()), id: \.element.id) { index, row in
-                if index > 0 {
-                    DashedRule().padding(.horizontal, 14)
-                }
+                if index > 0 { RowDivider() }
                 ItemRowView(row: row, now: model.now, clock: model.clock,
                             expanded: model.expandedItemID == row.id,
-                            notDueLabel: notDue ? model.nextLabel(for: row) : nil,
-                            locked: model.isLocked) {
-                    model.tap(row)
-                }
-                .contextMenu { menu(for: row) }
-                .accessibilityActions { voiceOverActions(for: row) }
+                            nextLabel: notDue ? model.nextLabel(for: row) : nil,
+                            locked: model.isLocked,
+                            onTake: { model.tap(row) },
+                            onOpen: { model.sheet = .editItem(row.item.id) })
+                    .contextMenu { menu(for: row) }
+                    .accessibilityActions { voiceOverActions(for: row) }
             }
         }
     }
@@ -190,7 +199,6 @@ struct TodayView: View {
             Button("Undo last dose") { model.undoLastDose(row.item) }
         }
         Button("Set time") { openSetTime(row.item.id) }
-        Button("Edit item") { model.sheet = .editItem(row.item.id) }
     }
 
     @ViewBuilder
@@ -219,46 +227,33 @@ struct TodayView: View {
     }
 }
 
-struct TopBar: View {
+/// The clear "+" beside the stack's title: opens Add.
+struct AddToStackButton: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
 
     init() {}
 
     var body: some View {
-        HStack(spacing: 10) {
-            CapsuleGlyph()
-                .frame(width: 20, height: 20)
-            Text("TAKEN")
-                .font(.monoFixed(15, .monoSemibold))
-                .tracking(15 * 0.3)
-                .foregroundStyle(theme.fg)
-                .accessibilityAddTraits(.isHeader)
-            Spacer()
-            Text(Fmt.dayHeader(model.today.day))
-                .hudFixed(11.5, theme.fgMuted, tracking: 0.14)
-            Button {
-                model.sheet = .settings
-            } label: {
-                Image(systemName: "gearshape")
-                    .font(.system(size: 17, weight: .regular))
-                    .foregroundStyle(theme.fgMuted)
-                    .frame(width: 44, height: 44)
-                    .contentShape(Rectangle())
-            }
-            .accessibilityLabel("Settings")
+        Button {
+            // Adding needs no Pro until the first dose; after it, without Pro, the paywall comes first.
+            model.requirePro { [weak model = model] in model?.sheet = .add }
+        } label: {
+            Image(systemName: "plus")
+                .font(.system(size: 17, weight: .semibold))
+                .foregroundStyle(theme.signalInk)
+                .frame(width: 36, height: 36)
+                .background(theme.signalWash, in: Circle())
+                .overlay(Circle().strokeBorder(theme.signalEdge, lineWidth: 1))
+                .frame(width: 44, height: 44)
+                .contentShape(Rectangle())
         }
-        .padding(.leading, 20)
-        .padding(.trailing, 8)
-        .frame(height: 52)
-        .background(theme.bg)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(theme.line).frame(height: 1)
-        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel("Add to stack")
     }
 }
 
-/// TAKE ALL and the undo toast, pinned above the home indicator.
+/// Take all and the undo toast, pinned above the tab bar.
 struct BottomDock: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
@@ -266,7 +261,7 @@ struct BottomDock: View {
     init() {}
 
     var body: some View {
-        // Counts what TAKE ALL logs right now, so the number on the button is the number it takes.
+        // Counts what Take all logs right now, so the number on the button is the number it takes.
         let pending = model.takeAllCount
         let showTakeAll = pending >= 2
         let visible = showTakeAll || model.toast != nil
@@ -277,21 +272,21 @@ struct BottomDock: View {
                     .accessibilityAction(named: "Dismiss") { model.dismissToast() }
             }
             if showTakeAll {
-                PrimaryButton(title: "TAKE ALL (\(pending))", lamp: true, locked: model.isLocked) {
+                PrimaryButton(title: "Take all", locked: model.isLocked, count: pending) {
                     model.requirePro { [weak model = model] in model?.takeAll() }
                 }
                 .transition(.opacity)
+                .accessibilityLabel("Take all, \(pending)")
                 .accessibilityHint(model.isLocked ? "Opens Taken Pro." : "Marks every pending dose taken now.")
             }
         }
         .padding(.horizontal, 20)
-        .padding(.top, visible ? 12 : 0)
-        .padding(.bottom, visible ? 6 : 0)
+        .padding(.top, visible ? 10 : 0)
+        .padding(.bottom, visible ? 8 : 0)
         .frame(maxWidth: .infinity)
         .background {
             if showTakeAll {
-                theme.bg
-                    .overlay(alignment: .top) { Rectangle().fill(theme.line).frame(height: 1) }
+                theme.bg.opacity(0.94)
                     .ignoresSafeArea(edges: .bottom)
             }
         }
@@ -300,7 +295,7 @@ struct BottomDock: View {
     }
 }
 
-/// Locked mode: the slim bar under the status panel. The log stays readable; a tap opens Taken Pro.
+/// Locked mode: a slim bar under the progress line. The log stays readable; a tap opens Taken Pro.
 struct LockedBar: View {
     @Environment(\.theme) private var theme
     let text: String
@@ -315,25 +310,27 @@ struct LockedBar: View {
         Button(action: action) {
             HStack(spacing: 10) {
                 Image(systemName: "lock.fill")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(theme.signalInk)
                 Text(text)
-                    .hudFixed(11, theme.fg, face: .monoSemibold, tracking: 0.14)
+                    .font(.sans(15, .sansMedium, relativeTo: .subheadline))
+                    .foregroundStyle(theme.fg)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.8)
                 Spacer(minLength: 8)
-                Image(systemName: "arrow.right")
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundStyle(theme.fgMuted)
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(theme.fgSubtle)
             }
-            .padding(.horizontal, 14)
-            .frame(maxWidth: .infinity, minHeight: 44)
-            .background(theme.signalWash.opacity(0.55), in: RoundedRectangle(cornerRadius: theme.radius.panel))
-            .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.signalEdge, lineWidth: 1))
+            .padding(.horizontal, 16)
+            .frame(maxWidth: .infinity, minHeight: 48)
+            .background(theme.signalWash, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous)
+                .strokeBorder(theme.signalEdge, lineWidth: 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
-        .accessibilityLabel("Logging needs Taken Pro. \(text.capitalized).")
+        .accessibilityLabel("Logging needs Taken Pro. \(text).")
         .accessibilityHint("Opens Taken Pro.")
     }
 }
@@ -349,18 +346,21 @@ struct ToastView: View {
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 6, height: 6)
+        HStack(spacing: 6) {
             Text(toast.message)
-                .hudFixed(12, theme.fg, tracking: 0.1)
+                .font(.sans(15, .sans, relativeTo: .subheadline))
                 .lineLimit(1)
-                .minimumScaleFactor(0.75)
+                .minimumScaleFactor(0.8)
+            if let time = toast.time {
+                Text(time)
+                    .font(.mono(15, .monoMedium, relativeTo: .subheadline))
+                    .fixedSize()
+            }
             Spacer(minLength: 8)
             if toast.undo != nil {
                 Button(action: onUndo) {
-                    Text("\u{00B7} UNDO")
-                        .font(.monoFixed(12, .monoSemibold))
-                        .tracking(12 * 0.12)
+                    Text("Undo")
+                        .font(.sans(15, .sansSemibold, relativeTo: .subheadline))
                         .foregroundStyle(theme.signalInk)
                         .frame(minWidth: 64, minHeight: 44)
                         .contentShape(Rectangle())
@@ -368,11 +368,14 @@ struct ToastView: View {
                 .accessibilityLabel("Undo")
             }
         }
-        .padding(.leading, 14)
+        .foregroundStyle(theme.fg)
+        .padding(.leading, 16)
         .padding(.trailing, 4)
-        .frame(minHeight: 48)
-        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
-        .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.lineStrong, lineWidth: 1))
+        .frame(minHeight: 50)
+        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous)
+            .strokeBorder(theme.lineStrong, lineWidth: 1))
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -384,46 +387,28 @@ struct EmptyStackView: View {
     init() {}
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            SectionHeader(index: "01", title: "STATUS", trailing: "EMPTY")
-            VStack(spacing: 26) {
-                CapsuleGlyph(fill: theme.fgFaint, stroke: theme.fgSubtle)
-                    .frame(width: 72, height: 72)
-                    .padding(.top, 12)
-                Text("NOTHING IN YOUR STACK")
-                    .hud(13, theme.fgMuted, tracking: 0.16)
-                PrimaryButton(title: "ADD TO STACK", lamp: true, locked: model.isLocked) {
-                    model.requirePro { [weak model = model] in model?.sheet = .add }
-                }
+        VStack(spacing: 18) {
+            CapsuleGlyph(fill: theme.signal, stroke: theme.fgSubtle)
+                .frame(width: 64, height: 64)
+                .padding(.top, 8)
+            VStack(spacing: 6) {
+                Text("Nothing in your stack yet")
+                    .font(.sans(20, .sansSemibold, relativeTo: .title3))
+                    .foregroundStyle(theme.fg)
+                Text("Tap what you take. It takes a few seconds.")
+                    .font(.sans(15, .sans, relativeTo: .subheadline))
+                    .foregroundStyle(theme.fgSubtle)
+                    .multilineTextAlignment(.center)
             }
-            .padding(24)
-            .frame(maxWidth: .infinity)
-            .background(theme.bgRaised.opacity(0.6), in: RoundedRectangle(cornerRadius: theme.radius.frame))
-            .overlay {
-                CornerBrackets(length: 14 * theme.brackets.scale, radius: theme.bracketRadius(theme.radius.frame))
-                    .stroke(theme.bracket, style: theme.brackets.style)
-                    .padding(theme.brackets.width / 2)
+            PrimaryButton(title: "Add to stack", locked: model.isLocked) {
+                model.requirePro { [weak model = model] in model?.sheet = .add }
             }
-            FooterLine()
-                .padding(.top, 26)
+            .padding(.top, 6)
         }
-    }
-}
-
-struct FooterLine: View {
-    @Environment(\.theme) private var theme
-
-    init() {}
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text("LOCAL ONLY \u{00B7} NO ACCOUNTS \u{00B7} NO ADS \u{00B7} NO TRACKING")
-                .hudFixed(9.5, theme.fgFaint, tracking: 0.14)
-            Text("TAKEN \(AppInfo.versionLine)")
-                .hudFixed(9.5, theme.fgFaint, tracking: 0.14)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
+        .padding(24)
+        .frame(maxWidth: .infinity)
+        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
     }
 }
 
@@ -435,6 +420,4 @@ enum AppInfo {
     static var build: String {
         Bundle.main.object(forInfoDictionaryKey: "CFBundleVersion") as? String ?? "1"
     }
-
-    static var versionLine: String { "V\(version) (\(build))" }
 }

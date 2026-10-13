@@ -16,16 +16,20 @@ final class TodoStoreTests: XCTestCase {
 
         let now = at(2026, 10, 13, 9, 41)
         var state = TodoState()
-        let added = state.add([TodoDraft(title: "Call the dentist", dueDate: at(2026, 10, 13, 16), hasTime: true),
+        let added = state.add([TodoDraft(title: "Call the dentist", due: .time(at(2026, 10, 13, 16))),
+                               TodoDraft(title: "Renew the passport", due: .day(DayKey(year: 2026, month: 10, day: 16))),
                                TodoDraft(title: "Buy milk")], at: now)
-        state.complete(added[1].id, at: at(2026, 10, 13, 10))
+        state.complete(added[2].id, at: at(2026, 10, 13, 10))
         XCTAssertEqual(state.firstNoteAt, now, "the first note is remembered")
-        XCTAssertEqual(added.map(\.order), [0, 1], "a note keeps the order it was said in")
+        XCTAssertEqual(added.map(\.order), [0, 1, 2], "a note keeps the order it was said in")
         XCTAssertEqual(Set(added.map(\.noteId)).count, 1, "one note, one id")
 
         try store.replace(with: state)
         XCTAssertEqual(store.load(), state)
         XCTAssertEqual(TodoStore(fileURL: store.fileURL).load(), state, "a second process sees the same tasks")
+        let text = String(decoding: try TodoStore.encode(state), as: UTF8.self)
+        XCTAssertTrue(text.contains(#""dueDay":"2026-10-16""#), "a day alone is stored as that date: \(text)")
+        XCTAssertFalse(text.contains("hasTime"), text)
     }
 
     func testUpdateIsCoordinatedAndReturnsItsValue() throws {
@@ -54,18 +58,31 @@ final class TodoStoreTests: XCTestCase {
         let state = try TodoStore.decode(Data(json.utf8))
         XCTAssertEqual(state.tasks.map(\.title), ["Call the dentist", "Buy milk", "No due date"])
         let first = state.tasks[0]
-        XCTAssertNil(first.dueDate)
+        XCTAssertNil(first.due)
         XCTAssertFalse(first.hasTime)
         XCTAssertNil(first.completedAt)
         XCTAssertEqual(first.noteId, first.id, "a task saved without a note is its own note")
         XCTAssertEqual(first.order, 0)
-        XCTAssertTrue(state.tasks[1].hasTime)
+        XCTAssertTrue(state.tasks[1].hasTime, "a file from before 1.1 shipped: dueDate with hasTime is a time")
+        XCTAssertEqual(state.tasks[1].due, .time(Date(timeIntervalSince1970: 1791100000)))
         XCTAssertEqual(state.tasks[1].order, 1)
         XCTAssertNotNil(state.tasks[1].completedAt)
         XCTAssertFalse(state.tasks[2].hasTime, "no due date, no time")
         XCTAssertNil(state.firstNoteAt)
         XCTAssertEqual(state.schemaVersion, 1)
         XCTAssertEqual(try TodoStore.decode(Data("{}".utf8)), TodoState())
+
+        let current = """
+            {"tasks":[
+              {"id":"6F1C2D3E-4A5B-4C6D-8E9F-0A1B2C3D4E5F","title":"Call Sam","dueAt":1791100000,"createdAt":1791000000},
+              {"id":"7A1C2D3E-4A5B-4C6D-8E9F-0A1B2C3D4E5F","title":"Renew the passport","dueDay":"2026-10-16","createdAt":1791000000},
+              {"id":"8A1C2D3E-4A5B-4C6D-8E9F-0A1B2C3D4E5F","title":"Bad day","dueDay":"2026-02-31","createdAt":1791000000}
+            ]}
+            """
+        let tasks = try TodoStore.decode(Data(current.utf8)).tasks
+        XCTAssertEqual(tasks[0].due, .time(Date(timeIntervalSince1970: 1791100000)))
+        XCTAssertEqual(tasks[1].due, .day(DayKey(year: 2026, month: 10, day: 16)))
+        XCTAssertNil(tasks[2].due, "a day that does not exist is no due date, and the task stays")
     }
 
     func testUnreadableFileIsKeptAsideNotOverwritten() throws {
@@ -90,14 +107,14 @@ final class TodoStoreTests: XCTestCase {
         let tasks = [
             TodoTask(title: "Morning first", createdAt: early, noteId: morning, order: 0),
             TodoTask(title: "Morning second", createdAt: early, noteId: morning, order: 1),
-            TodoTask(title: "Tomorrow, any time", dueDate: at(2026, 10, 14, 12), hasTime: false, createdAt: early,
+            TodoTask(title: "Tomorrow, any time", due: .day(DayKey(year: 2026, month: 10, day: 14)), createdAt: early,
                      noteId: morning, order: 2),
-            TodoTask(title: "Tomorrow 09:00", dueDate: at(2026, 10, 14, 9), hasTime: true, createdAt: late,
+            TodoTask(title: "Tomorrow 09:00", due: .time(at(2026, 10, 14, 9)), createdAt: late,
                      noteId: evening, order: 0),
-            TodoTask(title: "Today 16:00", dueDate: at(2026, 10, 13, 16), hasTime: true, createdAt: late,
+            TodoTask(title: "Today 16:00", due: .time(at(2026, 10, 13, 16)), createdAt: late,
                      noteId: evening, order: 1),
             TodoTask(title: "Evening, no time", createdAt: late, noteId: evening, order: 2),
-            TodoTask(title: "Tomorrow 23:00", dueDate: at(2026, 10, 14, 23), hasTime: true, createdAt: late,
+            TodoTask(title: "Tomorrow 23:00", due: .time(at(2026, 10, 14, 23)), createdAt: late,
                      noteId: evening, order: 3),
         ]
         XCTAssertEqual(TodoState(tasks: tasks).openTasks(clock: clock).map(\.title), [
@@ -143,13 +160,13 @@ final class TodoStoreTests: XCTestCase {
         state.reopen(id)
         XCTAssertNil(state.task(id)?.completedAt, "a tap on the check opens it again")
 
-        state.update(id, title: "  call the dentist about the filling. ", dueDate: at(2026, 10, 14, 9), hasTime: true)
+        state.update(id, title: "  call the dentist about the filling. ", due: .time(at(2026, 10, 14, 9)))
         XCTAssertEqual(state.task(id)?.title, "Call the dentist about the filling")
-        XCTAssertEqual(state.task(id)?.dueDate, at(2026, 10, 14, 9))
+        XCTAssertEqual(state.task(id)?.due, .time(at(2026, 10, 14, 9)))
         XCTAssertEqual(state.task(id)?.hasTime, true)
-        state.update(id, title: "   ", dueDate: nil, hasTime: true)
+        state.update(id, title: "   ", due: nil)
         XCTAssertEqual(state.task(id)?.title, "Call the dentist about the filling", "an empty title keeps the old one")
-        XCTAssertNil(state.task(id)?.dueDate)
+        XCTAssertNil(state.task(id)?.due)
         XCTAssertEqual(state.task(id)?.hasTime, false, "no due date, no time")
 
         let removed = try XCTUnwrap(state.delete(id))
@@ -205,7 +222,7 @@ final class TodoStoreTests: XCTestCase {
         let clock = londonClock()
         let now = at(2026, 10, 13, 9, 41) // Tuesday
         func label(_ due: Date?, _ hasTime: Bool, now: Date = at(2026, 10, 13, 9, 41)) -> String? {
-            TodoText.dueLabel(TodoTask(title: "x", dueDate: due, hasTime: hasTime, createdAt: now, noteId: UUID()),
+            TodoText.dueLabel(TodoTask(title: "x", due: due.map { make($0, hasTime) }, createdAt: now, noteId: UUID()),
                               now: now, clock: clock)
         }
         XCTAssertNil(label(nil, false))
@@ -223,7 +240,7 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertEqual(label(at(2026, 10, 14, 2), true, now: late), "02:00")
 
         func overdue(_ due: Date, _ hasTime: Bool) -> Bool {
-            TodoText.isOverdue(TodoTask(title: "x", dueDate: due, hasTime: hasTime, createdAt: now, noteId: UUID()),
+            TodoText.isOverdue(TodoTask(title: "x", due: make(due, hasTime), createdAt: now, noteId: UUID()),
                                now: now, clock: clock)
         }
         XCTAssertTrue(overdue(at(2026, 10, 13, 9), true))
@@ -235,12 +252,12 @@ final class TodoStoreTests: XCTestCase {
     func testDueTimeRemindersOnlyForOpenTasksWithATimeStillToCome() {
         let now = at(2026, 10, 13, 9, 41)
         let tasks = [
-            TodoTask(title: "Call the dentist", dueDate: at(2026, 10, 13, 16), hasTime: true, createdAt: now, noteId: UUID()),
-            TodoTask(title: "Already past", dueDate: at(2026, 10, 13, 9), hasTime: true, createdAt: now, noteId: UUID()),
-            TodoTask(title: "Any time tomorrow", dueDate: at(2026, 10, 14, 12), hasTime: false, createdAt: now, noteId: UUID()),
-            TodoTask(title: "Done", dueDate: at(2026, 10, 13, 18), hasTime: true, createdAt: now, completedAt: now,
+            TodoTask(title: "Call the dentist", due: .time(at(2026, 10, 13, 16)), createdAt: now, noteId: UUID()),
+            TodoTask(title: "Already past", due: .time(at(2026, 10, 13, 9)), createdAt: now, noteId: UUID()),
+            TodoTask(title: "Any time tomorrow", due: .day(DayKey(year: 2026, month: 10, day: 14)), createdAt: now,
                      noteId: UUID()),
-            TodoTask(title: "Tomorrow at nine", dueDate: at(2026, 10, 14, 9), hasTime: true, createdAt: now, noteId: UUID()),
+            TodoTask(title: "Done", due: .time(at(2026, 10, 13, 18)), createdAt: now, completedAt: now, noteId: UUID()),
+            TodoTask(title: "Tomorrow at nine", due: .time(at(2026, 10, 14, 9)), createdAt: now, noteId: UUID()),
         ]
         let plans = TodoNotifications.plan(tasks: tasks, now: now, clock: londonClock())
         XCTAssertEqual(plans.map(\.title), ["Call the dentist", "Tomorrow at nine"])
@@ -260,5 +277,128 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertTrue(TodoModel.shouldStop(now: start + 8.5, startedAt: start, lastVoiceAt: start, heardWords: false))
         XCTAssertTrue(TodoModel.shouldStop(now: start + 121, startedAt: start, lastVoiceAt: start + 120.9, heardWords: true),
                       "two minutes at most")
+    }
+
+    /// A due as the old tests wrote it: a moment with a time, or the London calendar date of a day-only one.
+    private func make(_ date: Date, _ hasTime: Bool) -> TodoDue {
+        hasTime ? .time(date) : .day(DayKey(calendarDateOf: date, in: london))
+    }
+
+    // MARK: Days stay days
+
+    @MainActor
+    func testADayOnlyDueDateIsTheSameDateInEveryTimeZone() {
+        // "Renew the passport on Friday", said in Sydney: Friday wherever the iPhone is later.
+        let friday = DayKey(year: 2026, month: 10, day: 16)
+        let task = TodoTask(title: "Renew the passport", due: .day(friday), createdAt: at(2026, 10, 13, 9), noteId: UUID())
+        let sydney = TimeZone(identifier: "Australia/Sydney")!
+        let losAngeles = TimeZone(identifier: "America/Los_Angeles")!
+        for zone in [sydney, losAngeles, london] {
+            let clock = DayClock(dayStartHour: 4, timeZone: zone)
+            var calendar = Calendar(identifier: .gregorian)
+            calendar.timeZone = zone
+            let thursday = calendar.date(from: DateComponents(year: 2026, month: 10, day: 15, hour: 10))!
+            XCTAssertEqual(TodoText.dueLabel(task, now: thursday, clock: clock), "Tomorrow", zone.identifier)
+            let fridayEvening = calendar.date(from: DateComponents(year: 2026, month: 10, day: 16, hour: 20))!
+            XCTAssertFalse(TodoText.isOverdue(task, now: fridayEvening, clock: clock), "\(zone.identifier): due all Friday")
+            let saturday = calendar.date(from: DateComponents(year: 2026, month: 10, day: 17, hour: 10))!
+            XCTAssertTrue(TodoText.isOverdue(task, now: saturday, clock: clock), zone.identifier)
+            let sorted = TodoOrdering.sortDate(task, clock: clock)
+            XCTAssertEqual(sorted.map { DayKey(calendarDateOf: $0, in: zone) }, friday, "sorted by the end of Friday there")
+        }
+        let edited = TodoEditSheet.savedDue(hasDue: true, hasTime: false,
+                                            picked: TodoEditSheet.pickerDate(.day(friday), clock: DayClock(dayStartHour: 4, timeZone: losAngeles)),
+                                            clock: DayClock(dayStartHour: 4, timeZone: losAngeles))
+        XCTAssertEqual(edited, .day(friday), "editing keeps the date")
+        XCTAssertNil(TodoEditSheet.savedDue(hasDue: false, hasTime: true, picked: Date(), clock: londonClock()))
+    }
+
+    // MARK: Saved whole, then sorted
+
+    func testANoteSavedWholeIsReplacedByItsTasks() {
+        var state = TodoState()
+        let now = at(2026, 10, 13, 9)
+        let whole = state.add(TodoValidation.wholeNote("call the dentist and buy milk"), at: now)[0]
+        XCTAssertEqual(state.firstNoteAt, now, "the whole note is the first note")
+        let sorted = state.replaceNote(whole.id, with: [TodoDraft(title: "Call the dentist", due: .time(at(2026, 10, 14, 9))),
+                                                        TodoDraft(title: "Buy milk")], at: now)
+        XCTAssertEqual(sorted.map(\.title), ["Call the dentist", "Buy milk"])
+        XCTAssertNil(state.task(whole.id), "the whole note goes")
+        XCTAssertEqual(state.tasks.map(\.title), ["Call the dentist", "Buy milk"])
+        XCTAssertEqual(Set(state.tasks.map(\.noteId)), [whole.noteId], "the same note")
+        XCTAssertEqual(state.tasks.map(\.createdAt), [now, now])
+        XCTAssertEqual(state.tasks.map(\.order), [0, 1])
+
+        var same = TodoState()
+        let note = same.add([TodoDraft(title: "Sort out the garage")], at: now)[0]
+        XCTAssertEqual(same.replaceNote(note.id, with: [TodoDraft(title: "Sort out the garage")], at: now), [note],
+                       "a note the model kept whole stays as it is")
+        XCTAssertEqual(same.tasks, [note])
+
+        var gone = TodoState()
+        let erased = gone.add([TodoDraft(title: "Call Sam")], at: now)[0]
+        gone.eraseAll()
+        XCTAssertTrue(gone.replaceNote(erased.id, with: [TodoDraft(title: "Call Sam")], at: now).isEmpty,
+                      "erased meanwhile: nothing comes back")
+        XCTAssertTrue(gone.tasks.isEmpty)
+
+        var changed = TodoState()
+        let done = changed.add([TodoDraft(title: "Call Sam and Kim")], at: now)[0]
+        changed.complete(done.id, at: now)
+        XCTAssertEqual(changed.replaceNote(done.id, with: [TodoDraft(title: "Call Sam"), TodoDraft(title: "Call Kim")],
+                                           at: now).map(\.id), [done.id], "a note already done stays as it is")
+    }
+
+    // MARK: Notifications
+
+    func testDeliveredNotificationsForFinishedOrDeletedTasksAreWithdrawn() {
+        let now = at(2026, 10, 13, 9)
+        let open = TodoTask(title: "Open", due: .time(at(2026, 10, 13, 8)), createdAt: now, noteId: UUID())
+        let done = TodoTask(title: "Done", due: .time(at(2026, 10, 13, 8)), createdAt: now, completedAt: now, noteId: UUID())
+        let deleted = UUID()
+        let delivered = [TodoNotifications.identifier(open.id), TodoNotifications.identifier(done.id),
+                         TodoNotifications.identifier(deleted), Reminders.requestPrefix + "20738"]
+        XCTAssertEqual(TodoNotifications.staleDelivered(delivered, tasks: [open, done]),
+                       [TodoNotifications.identifier(done.id), TodoNotifications.identifier(deleted)],
+                       "an open task's stays; the nudge's is never touched")
+    }
+
+    func testRebuildsRunOneAtATimeAndTheNewestWins() async throws {
+        // Two checks a moment apart used to interleave (remove, remove, add, add) and leave a done task's notification
+        // scheduled. Now a rebuild never overlaps another, and a request made while one runs replaces any waiting one.
+        let log = RebuildLog()
+        let scheduler = TodoNotificationScheduler { tasks in
+            await log.begin(tasks.count)
+            try? await Task.sleep(for: .milliseconds(100))
+            await log.end()
+        }
+        let call = TodoTask(title: "Call Sam", due: .time(at(2026, 10, 13, 16)), createdAt: at(2026, 10, 13, 9), noteId: UUID())
+        let milk = TodoTask(title: "Buy milk", createdAt: at(2026, 10, 13, 9), noteId: UUID())
+        let first = Task { await scheduler.reschedule([call]) }
+        while await log.runs.isEmpty { try await Task.sleep(for: .milliseconds(5)) }
+        await scheduler.reschedule([call, milk])
+        await scheduler.reschedule([])
+        await first.value
+        let runs = await log.runs
+        let most = await log.mostAtOnce
+        XCTAssertEqual(runs, [1, 0], "the waiting request was replaced by the newest one")
+        XCTAssertEqual(most, 1, "never two rebuilds at once")
+    }
+}
+
+/// What a test scheduler ran, and how many at once.
+private actor RebuildLog {
+    private(set) var runs: [Int] = []
+    private(set) var mostAtOnce = 0
+    private var running = 0
+
+    func begin(_ count: Int) {
+        running += 1
+        mostAtOnce = max(mostAtOnce, running)
+        runs.append(count)
+    }
+
+    func end() {
+        running -= 1
     }
 }

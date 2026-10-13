@@ -73,6 +73,20 @@ final class TakenStore: Sendable {
         try update { current in current = state }
     }
 
+    /// Erase all data: the copies of a file that could not be read, set aside by a write (`taken-unreadable-*.json`).
+    func removeSetAsideCopies() {
+        Self.removeFiles(in: fileURL.deletingLastPathComponent(), prefix: "taken-unreadable-")
+    }
+
+    /// Deletes the JSON files in a folder whose names start with `prefix`.
+    static func removeFiles(in directory: URL, prefix: String) {
+        let fileManager = FileManager.default
+        guard let names = try? fileManager.contentsOfDirectory(atPath: directory.path) else { return }
+        for name in names where name.hasPrefix(prefix) && name.hasSuffix(".json") {
+            try? fileManager.removeItem(at: directory.appendingPathComponent(name))
+        }
+    }
+
     // MARK: Encoding
 
     static func encode(_ state: StackState) throws -> Data {

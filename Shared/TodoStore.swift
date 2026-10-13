@@ -52,6 +52,11 @@ final class TodoStore: Sendable {
         try update { $0 = state }
     }
 
+    /// Erase all data: the copies of a file that could not be read, set aside by a write (`todos-unreadable-*.json`).
+    func removeSetAsideCopies() {
+        TakenStore.removeFiles(in: fileURL.deletingLastPathComponent(), prefix: "todos-unreadable-")
+    }
+
     static func encode(_ state: TodoState) throws -> Data {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]

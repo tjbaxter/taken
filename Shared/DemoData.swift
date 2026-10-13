@@ -11,8 +11,11 @@ enum DemoData {
         return calendar.date(from: DateComponents(year: c.year, month: c.month, day: c.day, hour: 21, minute: 41)) ?? real
     }
 
+    /// The demo's settings: the nudge on, waking at 07:00 (the default), so the day rolls over at 03:00.
+    static let settings = StackSettings(reminderEnabled: true)
+
     static func state(now: Date, allTaken: Bool, timeZone: TimeZone = .current) -> StackState {
-        let clock = DayClock(dayStartHour: 4, timeZone: timeZone)
+        let clock = DayClock(dayStartHour: settings.dayStartHour, timeZone: timeZone)
         let today = clock.day(for: now)
         let created = clock.start(of: today.adding(-60))
         var random = SeededRandom(seed: 0x7A4E_2026)
@@ -50,13 +53,12 @@ enum DemoData {
             log(mag, today, 21, 12)
         }
 
-        return StackState(items: [vd3, fin, fsh, cre, mag, znc], doses: doses,
-                          settings: StackSettings(reminderEnabled: true))
+        return StackState(items: [vd3, fin, fsh, cre, mag, znc], doses: doses, settings: settings)
     }
 
     /// The partly taken day shown in the day-sheet screenshot.
     static func sheetDay(now: Date, timeZone: TimeZone = .current) -> DayKey {
-        DayClock(dayStartHour: 4, timeZone: timeZone).day(for: now).adding(-15)
+        DayClock(dayStartHour: settings.dayStartHour, timeZone: timeZone).day(for: now).adding(-15)
     }
 }
 

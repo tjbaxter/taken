@@ -2,12 +2,26 @@ import SwiftUI
 import Observation
 import AppIntents
 
+/// The tab bar's three tabs (REDESIGN.md).
+enum AppTab: String, Hashable, Sendable {
+    case today
+    case todo
+    case history
+}
+
+/// Every sheet, presented above the tab bar, so one place can close it (a voice to-do request, the paywall).
 enum SheetRoute: Identifiable, Hashable {
     case add
+    /// Profile, with every setting (the avatar on each tab).
     case settings
     case day(DayKey)
     case setTime(UUID)
+    /// The item sheet: tap an item's name on Today.
     case editItem(UUID)
+    /// A to-do's words and due time.
+    case todoEdit(UUID)
+    /// Typing to-dos instead of saying them.
+    case todoType
 
     var id: String {
         switch self {
@@ -16,6 +30,8 @@ enum SheetRoute: Identifiable, Hashable {
         case .day(let day): return "day-\(day.ordinal)"
         case .setTime(let id): return "time-\(id.uuidString)"
         case .editItem(let id): return "edit-\(id.uuidString)"
+        case .todoEdit(let id): return "todo-\(id.uuidString)"
+        case .todoType: return "todo-type"
         }
     }
 }
@@ -31,6 +47,8 @@ enum UndoStep: Equatable, Sendable {
 struct Toast: Identifiable, Equatable {
     let id = UUID()
     let message: String
+    /// A time after the message, set in Geist Mono: "Vitamin D3 taken at" "07:42".
+    var time: String? = nil
     var undo: UndoStep? = nil
 }
 
@@ -55,16 +73,21 @@ final class AppModel {
     private(set) var streak: Int = 0
     private(set) var adherence = Adherence(taken: 0, due: 0)
 
+    /// The tab in front.
+    var tab: AppTab
     var sheet: SheetRoute?
     var toast: Toast?
     var expandedItemID: UUID?
-    /// Section the TODAY scroll view should jump to (screenshots, deep links).
-    var scrollTarget: String?
     /// The Taken Pro sheet, and which presentation level shows it.
     var paywall: PaywallRequest?
-    /// Chips pre-selected in the Add sheet for the `-demo -screen add` screenshot.
+    /// Chips pre-selected in the Add sheet for the `-demo -screen add` screenshot, and how often each is taken.
     let demoPreselect: [String]
-    /// Increments each time the day locks in (ALL TAKEN) from a tap, to run the lock-in animation once.
+    let demoChoices: [String: FrequencyChoice]
+    /// Profile: a name and a photo, both optional, on this iPhone.
+    let profileStore: ProfileStore
+    private(set) var profile: Profile
+    private(set) var profilePhoto: UIImage?
+    /// Increments each time a tap finishes the day (All taken), to run its check animation once.
     private(set) var lockInCount = 0
     private(set) var notificationsDenied = false
 
@@ -79,13 +102,19 @@ final class AppModel {
     /// What the paywall was opened for, run once Pro is on and the sheet has closed.
     @ObservationIgnored private var afterPaywall: (@MainActor () -> Void)?
 
-    init(store: TakenStore, pro: ProStore? = nil, isDemo: Bool, launchScreen: String?,
-         clockNow: @escaping @Sendable () -> Date) {
+    init(store: TakenStore, pro: ProStore? = nil, profileStore: ProfileStore = .shared, isDemo: Bool,
+         launchScreen: String?, clockNow: @escaping @Sendable () -> Date) {
         self.store = store
         self.isDemo = isDemo
         self.launchScreen = launchScreen
         self.clockNow = clockNow
-        self.demoPreselect = isDemo && launchScreen == "add" ? ["Vitamin D3", "Fish Oil", "Finasteride"] : []
+        self.tab = Self.tab(forScreen: launchScreen)
+        let addScreen = isDemo && launchScreen == "add"
+        self.demoPreselect = addScreen ? ["Vitamin D3", "Fish Oil", "Finasteride"] : []
+        self.demoChoices = addScreen ? ["Finasteride": .alternate] : [:]
+        self.profileStore = profileStore
+        self.profile = profileStore.load()
+        self.profilePhoto = profileStore.loadPhoto().flatMap { UIImage(data: $0) }
         let state = store.load()
         let now = clockNow()
         let engine = StackEngine(state: state, clock: DayClock(dayStartHour: state.settings.dayStartHour))
@@ -120,7 +149,7 @@ final class AppModel {
             screen = arguments[index + 1]
         }
         guard arguments.contains("-demo") else {
-            return AppModel(store: .shared, isDemo: false, launchScreen: nil, clockNow: { Date() })
+            return AppModel(store: .shared, profileStore: .shared, isDemo: false, launchScreen: nil, clockNow: { Date() })
         }
         // `-theme blush` (signal, blush, phosphor, ice): the screenshots of every look.
         var look = ThemeID.signal
@@ -142,7 +171,21 @@ final class AppModel {
         if screen == "paywall-no-yearly" { offers[.yearly] = nil }
         let demoLocked = screen.map { lockedScreens.contains($0) } ?? false
         let pro = ProStore(demoLocked: demoLocked, now: demoNow, offers: offers)
-        return AppModel(store: store, pro: pro, isDemo: true, launchScreen: screen, clockNow: { demoNow })
+        // A demo profile with a name (its initials on every tab), in a temporary folder; first run has none.
+        let profileFolder = FileManager.default.temporaryDirectory.appendingPathComponent("taken-demo-profile-\(UUID().uuidString)")
+        let profiles = ProfileStore(directory: profileFolder)
+        if screen != "empty" { try? profiles.save(Profile(name: "Alex Morgan")) }
+        return AppModel(store: store, pro: pro, profileStore: profiles, isDemo: true, launchScreen: screen,
+                        clockNow: { demoNow })
+    }
+
+    /// The tab a `-screen` opens on: the To-do screens on To-do, the log and the day sheet on History.
+    static func tab(forScreen screen: String?) -> AppTab {
+        if TodoModel.opensOnTodo(screen) { return .todo }
+        switch screen {
+        case "log", "history", "day": return .history
+        default: return .today
+        }
     }
 
     // MARK: Derived
@@ -219,6 +262,8 @@ final class AppModel {
             // Renewals, refunds and purchases made elsewhere land here (PRO.md: refresh on foreground).
             await pro.foreground()
             await Reminders.reschedule(state: snapshot, now: Date())
+            // Due-time notifications too: tasks saved before notifications were allowed get theirs now.
+            await TodoNotificationScheduler.shared.reschedule(TodoStore.shared.load().tasks)
             let denied = await Reminders.isDenied()
             self.notificationsDenied = denied && snapshot.settings.reminderEnabled
         }
@@ -234,21 +279,34 @@ final class AppModel {
         try? await Task.sleep(for: .milliseconds(450))
         switch launchScreen {
         case "add": sheet = .add
-        case "settings": sheet = .settings
+        case "settings", "profile", "look", "settings-locked": sheet = .settings
         case "day": sheet = .day(DemoData.sheetDay(now: now))
-        case "look": sheet = .settings
-        case "settings-locked": sheet = .settings
-        case "log": scrollTarget = "log"
+        case "item":
+            if let item = state.items.first(where: { $0.name == "Finasteride" }) { sheet = .editItem(item.id) }
         case "paywall", "paywall-no-yearly": presentPaywall(origin: .intro)
         default: break
         }
     }
 
+    // MARK: Tabs
+
+    /// A voice to-do request (Siri, the Action button, the control, the Lock Screen, a link, a notification, the quick
+    /// action): the To-do tab comes to the front and any sheet over it closes, so Listening and the stop button show.
+    func openTodoTab() {
+        if sheet != nil { sheet = nil }
+        tab = .todo
+    }
+
+    /// The To-do tab is in front with no sheet or paywall over it: the mic may open.
+    var showsTodoTabUncovered: Bool { tab == .todo && sheet == nil && paywall == nil }
+
     func handle(url: URL) {
         guard url.scheme == "taken" else { return }
         reload()
         guard let route = ProRoute(url: url) else {
+            // taken://today (a widget), taken://todo (the To-do tab follows on its own): whatever was open closes.
             sheet = nil
+            if url.host == "today" { tab = .today }
             return
         }
         // taken://pro from a locked widget: the tap it was, run once Pro is on.
@@ -269,9 +327,10 @@ final class AppModel {
         }
     }
 
-    /// A tapped nudge opens on the day it was for: today's on TODAY, an earlier day's on that day's sheet.
+    /// A tapped nudge opens on the day it was for: today's on Today, an earlier day's on its sheet over History.
     func openDay(fromNudge day: DayKey) {
         reload()
+        tab = day == today.day ? .today : .history
         sheet = day == today.day ? nil : .day(day)
     }
 
@@ -309,7 +368,7 @@ final class AppModel {
             if !hadLogged && !result.state.doses.isEmpty { scheduleIntro() }
             return result.value
         } catch {
-            show(Toast(message: "COULD NOT SAVE. TRY AGAIN"))
+            show(Toast(message: "Could not save. Try again."))
             return nil
         }
     }
@@ -450,7 +509,7 @@ final class AppModel {
         let zone = clock.calendar.timeZone
         guard let dose = write({ $0.logDose(itemId: item.id, at: at, timeZone: zone) }) ?? nil else { return }
         afterTake(wasLocked: wasLocked)
-        show(Toast(message: "\(item.code) TAKEN \(Fmt.clock(at, clock))", undo: .remove([dose.id])))
+        show(Toast(message: "\(item.name) taken at", time: Fmt.clock(at, clock), undo: .remove([dose.id])))
         announce("\(item.name) taken at \(Fmt.spoken(at)).")
     }
 
@@ -461,7 +520,7 @@ final class AppModel {
         guard let dose = write({ $0.logNextDoseIfPending(itemId: itemID, now: at, clock: clock) }) ?? nil,
               let item = state.item(dose.itemId) else { return }
         afterTake(wasLocked: wasLocked)
-        show(Toast(message: "\(item.code) TAKEN \(Fmt.clock(at, clock))", undo: .remove([dose.id])))
+        show(Toast(message: "\(item.name) taken at", time: Fmt.clock(at, clock), undo: .remove([dose.id])))
         announce("\(item.name) taken at \(Fmt.spoken(at)).")
     }
 
@@ -471,7 +530,7 @@ final class AppModel {
         let clock = self.clock
         guard let logged = write({ $0.takeAllPending(now: at, clock: clock) }), !logged.isEmpty else { return }
         afterTake(wasLocked: wasLocked)
-        show(Toast(message: "\(logged.count) TAKEN \(Fmt.clock(at, clock))", undo: .remove(Set(logged.map(\.id)))))
+        show(Toast(message: "\(logged.count) taken at", time: Fmt.clock(at, clock), undo: .remove(Set(logged.map(\.id)))))
         announce("\(logged.count) taken at \(Fmt.spoken(at)).")
     }
 
@@ -505,7 +564,7 @@ final class AppModel {
         let clock = self.clock
         guard let removed = write({ $0.undoLastDose(itemId: item.id, on: day, clock: clock) }) ?? nil else { return }
         Haptics.soft(hapticsOn)
-        show(Toast(message: "\(item.code) LAST DOSE REMOVED", undo: .restore([removed])))
+        show(Toast(message: "\(item.name): last dose removed", undo: .restore([removed])))
         announce("\(item.name), last dose removed.")
     }
 
@@ -527,11 +586,11 @@ final class AppModel {
         if let existing {
             write { $0.setDoseTime(doseId: existing.id, to: at, timeZone: zone) }
             Haptics.impact(hapticsOn)
-            show(Toast(message: "\(item.code) SET TO \(Fmt.clock(at, clock))", undo: .restore([existing])))
+            show(Toast(message: "\(item.name) set to", time: Fmt.clock(at, clock), undo: .restore([existing])))
             announce("\(item.name) set to \(Fmt.spoken(at)).")
         } else if let dose = write({ $0.logDose(itemId: item.id, at: at, timeZone: zone) }) ?? nil {
             afterTake(wasLocked: wasLocked)
-            show(Toast(message: "\(item.code) TAKEN \(Fmt.clock(at, clock))", undo: .remove([dose.id])))
+            show(Toast(message: "\(item.name) taken at", time: Fmt.clock(at, clock), undo: .remove([dose.id])))
             announce("\(item.name) taken at \(Fmt.spoken(at)).")
         }
     }
@@ -560,7 +619,7 @@ final class AppModel {
         let at = clockNow()
         guard let added = write({ $0.addItems(drafts, now: at) }), !added.isEmpty else { return }
         Haptics.impact(hapticsOn)
-        show(Toast(message: added.count == 1 ? "\(added[0].code) ADDED" : "\(added.count) ADDED TO STACK"))
+        show(Toast(message: added.count == 1 ? "\(added[0].name) added" : "\(added.count) added to your stack"))
         refreshShortcuts()
     }
 
@@ -609,17 +668,46 @@ final class AppModel {
             let granted = await Reminders.requestPermission()
             notificationsDenied = !granted
             guard granted else { return }
+            // Notifications are allowed now: to-dos with a time get theirs too.
+            await TodoNotificationScheduler.shared.reschedule(TodoStore.shared.load().tasks)
         }
         if !enabled { notificationsDenied = false }
         write { $0.settings.reminderEnabled = enabled }
     }
 
     func setReminderMinutes(_ minutes: Int) {
-        write { $0.settings.reminderMinutes = min(max(minutes, 0), 24 * 60 - 1) }
+        write { $0.settings.reminderMinutes = minutes }
     }
 
-    func setDayStartHour(_ hour: Int) {
-        write { $0.settings.dayStartHour = min(max(hour, 0), 23) }
+    /// Profile > Wake-up time. The day rolls over 4 hours before it (never seen or set), so every view, widget, Siri
+    /// answer and nudge follows at once; the nudge moves with it until a nudge time is chosen.
+    func setWakeMinutes(_ minutes: Int) {
+        write { $0.settings.wakeMinutes = StackSettings.clampMinutes(minutes) }
+        TodoModel.shared.attach(self)
+    }
+
+    // MARK: Profile
+
+    func setProfileName(_ name: String) {
+        var next = profile
+        next.name = Profile.clean(name)
+        guard next != profile else { return }
+        profile = next
+        guard !isDemo else { return }
+        try? profileStore.save(next)
+    }
+
+    /// A photo from the photo picker: the centre square, kept small, on this iPhone.
+    func setProfilePhoto(_ data: Data) async {
+        let prepared = await Task.detached(priority: .userInitiated) { ProfilePhoto.prepare(data) }.value
+        guard let prepared, let image = UIImage(data: prepared) else { return }
+        if !isDemo { try? profileStore.savePhoto(prepared) }
+        withAnimation(.snappy(duration: 0.25)) { profilePhoto = image }
+    }
+
+    func removeProfilePhoto() {
+        if !isDemo { profileStore.removePhoto() }
+        withAnimation(.snappy(duration: 0.25)) { profilePhoto = nil }
     }
 
     func setHaptics(_ enabled: Bool) {
@@ -663,10 +751,18 @@ final class AppModel {
         try? await app.setAlternateIconName(wanted)
     }
 
+    /// Erase all data: the stack, every dose, the settings, every to-do, the profile, and any unreadable copy a write set
+    /// aside. The look stays, and so do the Taken Pro status file and the date of the first voice note.
     func eraseAll() {
         write { $0.eraseAll() }
-        // The to-dos go too (the first voice note stays used).
         TodoModel.shared.eraseAll()
+        if !isDemo {
+            profileStore.erase()
+            store.removeSetAsideCopies()
+            TodoModel.shared.store.removeSetAsideCopies()
+        }
+        profile = Profile()
+        profilePhoto = nil
         expandedItemID = nil
         refreshShortcuts()
     }

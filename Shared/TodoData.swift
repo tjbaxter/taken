@@ -4,15 +4,20 @@ import Foundation
 // order, and how a task reads. Compiled into the app and the widget extension; the speech and the model that turn a
 // voice note into these live in Taken/Todo.
 
+/// When a to-do is due.
+enum TodoDue: Hashable, Sendable {
+    /// A clock time was said ("by 4 pm"): the moment it is due.
+    case time(Date)
+    /// Only a day was said ("on Friday"): that calendar date, which stays the same date wherever the iPhone goes.
+    case day(DayKey)
+}
+
 /// One thing to do, from a voice note.
 struct TodoTask: Codable, Identifiable, Hashable, Sendable {
     var id: UUID
     /// Short and imperative: "Call the dentist".
     var title: String
-    /// When it is due. Without `hasTime` only its day counts (it is stored at noon that day).
-    var dueDate: Date?
-    /// A clock time was said: "by 4 pm" is 16:00.
-    var hasTime: Bool
+    var due: TodoDue?
     var createdAt: Date
     var completedAt: Date?
     /// The voice note it came from. Tasks from one note share it.
@@ -20,12 +25,11 @@ struct TodoTask: Codable, Identifiable, Hashable, Sendable {
     /// Where it came in its note, so a ramble keeps the order it was said in.
     var order: Int
 
-    init(id: UUID = UUID(), title: String, dueDate: Date? = nil, hasTime: Bool = false, createdAt: Date,
-         completedAt: Date? = nil, noteId: UUID, order: Int = 0) {
+    init(id: UUID = UUID(), title: String, due: TodoDue? = nil, createdAt: Date, completedAt: Date? = nil,
+         noteId: UUID, order: Int = 0) {
         self.id = id
         self.title = title
-        self.dueDate = dueDate
-        self.hasTime = dueDate == nil ? false : hasTime
+        self.due = due
         self.createdAt = createdAt
         self.completedAt = completedAt
         self.noteId = noteId
@@ -34,32 +38,66 @@ struct TodoTask: Codable, Identifiable, Hashable, Sendable {
 
     var isDone: Bool { completedAt != nil }
 
-    private enum CodingKeys: String, CodingKey { case id, title, dueDate, hasTime, createdAt, completedAt, noteId, order }
+    /// A clock time was said.
+    var hasTime: Bool { dueTime != nil }
+
+    /// The moment it is due, when a clock time was said.
+    var dueTime: Date? {
+        if case .time(let date) = due { return date }
+        return nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, title, dueAt, dueDay, createdAt, completedAt, noteId, order
+        /// Builds before 1.1 shipped stored every due date as a moment, a day alone at noon.
+        case dueDate, hasTime
+    }
 
     /// Every field but the title has a default, so a file from an earlier or later version always loads.
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         id = try c.decodeIfPresent(UUID.self, forKey: .id) ?? UUID()
         title = try c.decodeIfPresent(String.self, forKey: .title) ?? ""
-        dueDate = try? c.decodeIfPresent(Date.self, forKey: .dueDate)
-        hasTime = dueDate == nil ? false : ((try? c.decodeIfPresent(Bool.self, forKey: .hasTime)) ?? false)
+        if let day = (try? c.decodeIfPresent(String.self, forKey: .dueDay)).flatMap({ DayKey(iso: $0) }) {
+            due = .day(day)
+        } else if let at = try? c.decodeIfPresent(Date.self, forKey: .dueAt) {
+            due = .time(at)
+        } else if let legacy = try? c.decodeIfPresent(Date.self, forKey: .dueDate) {
+            let timed = (try? c.decodeIfPresent(Bool.self, forKey: .hasTime)) ?? false
+            due = timed ? .time(legacy) : .day(DayKey(calendarDateOf: legacy, in: .current))
+        } else {
+            due = nil
+        }
         createdAt = (try? c.decodeIfPresent(Date.self, forKey: .createdAt)) ?? .distantPast
         completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
         noteId = (try? c.decodeIfPresent(UUID.self, forKey: .noteId)) ?? id
         order = (try? c.decodeIfPresent(Int.self, forKey: .order)) ?? 0
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(title, forKey: .title)
+        switch due {
+        case .time(let date): try c.encode(date, forKey: .dueAt)
+        case .day(let day): try c.encode(day.iso, forKey: .dueDay)
+        case nil: break
+        }
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(completedAt, forKey: .completedAt)
+        try c.encode(noteId, forKey: .noteId)
+        try c.encode(order, forKey: .order)
     }
 }
 
 /// A task as a voice note produced it, before it is saved.
 struct TodoDraft: Hashable, Sendable {
     var title: String
-    var dueDate: Date?
-    var hasTime: Bool
+    var due: TodoDue?
 
-    init(title: String, dueDate: Date? = nil, hasTime: Bool = false) {
+    init(title: String, due: TodoDue? = nil) {
         self.title = title
-        self.dueDate = dueDate
-        self.hasTime = dueDate == nil ? false : hasTime
+        self.due = due
     }
 }
 
@@ -122,11 +160,30 @@ struct TodoState: Codable, Hashable, Sendable {
     @discardableResult
     mutating func add(_ drafts: [TodoDraft], noteId: UUID = UUID(), at now: Date) -> [TodoTask] {
         let added = drafts.enumerated().map { index, draft in
-            TodoTask(title: draft.title, dueDate: draft.dueDate, hasTime: draft.hasTime, createdAt: now,
-                     noteId: noteId, order: index)
+            TodoTask(title: draft.title, due: draft.due, createdAt: now, noteId: noteId, order: index)
         }
         tasks.append(contentsOf: added)
         if !added.isEmpty && firstNoteAt == nil { firstNoteAt = now }
+        prune(now: now)
+        return added
+    }
+
+    /// A voice note is saved whole the moment its words are known (so nothing said is lost if iOS ends Taken while the
+    /// model is still sorting), then replaced here by the tasks the model made of it. Returns the note's tasks as they
+    /// now stand: the sorted ones; the whole note when the drafts are just that; nothing when the note was deleted or
+    /// erased meanwhile; and the note as it is when someone already changed it.
+    @discardableResult
+    mutating func replaceNote(_ placeholder: UUID, with drafts: [TodoDraft], at now: Date) -> [TodoTask] {
+        guard let index = tasks.firstIndex(where: { $0.id == placeholder }) else { return [] }
+        let whole = tasks[index]
+        guard !whole.isDone, whole.due == nil else { return [whole] }
+        if drafts.count == 1, drafts[0].title == whole.title, drafts[0].due == nil { return [whole] }
+        guard !drafts.isEmpty else { return [whole] }
+        tasks.remove(at: index)
+        let added = drafts.enumerated().map { offset, draft in
+            TodoTask(title: draft.title, due: draft.due, createdAt: whole.createdAt, noteId: whole.noteId, order: offset)
+        }
+        tasks.append(contentsOf: added)
         prune(now: now)
         return added
     }
@@ -144,13 +201,11 @@ struct TodoState: Codable, Hashable, Sendable {
         tasks[index].completedAt = nil
     }
 
-    /// Edits the words or the due time. An empty title keeps the old one.
-    mutating func update(_ id: UUID, title: String, dueDate: Date?, hasTime: Bool) {
+    /// Edits the words or when it is due. An empty title keeps the old one.
+    mutating func update(_ id: UUID, title: String, due: TodoDue?) {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return }
-        let trimmed = TodoText.clean(title)
-        if let trimmed { tasks[index].title = trimmed }
-        tasks[index].dueDate = dueDate
-        tasks[index].hasTime = dueDate == nil ? false : hasTime
+        if let trimmed = TodoText.clean(title) { tasks[index].title = trimmed }
+        tasks[index].due = due
     }
 
     @discardableResult
@@ -208,13 +263,18 @@ enum TodoOrdering {
         }
     }
 
-    /// The moment a task is due by: its time, or the end of its day.
+    /// The moment a task is due by: its time, or the end of its day where the iPhone is now.
     static func sortDate(_ task: TodoTask, clock: DayClock) -> Date? {
-        guard let due = task.dueDate else { return nil }
-        if task.hasTime { return due }
-        let calendar = clock.calendar
-        let start = calendar.startOfDay(for: due)
-        return calendar.date(byAdding: .day, value: 1, to: start).map { $0.addingTimeInterval(-1) } ?? due
+        switch task.due {
+        case .time(let date):
+            return date
+        case .day(let day):
+            let (year, month, dayOfMonth) = day.adding(1).ymd
+            let next = clock.calendar.date(from: DateComponents(year: year, month: month, day: dayOfMonth))
+            return next.map { $0.addingTimeInterval(-1) }
+        case nil:
+            return nil
+        }
     }
 
     private static func tieBreak(_ a: TodoTask, _ b: TodoTask) -> Bool {
@@ -240,10 +300,18 @@ enum TodoText {
 
     /// The day word and the clock time of a due label, apart, so the time can be set in mono: ("Tomorrow", "09:00").
     static func dueParts(_ task: TodoTask, now: Date, clock: DayClock) -> (day: String?, time: String?)? {
-        guard let due = task.dueDate else { return nil }
+        guard let due = task.due else { return nil }
         let today = clock.day(for: now)
-        let day = task.hasTime ? clock.day(for: due) : calendarDay(due, clock: clock)
-        let time = task.hasTime ? clockTime(due, clock: clock) : nil
+        let day: DayKey
+        let time: String?
+        switch due {
+        case .time(let date):
+            day = clock.day(for: date)
+            time = clockTime(date, clock: clock)
+        case .day(let date):
+            day = date
+            time = nil
+        }
         let gap = today.distance(to: day)
         let dayWord: String?
         switch gap {
@@ -260,15 +328,17 @@ enum TodoText {
 
     /// Past its time (or its day) and still open.
     static func isOverdue(_ task: TodoTask, now: Date, clock: DayClock) -> Bool {
-        guard !task.isDone, let due = task.dueDate else { return false }
-        if task.hasTime { return due < now }
-        return calendarDay(due, clock: clock) < clock.day(for: now)
+        guard !task.isDone, let due = task.due else { return false }
+        switch due {
+        case .time(let date): return date < now
+        case .day(let day): return day < clock.day(for: now)
+        }
     }
 
     /// "due tomorrow at 9:00 AM", for VoiceOver.
     static func spokenDue(_ task: TodoTask, now: Date, clock: DayClock) -> String? {
         guard let label = dueLabel(task, now: now, clock: clock) else { return nil }
-        if task.hasTime, let due = task.dueDate {
+        if let due = task.dueTime {
             let spokenTime = due.formatted(date: .omitted, time: .shortened)
             let words = label.split(separator: " ").dropLast().joined(separator: " ")
             return words.isEmpty ? "due at \(spokenTime)" : "due \(words.lowercased()) at \(spokenTime)"
@@ -282,10 +352,9 @@ enum TodoText {
         return String(format: "%02d:%02d", hm.hour, hm.minute)
     }
 
-    /// The calendar date of a day-only due date (stored at noon), as a DayKey.
+    /// The calendar date of a moment in the clock's zone (midnight to midnight), as a DayKey.
     static func calendarDay(_ date: Date, clock: DayClock) -> DayKey {
-        let c = clock.calendar.dateComponents([.year, .month, .day], from: date)
-        return DayKey(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+        DayKey(calendarDateOf: date, in: clock.calendar.timeZone)
     }
 
     /// A title as the list shows it: trimmed, one space between words, no list marker or end punctuation, a capital

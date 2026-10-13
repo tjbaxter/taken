@@ -105,11 +105,13 @@ struct ThemeRadius: Hashable, Sendable {
     var segment: CGFloat
     /// Lamps and small lit squares: 0 is square, 1 is round.
     var lampRoundness: CGFloat
+    /// The app's calm surfaces (1.1): the list cards, buttons, toasts and the history's day cells halve it.
+    var card: CGFloat
 
-    /// Signal, Phosphor and Ice: square-ish, 4 pt and under, square frames.
-    static let hud = ThemeRadius(frame: 0, panel: 4, control: 3, mark: 2, segment: 0, lampRoundness: 0)
+    /// Signal, Phosphor and Ice: the widgets keep their square-ish HUD corners; the app's cards are rounded.
+    static let hud = ThemeRadius(frame: 0, panel: 4, control: 3, mark: 2, segment: 0, lampRoundness: 0, card: 14)
     /// Blush: softer corners everywhere, round lamps.
-    static let soft = ThemeRadius(frame: 14, panel: 12, control: 8, mark: 4, segment: 3, lampRoundness: 1)
+    static let soft = ThemeRadius(frame: 14, panel: 12, control: 8, mark: 4, segment: 3, lampRoundness: 1, card: 16)
 }
 
 /// The viewfinder corner brackets on the HUD frames.
@@ -204,17 +206,6 @@ struct Theme: Hashable, Sendable {
     /// The signal as a glow: `opacity` is Signal's, scaled for the look.
     func glow(_ opacity: Double) -> Color {
         signal.opacity(opacity * glowStrength)
-    }
-
-    /// Corner radius for brackets around a shape with corner radius `shape`: square viewfinder corners in Signal,
-    /// Phosphor and Ice; in Blush they follow the curve.
-    func bracketRadius(_ shape: CGFloat) -> CGFloat {
-        brackets.followCorners ? shape : 0
-    }
-
-    /// Corner radius of a lamp (a small lit square) of `size`.
-    func lampRadius(_ size: CGFloat) -> CGFloat {
-        size / 2 * radius.lampRoundness
     }
 
     // Tinted and clear Home Screens draw every widget colour white and keep only its alpha. These are those alphas,
@@ -357,91 +348,39 @@ extension Font {
     }
 }
 
-/// Mono caps with HUD letter-spacing; without a colour it is the look's subtle ink.
+/// The widgets' mono caps labels, letter-spaced, at a fixed size; without a colour it is the look's subtle ink.
 private struct HUDLabel: ViewModifier {
     @Environment(\.theme) private var theme
     let size: CGFloat
     let color: Color?
     let face: Face
     let tracking: CGFloat
-    let fixed: Bool
 
-    init(size: CGFloat, color: Color?, face: Face, tracking: CGFloat, fixed: Bool) {
+    init(size: CGFloat, color: Color?, face: Face, tracking: CGFloat) {
         self.size = size
         self.color = color
         self.face = face
         self.tracking = tracking
-        self.fixed = fixed
     }
 
     func body(content: Content) -> some View {
         content
-            .font(fixed ? Font.monoFixed(size, face) : Font.mono(size, face))
+            .font(Font.monoFixed(size, face))
             .tracking(size * tracking)
             .foregroundStyle(color ?? theme.fgSubtle)
     }
 }
 
 extension View {
-    /// Mono caps label with HUD letter-spacing (tracking is a fraction of the size, like CSS em).
-    func hud(_ size: CGFloat = 11, _ color: Color? = nil, face: Face = .monoMedium, tracking: CGFloat = 0.14) -> some View {
-        modifier(HUDLabel(size: size, color: color, face: face, tracking: tracking, fixed: false))
-    }
-
-    /// Same as `hud` but never scales, for widgets and dense readouts.
+    /// A widget label in mono caps (tracking is a fraction of the size, like CSS em), at a fixed size.
     func hudFixed(_ size: CGFloat = 11, _ color: Color? = nil, face: Face = .monoMedium, tracking: CGFloat = 0.14) -> some View {
-        modifier(HUDLabel(size: size, color: color, face: face, tracking: tracking, fixed: true))
+        modifier(HUDLabel(size: size, color: color, face: face, tracking: tracking))
     }
 }
 
 // MARK: - Shapes
 
-/// Viewfinder corner brackets. With a `radius` each corner is an arc that follows a rounded frame (Blush); at 0 they
-/// are square corners.
-struct CornerBrackets: Shape {
-    var length: CGFloat
-    var radius: CGFloat = 0
-
-    var animatableData: CGFloat {
-        get { length }
-        set { length = newValue }
-    }
-
-    func path(in rect: CGRect) -> Path {
-        let r = max(0, min(radius, rect.width / 2, rect.height / 2))
-        let l = max(0, min(length, rect.width / 2 - r, rect.height / 2 - r))
-        var p = Path()
-
-        // Arm, then the corner (a point, or an arc from `start` to `end` around `vertex`), then the other arm.
-        func corner(_ start: CGPoint, _ vertex: CGPoint, _ end: CGPoint, _ armStart: CGPoint, _ armEnd: CGPoint) {
-            p.move(to: armStart)
-            if r > 0 {
-                if l > 0 { p.addLine(to: start) }
-                p.addArc(tangent1End: vertex, tangent2End: end, radius: r)
-            } else {
-                p.addLine(to: vertex)
-            }
-            if l > 0 || r == 0 { p.addLine(to: armEnd) }
-        }
-
-        // Top left, top right, bottom right, bottom left: arm, curve (or corner), arm.
-        corner(CGPoint(x: rect.minX, y: rect.minY + r), CGPoint(x: rect.minX, y: rect.minY),
-               CGPoint(x: rect.minX + r, y: rect.minY),
-               CGPoint(x: rect.minX, y: rect.minY + r + l), CGPoint(x: rect.minX + r + l, y: rect.minY))
-        corner(CGPoint(x: rect.maxX - r, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY),
-               CGPoint(x: rect.maxX, y: rect.minY + r),
-               CGPoint(x: rect.maxX - r - l, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY + r + l))
-        corner(CGPoint(x: rect.maxX, y: rect.maxY - r), CGPoint(x: rect.maxX, y: rect.maxY),
-               CGPoint(x: rect.maxX - r, y: rect.maxY),
-               CGPoint(x: rect.maxX, y: rect.maxY - r - l), CGPoint(x: rect.maxX - r - l, y: rect.maxY))
-        corner(CGPoint(x: rect.minX + r, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY),
-               CGPoint(x: rect.minX, y: rect.maxY - r),
-               CGPoint(x: rect.minX + r + l, y: rect.maxY), CGPoint(x: rect.minX, y: rect.maxY - r - l))
-        return p
-    }
-}
-
-/// A horizontal line, for dashed separators.
+/// A horizontal line, for the medium widget's dashed separators.
 struct HLine: Shape {
     func path(in rect: CGRect) -> Path {
         var p = Path()
@@ -451,22 +390,7 @@ struct HLine: Shape {
     }
 }
 
-struct DashedRule: View {
-    @Environment(\.theme) private var theme
-    var color: Color?
-
-    init(color: Color? = nil) {
-        self.color = color
-    }
-
-    var body: some View {
-        HLine()
-            .stroke(color ?? theme.lineDash, style: StrokeStyle(lineWidth: 1, dash: [4, 4]))
-            .frame(height: 1)
-    }
-}
-
-/// A square check mark, mil-spec rather than rounded.
+/// A check mark.
 struct CheckShape: Shape {
     func path(in rect: CGRect) -> Path {
         var p = Path()

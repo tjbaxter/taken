@@ -118,6 +118,7 @@ enum TodoPrompt {
         - Never add a task that was not said. Leave out chat that is not a task.
         - dueISO8601: only when the speaker gave a day or a clock time for that task, in local time as YYYY-MM-DDTHH:MM:00, or YYYY-MM-DD when only a day was said. Use the dates listed with the note. Otherwise leave it empty.
         - Clock times: "by 4" or "at 4 pm" is 16:00. A bare hour from 1 to 6 is in the afternoon, 7 to 11 in the morning unless they say tonight or evening, 12 is noon.
+        - A clock time that has already passed today means that time tomorrow.
         - A day or time said once for a list ("today by 4 I need to do X, Y and Z") applies to every task in that list.
         - hasTime is true only when a clock time was said.
         """
@@ -155,10 +156,7 @@ enum TodoPrompt {
     }
 
     /// "2026-10-13"
-    static func iso(_ day: DayKey) -> String {
-        let (year, month, dayOfMonth) = day.ymd
-        return String(format: "%04d-%02d-%02d", year, month, dayOfMonth)
-    }
+    static func iso(_ day: DayKey) -> String { day.iso }
 }
 
 // MARK: - Validation (code owns what is saved)
@@ -170,8 +168,12 @@ enum TodoValidation {
     static let maxNoteLength = 400
     /// Due dates further ahead than this are a mistake (a wrong year), so they are dropped.
     static let maxAhead: TimeInterval = 366 * 24 * 60 * 60
-    /// A due time may be in the past by up to a day (said late: "I had to call her by 4"), never more.
+    /// A due time written up to a day in the past is a time already gone today ("call Sam at 9" said at 21:30, or "today
+    /// by 4" said at 01:30 while the day being lived is still yesterday): it moves to its next occurrence. Further back
+    /// than this it is a wrong date, and dropped.
     static let maxBehind: TimeInterval = 24 * 60 * 60
+    /// A time this close behind now is the one meant ("at 9:40" said at 9:41): it stays, and shows as due now.
+    static let lateGrace: TimeInterval = 10 * 60
 
     /// The model's tasks as they are saved: titles cleaned, due dates parsed and checked, duplicates and empties
     /// dropped, at most `maxTasks`. With nothing left from a note that had words, the note is one task.
@@ -181,9 +183,8 @@ enum TodoValidation {
         for item in raw {
             guard let title = TodoText.clean(item.title) else { continue }
             let due = item.dueISO8601.flatMap { parseDue($0, hasTime: item.hasTime, context: context) }
-            let key = title.lowercased() + "|" + (due.map { String($0.date.timeIntervalSince1970) } ?? "")
-            guard seen.insert(key).inserted else { continue }
-            drafts.append(TodoDraft(title: title, dueDate: due?.date, hasTime: due?.hasTime ?? false))
+            guard seen.insert(title.lowercased() + "|" + key(due)).inserted else { continue }
+            drafts.append(TodoDraft(title: title, due: due))
             if drafts.count == maxTasks { break }
         }
         return drafts.isEmpty ? wholeNote(transcript) : drafts
@@ -195,10 +196,19 @@ enum TodoValidation {
         return [TodoDraft(title: title)]
     }
 
-    /// A due date the model wrote, as a moment: "2026-10-13T16:00:00" (local), with seconds or not, with a "Z" or
-    /// "+01:00" offset or not, or a date alone ("2026-10-14", kept at noon that day). Nil for anything else, for a
-    /// day or time that does not exist, more than a day in the past, or more than a year ahead.
-    static func parseDue(_ text: String, hasTime: Bool, context: TodoContext) -> (date: Date, hasTime: Bool)? {
+    private static func key(_ due: TodoDue?) -> String {
+        switch due {
+        case .time(let date): return "t\(date.timeIntervalSince1970)"
+        case .day(let day): return "d\(day.ordinal)"
+        case nil: return ""
+        }
+    }
+
+    /// A due date the model wrote: "2026-10-13T16:00:00" (local), with seconds or not, with a "Z" or "+01:00" offset
+    /// or not, is a moment; a date alone ("2026-10-14") is that calendar date. Nil for anything else, for a day or time
+    /// that does not exist, more than a day in the past, or more than a year ahead. A clock time already gone moves to
+    /// its next occurrence, so it is never saved late and silent.
+    static func parseDue(_ text: String, hasTime: Bool, context: TodoContext) -> TodoDue? {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty, let parts = DueParts(trimmed) else { return nil }
         guard (1...12).contains(parts.month), (1...31).contains(parts.day), (2000...2200).contains(parts.year) else { return nil }
@@ -215,20 +225,28 @@ enum TodoValidation {
         let check = calendar.dateComponents([.year, .month, .day], from: date)
         guard check.year == parts.year, check.month == parts.month, check.day == parts.day else { return nil }
         let now = context.now
-        if timed {
-            guard date >= now.addingTimeInterval(-maxBehind), date <= now.addingTimeInterval(maxAhead) else { return nil }
-            return (date, true)
-        }
-        // A date alone: yesterday at the earliest (said late at night), a year ahead at the latest. Kept at noon in the
-        // speaker's own zone.
         var local = Calendar(identifier: .gregorian)
         local.timeZone = context.timeZone
-        guard let noon = local.date(from: DateComponents(year: parts.year, month: parts.month, day: parts.day, hour: 12))
-        else { return nil }
+        if timed {
+            guard date >= now.addingTimeInterval(-maxBehind), date <= now.addingTimeInterval(maxAhead) else { return nil }
+            return .time(nextOccurrence(of: date, now: now, calendar: local))
+        }
+        // A date alone: yesterday at the earliest (said late at night), a year ahead at the latest.
         let today = TodoText.calendarDay(now, clock: context.clock)
         let day = DayKey(year: parts.year, month: parts.month, day: parts.day)
-        guard today.distance(to: day) >= -1, noon <= now.addingTimeInterval(maxAhead) else { return nil }
-        return (noon, false)
+        guard today.distance(to: day) >= -1, today.distance(to: day) <= 366 else { return nil }
+        return .day(day)
+    }
+
+    /// A clock time more than `lateGrace` behind now, at the same wall-clock time on the next day that is still to
+    /// come (whole days in the speaker's zone, so a daylight saving change keeps the time that was said).
+    static func nextOccurrence(of date: Date, now: Date, calendar: Calendar) -> Date {
+        let earliest = now.addingTimeInterval(-lateGrace)
+        guard date < earliest else { return date }
+        for days in 1...3 {
+            if let next = calendar.date(byAdding: .day, value: days, to: date), next >= earliest { return next }
+        }
+        return date.addingTimeInterval(TimeInterval(Int((earliest.timeIntervalSince(date) / 86_400).rounded(.up))) * 86_400)
     }
 
     /// Canned or stored answers in the guided generation's shape: `{"tasks": [{"title": ..., "dueISO8601": ...,

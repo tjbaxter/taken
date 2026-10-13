@@ -1,163 +1,123 @@
 import SwiftUI
 
-/// One item on TODAY. Tap a pending row to take it; tap a taken row for the detail line.
+/// One item on Today: the name and a small frequency line on the left, and on the right the ring that logs (empty while
+/// pending, the look's signal with a check and the time once taken). The name opens the item sheet; only the ring logs.
 struct ItemRowView: View {
     let row: ItemDay
     let now: Date
     let clock: DayClock
     let expanded: Bool
-    var notDueLabel: String? = nil
-    /// Locked mode: a tap that would log opens Taken Pro instead.
+    /// The Not today group: "Next: Thursday" under the name, and a quiet ring.
+    var nextLabel: String?
+    /// Locked mode: a tap on the ring opens Taken Pro instead of logging.
     var locked: Bool = false
-    let onTap: () -> Void
+    let onTake: () -> Void
+    let onOpen: () -> Void
 
-    @Environment(\.dynamicTypeSize) private var typeSize
     @Environment(\.theme) private var theme
 
-    init(row: ItemDay, now: Date, clock: DayClock, expanded: Bool, notDueLabel: String? = nil, locked: Bool = false,
-         onTap: @escaping () -> Void) {
+    init(row: ItemDay, now: Date, clock: DayClock, expanded: Bool, nextLabel: String? = nil, locked: Bool = false,
+         onTake: @escaping () -> Void, onOpen: @escaping () -> Void) {
         self.row = row
         self.now = now
         self.clock = clock
         self.expanded = expanded
-        self.notDueLabel = notDueLabel
+        self.nextLabel = nextLabel
         self.locked = locked
-        self.onTap = onTap
+        self.onTake = onTake
+        self.onOpen = onOpen
     }
 
-    var body: some View {
-        Button(action: onTap) {
-            VStack(alignment: .leading, spacing: 0) {
-                if typeSize.isAccessibilitySize {
-                    stackedLine
-                } else {
-                    line
-                }
+    private var quiet: Bool { nextLabel != nil && row.doses.isEmpty }
 
-                if expanded {
-                    detailLine
-                        .padding(.leading, 74)
-                        .padding(.trailing, 14)
-                        .padding(.bottom, 14)
-                        .transition(.opacity.combined(with: .move(edge: .top)))
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 4) {
+                Button(action: onOpen) {
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text(row.item.name)
+                            .font(.sans(17, .sansMedium, relativeTo: .body))
+                            .foregroundStyle(quiet ? theme.fgMuted : theme.fg)
+                            .lineLimit(2)
+                            .multilineTextAlignment(.leading)
+                        Text(subtitle)
+                            .font(.sans(14, .sans, relativeTo: .footnote))
+                            .foregroundStyle(theme.fgSubtle)
+                            .lineLimit(1)
+                    }
+                    .padding(.leading, 16)
+                    .padding(.vertical, 12)
+                    .frame(maxWidth: .infinity, minHeight: 64, alignment: .leading)
+                    .contentShape(Rectangle())
                 }
+                .buttonStyle(RowPressStyle())
+                Button(action: onTake) {
+                    HStack(spacing: 10) {
+                        if let last = row.lastDose {
+                            Text(Fmt.clock(last.takenAt, clock))
+                                .font(.mono(15, .monoMedium, relativeTo: .body))
+                                .foregroundStyle(theme.signalInk)
+                                .fixedSize()
+                        }
+                        DoseRing(total: row.isDue ? row.dosesPerDay : 1, taken: row.takenCount, quiet: quiet,
+                                 locked: locked && (row.isPending || quiet))
+                    }
+                    .padding(.trailing, 16)
+                    .padding(.leading, 8)
+                    .frame(minWidth: 72, minHeight: 64, alignment: .trailing)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(RingPressStyle())
             }
-            .contentShape(Rectangle())
+            if expanded {
+                detail
+                    .padding(.leading, 16)
+                    .padding(.trailing, 16)
+                    .padding(.bottom, 14)
+                    .transition(.opacity.combined(with: .move(edge: .top)))
+            }
         }
-        .buttonStyle(RowPressStyle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
         .accessibilityAddTraits(.isButton)
+        .accessibilityAction { onTake() }
+        .accessibilityAction(named: "Edit item") { onOpen() }
     }
 
-    /// The row on one line: tag, name, readout, state.
-    private var line: some View {
-        HStack(spacing: 14) {
-            CodeTag(code: row.item.code, lit: row.isDue && row.isDone, dim: notDueLabel != nil && row.doses.isEmpty)
-            VStack(alignment: .leading, spacing: 5) {
-                nameText.lineLimit(1)
-                frequencyText
-            }
-            Spacer(minLength: 8)
-            readout
-            StateMark(row: row)
-        }
-        .padding(.horizontal, 14)
-        .frame(minHeight: 70)
+    /// "Daily", "2x daily · 1 of 2", "Every other day · Next: Thursday".
+    private var subtitle: String {
+        let frequency = Fmt.frequency(row.frequency)
+        if let nextLabel, row.doses.isEmpty { return "\(frequency) \u{00B7} \(nextLabel)" }
+        if row.isDue && row.dosesPerDay > 1 { return "\(frequency) \u{00B7} \(row.takenCount) of \(row.dosesPerDay)" }
+        return frequency
     }
 
-    /// Accessibility text sizes: the readout moves under the name, so the name keeps the width it needs.
-    private var stackedLine: some View {
-        HStack(spacing: 14) {
-            CodeTag(code: row.item.code, lit: row.isDue && row.isDone, dim: notDueLabel != nil && row.doses.isEmpty)
-            VStack(alignment: .leading, spacing: 6) {
-                nameText.lineLimit(2)
-                frequencyText
-                stackedReadout
-            }
-            .layoutPriority(1)
-            Spacer(minLength: 8)
-            StateMark(row: row)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-        .frame(minHeight: 70)
-    }
-
-    private var nameText: some View {
-        Text(row.item.name)
-            .font(.sans(17, .sansMedium))
-            .foregroundStyle(notDueLabel != nil && row.doses.isEmpty ? theme.fgMuted : theme.fg)
-    }
-
-    private var frequencyText: some View {
-        Text(Fmt.frequency(row.frequency)).hud(10.5, theme.fgSubtle, tracking: 0.12)
-    }
-
-    private func agoText(_ last: Dose) -> String {
-        row.dosesPerDay > 1 ? "\(row.takenCount)/\(row.dosesPerDay) \u{00B7} \(Fmt.ago(last.takenAt, now: now))" : Fmt.ago(last.takenAt, now: now)
-    }
-
-    @ViewBuilder
-    private var readout: some View {
-        if let last = row.lastDose {
-            VStack(alignment: .trailing, spacing: 5) {
-                Text(Fmt.clock(last.takenAt, clock))
-                    .font(.monoFixed(15, .monoMedium))
-                    .foregroundStyle(theme.signalInk)
-                Text(agoText(last))
-                    .hud(10, theme.fgSubtle, tracking: 0.1)
-            }
-        } else if let notDueLabel {
-            Text(notDueLabel).hud(10, theme.fgSubtle, tracking: 0.1)
-        } else {
-            Text("PENDING").hud(10.5, theme.fgSubtle, tracking: 0.14)
-        }
-    }
-
-    @ViewBuilder
-    private var stackedReadout: some View {
-        if let last = row.lastDose {
-            HStack(spacing: 8) {
-                Text(Fmt.clock(last.takenAt, clock))
-                    .font(.monoFixed(15, .monoMedium))
-                    .foregroundStyle(theme.signalInk)
-                Text(agoText(last))
-                    .hud(10, theme.fgSubtle, tracking: 0.1)
-            }
-        } else if let notDueLabel {
-            Text(notDueLabel).hud(10, theme.fgSubtle, tracking: 0.1)
-        } else {
-            Text("PENDING").hud(10.5, theme.fgSubtle, tracking: 0.14)
-        }
-    }
-
-    private var detailLine: some View {
+    private var detail: some View {
         VStack(alignment: .leading, spacing: 6) {
             ForEach(Array(row.doses.enumerated()), id: \.element.id) { index, dose in
-                HStack(spacing: 8) {
-                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 5, height: 5)
-                    Text(detailText(index: index, dose: dose)).hud(11, theme.fgMuted, tracking: 0.1)
+                HStack(spacing: 6) {
+                    Text(row.doses.count > 1 ? "Dose \(index + 1) taken at" : "Taken at")
+                        .font(.sans(14, .sans, relativeTo: .footnote))
+                    Text(Fmt.clock(dose.takenAt, clock))
+                        .font(.mono(14, .monoMedium, relativeTo: .footnote))
+                    Text("\u{00B7} \(Fmt.agoDetailed(dose.takenAt, now: now))")
+                        .font(.sans(14, .sans, relativeTo: .footnote))
                 }
+                .foregroundStyle(theme.fgMuted)
             }
         }
-    }
-
-    private func detailText(index: Int, dose: Dose) -> String {
-        let prefix = row.doses.count > 1 ? "DOSE \(index + 1) " : ""
-        return "\(prefix)TAKEN \(Fmt.clock(dose.takenAt, clock)) \u{00B7} \(Fmt.agoDetailed(dose.takenAt, now: now))"
     }
 
     private var accessibilityHint: String {
-        guard row.isPending || (!row.isDue && row.doses.isEmpty) else { return "Double tap for details." }
+        guard row.isPending || quiet else { return "Double tap for the times. Actions has Edit item." }
         return locked ? "Logging needs Taken Pro. Double tap to see plans." : "Double tap to mark taken."
     }
 
     private var accessibilityLabel: String {
         let name = row.item.name
         if row.doses.isEmpty {
-            if notDueLabel != nil { return "\(name), not due today." }
+            if let nextLabel { return "\(name), not due today. \(nextLabel)." }
             return "\(name), pending."
         }
         let times = Fmt.list(row.doses.map { Fmt.spoken($0.takenAt) })
@@ -168,81 +128,83 @@ struct ItemRowView: View {
     }
 }
 
-/// Right-hand state: a dashed ring when pending, a lit disc with a check when taken, pips for multi-dose.
-struct StateMark: View {
-    let row: ItemDay
+/// The ring on the right of a row: empty while pending, one arc per dose for a 2x or 3x item, and the look's signal with
+/// a check once everything due is taken.
+struct DoseRing: View {
+    let total: Int
+    let taken: Int
+    var quiet: Bool = false
+    var locked: Bool = false
 
-    init(row: ItemDay) {
-        self.row = row
-    }
-
-    var body: some View {
-        if row.dosesPerDay > 1 && row.isDue {
-            HStack(spacing: 5) {
-                ForEach(0..<row.dosesPerDay, id: \.self) { index in
-                    Pip(lit: index < row.takenCount)
-                }
-            }
-            .frame(minWidth: 28)
-        } else {
-            Disc(lit: !row.doses.isEmpty)
-        }
-    }
-}
-
-struct Pip: View {
-    let lit: Bool
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.theme) private var theme
 
-    init(lit: Bool) {
-        self.lit = lit
+    init(total: Int, taken: Int, quiet: Bool = false, locked: Bool = false) {
+        self.total = max(total, 1)
+        self.taken = taken
+        self.quiet = quiet
+        self.locked = locked
     }
+
+    private var done: Bool { taken >= total }
 
     var body: some View {
         ZStack {
-            Circle()
-                .strokeBorder(theme.fgFaint, style: StrokeStyle(lineWidth: 1.2, dash: [2.5, 2.5]))
-                .opacity(lit ? 0 : 1)
-            if lit {
+            if done {
                 Circle()
                     .fill(theme.signal)
-                    .shadow(color: theme.glow(0.6), radius: 4)
-                    .transition(reduceMotion ? .opacity : .scale(scale: 0.4).combined(with: .opacity))
+                    .shadow(color: theme.glow(0.35), radius: 6)
+                CheckShape()
+                    .stroke(theme.onSignal, style: StrokeStyle(lineWidth: 2.4, lineCap: .round, lineJoin: .round))
+                    .frame(width: 15, height: 15)
+            } else {
+                Circle()
+                    .strokeBorder(quiet ? theme.line : theme.lineStrong, lineWidth: 1.5)
+                if total > 1 {
+                    ForEach(0..<total, id: \.self) { index in
+                        Arc(index: index, count: total)
+                            .stroke(index < taken ? theme.signal : Color.clear,
+                                    style: StrokeStyle(lineWidth: 3, lineCap: .round))
+                            .padding(1.5)
+                    }
+                }
+                if locked {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 9, weight: .semibold))
+                        .foregroundStyle(theme.fgSubtle)
+                }
             }
         }
-        .frame(width: 12, height: 12)
-        .animation(reduceMotion ? .easeOut(duration: 0.18) : .spring(response: 0.28, dampingFraction: 0.6), value: lit)
+        .frame(width: 30, height: 30)
+        .scaleEffect(done ? 1 : 0.94)
+        .animation(reduceMotion ? .easeOut(duration: 0.18) : .spring(response: 0.3, dampingFraction: 0.55), value: done)
+        .animation(.snappy(duration: 0.25), value: taken)
+        .accessibilityHidden(true)
+    }
+
+    /// One dose's share of the ring, with a small gap either side, starting at the top.
+    private struct Arc: Shape {
+        let index: Int
+        let count: Int
+
+        func path(in rect: CGRect) -> Path {
+            let gap = 14.0
+            let share = 360.0 / Double(count)
+            let start = -90 + share * Double(index) + gap / 2
+            let end = start + share - gap
+            var path = Path()
+            path.addArc(center: CGPoint(x: rect.midX, y: rect.midY), radius: min(rect.width, rect.height) / 2,
+                        startAngle: .degrees(start), endAngle: .degrees(end), clockwise: false)
+            return path
+        }
     }
 }
 
-struct Disc: View {
-    let lit: Bool
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
-    @Environment(\.theme) private var theme
-
-    init(lit: Bool) {
-        self.lit = lit
-    }
-
-    var body: some View {
-        ZStack {
-            Circle()
-                .strokeBorder(theme.fgFaint, style: StrokeStyle(lineWidth: 1.4, dash: [3, 3]))
-                .opacity(lit ? 0 : 1)
-            if lit {
-                ZStack {
-                    Circle()
-                        .fill(theme.signal)
-                        .shadow(color: theme.glow(0.6), radius: 6)
-                    CheckShape()
-                        .stroke(theme.onSignal, style: StrokeStyle(lineWidth: 2.4, lineCap: .square, lineJoin: .miter))
-                        .frame(width: 15, height: 15)
-                }
-                .transition(reduceMotion ? .opacity : .scale(scale: 0.5).combined(with: .opacity))
-            }
-        }
-        .frame(width: 28, height: 28)
-        .animation(reduceMotion ? .easeOut(duration: 0.18) : .spring(response: 0.28, dampingFraction: 0.58), value: lit)
+/// The ring's press: it gives a little, like a button you can feel.
+private struct RingPressStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .scaleEffect(configuration.isPressed ? 0.9 : 1)
+            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
     }
 }

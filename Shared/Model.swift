@@ -125,35 +125,100 @@ struct Dose: Codable, Identifiable, Hashable, Sendable {
 }
 
 struct StackSettings: Codable, Hashable, Sendable {
-    /// Hour (0...23) the day rolls over. A dose before it counts for the previous day.
-    var dayStartHour: Int = 4
+    /// When the person wakes up, in minutes after midnight (Profile > Wake-up time). Default 07:00. The day rolls over
+    /// from it (`dayStartHour`), so nobody ever sets or sees the rollover itself.
+    var wakeMinutes: Int = StackSettings.defaultWakeMinutes
     var reminderEnabled: Bool = false
-    /// Minutes after midnight for the nudge. Default 21:00.
-    var reminderMinutes: Int = 21 * 60
+    /// The nudge time the person chose, in minutes after midnight. Nil until they choose one: the nudge then comes 13
+    /// hours after the wake-up time (`reminderMinutes`).
+    var chosenReminderMinutes: Int?
     var hapticsEnabled: Bool = true
-    /// The look (Settings > LOOK). The app, the widgets, the Control Center control and the app icon follow it, so it
+    /// The look (Profile > Look). The app, the widgets, the Control Center control and the app icon follow it, so it
     /// lives here in the App Group store with everything else. Files from before 1.1 have none: Signal.
     var theme: ThemeID = .signal
 
-    init(dayStartHour: Int = 4, reminderEnabled: Bool = false, reminderMinutes: Int = 21 * 60, hapticsEnabled: Bool = true,
-         theme: ThemeID = .signal) {
-        self.dayStartHour = dayStartHour
+    static let defaultWakeMinutes = 7 * 60
+    /// The day rolls over this long before the wake-up time, so a late night stays on the day being lived.
+    static let rolloverLead = 4 * 60
+    /// The latest the day may roll over: a wake-up time in the afternoon still starts its day by noon.
+    static let latestRolloverHour = 12
+    /// The nudge, unless the person chose a time: this long after waking up.
+    static let nudgeAfterWake = 13 * 60
+    /// A missed day's backfill time: this long after waking up.
+    static let backfillAfterWake = 60
+
+    init(wakeMinutes: Int = StackSettings.defaultWakeMinutes, reminderEnabled: Bool = false,
+         reminderMinutes: Int? = nil, hapticsEnabled: Bool = true, theme: ThemeID = .signal) {
+        self.wakeMinutes = Self.clampMinutes(wakeMinutes)
         self.reminderEnabled = reminderEnabled
-        self.reminderMinutes = reminderMinutes
+        self.chosenReminderMinutes = reminderMinutes.map(Self.clampMinutes)
         self.hapticsEnabled = hapticsEnabled
         self.theme = theme
     }
 
-    private enum CodingKeys: String, CodingKey { case dayStartHour, reminderEnabled, reminderMinutes, hapticsEnabled, theme }
+    /// Settings as 1.0 and the first 1.1 builds described them, with a day-start hour: the wake-up time is that hour
+    /// plus 4, so the day rolls over exactly where it did and nobody's history moves.
+    init(dayStartHour: Int, reminderEnabled: Bool = false, reminderMinutes: Int = 21 * 60, hapticsEnabled: Bool = true,
+         theme: ThemeID = .signal) {
+        self.init(wakeMinutes: Self.wakeMinutes(forDayStartHour: dayStartHour), reminderEnabled: reminderEnabled,
+                  reminderMinutes: reminderMinutes, hapticsEnabled: hapticsEnabled, theme: theme)
+    }
+
+    /// The hour the day rolls over (0...12): the wake-up time minus 4 hours, never before midnight or after noon.
+    /// Wake 08:00 rolls over at 04:00, 05:00 at 01:00, 14:00 at 10:00, 02:00 at 00:00.
+    var dayStartHour: Int { Self.dayStartHour(forWake: wakeMinutes) }
+
+    /// Minutes after midnight for the nudge: the one chosen, or 13 hours after waking up.
+    var reminderMinutes: Int {
+        get { chosenReminderMinutes ?? (wakeMinutes + Self.nudgeAfterWake) % (24 * 60) }
+        set { chosenReminderMinutes = Self.clampMinutes(newValue) }
+    }
+
+    /// Where the day sheet starts a backfill on a past day: an hour after waking up.
+    var backfillMinutes: Int { (wakeMinutes + Self.backfillAfterWake) % (24 * 60) }
+
+    static func dayStartHour(forWake minutes: Int) -> Int {
+        let rollover = clampMinutes(minutes) - rolloverLead
+        guard rollover > 0 else { return 0 }
+        return min(rollover / 60, latestRolloverHour)
+    }
+
+    static func wakeMinutes(forDayStartHour hour: Int) -> Int {
+        (min(max(hour, 0), 23) * 60 + rolloverLead) % (24 * 60)
+    }
+
+    static func clampMinutes(_ minutes: Int) -> Int { min(max(minutes, 0), 24 * 60 - 1) }
+
+    private enum CodingKeys: String, CodingKey {
+        case wakeMinutes, dayStartHour, reminderEnabled, reminderMinutes, hapticsEnabled, theme
+    }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
-        dayStartHour = min(max(try c.decodeIfPresent(Int.self, forKey: .dayStartHour) ?? 4, 0), 23)
+        if let wake = try? c.decodeIfPresent(Int.self, forKey: .wakeMinutes) {
+            wakeMinutes = Self.clampMinutes(wake)
+        } else if let hour = try? c.decodeIfPresent(Int.self, forKey: .dayStartHour) {
+            // A file from before the wake-up time: the same rollover, as a wake-up time.
+            wakeMinutes = Self.wakeMinutes(forDayStartHour: hour)
+        } else {
+            wakeMinutes = Self.defaultWakeMinutes
+        }
         reminderEnabled = try c.decodeIfPresent(Bool.self, forKey: .reminderEnabled) ?? false
-        reminderMinutes = min(max(try c.decodeIfPresent(Int.self, forKey: .reminderMinutes) ?? 21 * 60, 0), 24 * 60 - 1)
+        chosenReminderMinutes = (try? c.decodeIfPresent(Int.self, forKey: .reminderMinutes)).map(Self.clampMinutes)
         hapticsEnabled = try c.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
         // A look this version does not know (or a malformed one) reads as Signal and never costs the rest of the file.
         theme = (try? c.decodeIfPresent(ThemeID.self, forKey: .theme)) ?? .signal
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(wakeMinutes, forKey: .wakeMinutes)
+        // Written too, so an earlier build reading this file rolls the day over at the same hour.
+        try c.encode(dayStartHour, forKey: .dayStartHour)
+        try c.encode(reminderEnabled, forKey: .reminderEnabled)
+        try c.encodeIfPresent(chosenReminderMinutes, forKey: .reminderMinutes)
+        try c.encode(hapticsEnabled, forKey: .hapticsEnabled)
+        try c.encode(theme, forKey: .theme)
     }
 }
 

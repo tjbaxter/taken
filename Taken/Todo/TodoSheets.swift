@@ -6,7 +6,7 @@ struct TodoEditSheet: View {
     @Environment(\.dismiss) private var dismiss
     let task: TodoTask
     let clock: DayClock
-    let onSave: (String, Date?, Bool) -> Void
+    let onSave: (String, TodoDue?) -> Void
     let onDelete: () -> Void
 
     @State private var title: String
@@ -14,16 +14,36 @@ struct TodoEditSheet: View {
     @State private var hasTime: Bool
     @State private var due: Date
 
-    init(task: TodoTask, clock: DayClock, onSave: @escaping (String, Date?, Bool) -> Void,
+    init(task: TodoTask, clock: DayClock, onSave: @escaping (String, TodoDue?) -> Void,
          onDelete: @escaping () -> Void) {
         self.task = task
         self.clock = clock
         self.onSave = onSave
         self.onDelete = onDelete
         _title = State(initialValue: task.title)
-        _hasDue = State(initialValue: task.dueDate != nil)
+        _hasDue = State(initialValue: task.due != nil)
         _hasTime = State(initialValue: task.hasTime)
-        _due = State(initialValue: task.dueDate ?? TodoEditSheet.suggestedDue(clock: clock))
+        _due = State(initialValue: TodoEditSheet.pickerDate(task.due, clock: clock))
+    }
+
+    /// What the picker starts on: the time said, the day said at 09:00 where the iPhone is now, or tomorrow at 09:00.
+    static func pickerDate(_ due: TodoDue?, clock: DayClock, now: Date = Date()) -> Date {
+        switch due {
+        case .time(let date):
+            return date
+        case .day(let day):
+            let (year, month, dayOfMonth) = day.ymd
+            return clock.calendar.date(from: DateComponents(year: year, month: month, day: dayOfMonth, hour: 9))
+                ?? suggestedDue(clock: clock, now: now)
+        case nil:
+            return suggestedDue(clock: clock, now: now)
+        }
+    }
+
+    /// What is saved: a time, or the calendar date picked, which stays that date wherever the iPhone goes.
+    static func savedDue(hasDue: Bool, hasTime: Bool, picked: Date, clock: DayClock) -> TodoDue? {
+        guard hasDue else { return nil }
+        return hasTime ? .time(picked) : .day(TodoText.calendarDay(picked, clock: clock))
     }
 
     var body: some View {
@@ -73,7 +93,7 @@ struct TodoEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(title, hasDue ? due : nil, hasDue && hasTime)
+                        onSave(title, Self.savedDue(hasDue: hasDue, hasTime: hasTime, picked: due, clock: clock))
                         dismiss()
                     }
                     .font(.sans(16, .sansSemibold, relativeTo: .body))

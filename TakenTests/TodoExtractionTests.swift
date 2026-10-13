@@ -20,13 +20,10 @@ final class TodoExtractionTests: XCTestCase {
         let drafts = TodoValidation.validate(raw, transcript: "today by 4 call the dentist ...", context: context)
         XCTAssertEqual(drafts.map(\.title),
                        ["Call the dentist", "Pick up the dry cleaning", "Email Sam the deck", "Book flights for March"])
-        XCTAssertEqual(drafts[0].dueDate, at(2026, 10, 13, 16))
-        XCTAssertTrue(drafts[0].hasTime)
-        XCTAssertEqual(drafts[1].dueDate, at(2026, 10, 13, 16))
-        XCTAssertEqual(drafts[2].dueDate, at(2026, 10, 14, 12), "a day alone is kept at noon")
-        XCTAssertFalse(drafts[2].hasTime)
-        XCTAssertNil(drafts[3].dueDate)
-        XCTAssertFalse(drafts[3].hasTime)
+        XCTAssertEqual(drafts[0].due, .time(at(2026, 10, 13, 16)))
+        XCTAssertEqual(drafts[1].due, .time(at(2026, 10, 13, 16)))
+        XCTAssertEqual(drafts[2].due, .day(DayKey(year: 2026, month: 10, day: 14)), "a day alone is that date")
+        XCTAssertNil(drafts[3].due)
     }
 
     func testCannedAnswersInOtherShapesDecode() {
@@ -38,19 +35,26 @@ final class TodoExtractionTests: XCTestCase {
     }
 
     func testDatesAreCheckedNeverTrusted() {
+        /// The moment of a timed answer, or the London noon of a day alone (so both read as dates here).
         func due(_ text: String, _ hasTime: Bool = true) -> Date? {
-            TodoValidation.parseDue(text, hasTime: hasTime, context: context)?.date
+            switch TodoValidation.parseDue(text, hasTime: hasTime, context: context) {
+            case .time(let date): return date
+            case .day(let day): return at(day.ymd.year, day.ymd.month, day.ymd.day, 12)
+            case nil: return nil
+            }
         }
         XCTAssertEqual(due("2026-10-13T16:00:00+02:00"), at(2026, 10, 13, 15), "an offset is honoured")
         XCTAssertEqual(due("2026-10-13T15:00:00Z"), at(2026, 10, 13, 16), "UTC")
         XCTAssertEqual(due("2026-10-13T15:00:00.000Z"), at(2026, 10, 13, 16))
         XCTAssertEqual(due("2026-10-13 16:00"), at(2026, 10, 13, 16))
         XCTAssertEqual(due(" 2026-10-13T16:00:00 "), at(2026, 10, 13, 16))
-        XCTAssertEqual(TodoValidation.parseDue("2026-10-14T00:00:00", hasTime: false, context: context)?.hasTime, false,
-                       "midnight with no time said is a day")
-        XCTAssertEqual(TodoValidation.parseDue("2026-10-14", hasTime: true, context: context)?.hasTime, false,
-                       "no time written, no time kept")
-        XCTAssertEqual(due("2026-10-13T08:00:00"), at(2026, 10, 13, 8), "an hour and a half ago is kept (said late)")
+        XCTAssertEqual(TodoValidation.parseDue("2026-10-14T00:00:00", hasTime: false, context: context),
+                       .day(DayKey(year: 2026, month: 10, day: 14)), "midnight with no time said is a day")
+        XCTAssertEqual(TodoValidation.parseDue("2026-10-14", hasTime: true, context: context),
+                       .day(DayKey(year: 2026, month: 10, day: 14)), "no time written, no time kept")
+        XCTAssertEqual(due("2026-10-13T08:00:00"), at(2026, 10, 14, 8),
+                       "a time already gone today means that time tomorrow, never saved late and silent")
+        XCTAssertEqual(due("2026-10-13T09:35:00"), at(2026, 10, 13, 9, 35), "six minutes ago is the time meant")
         XCTAssertNil(due("2026-10-12T08:00:00"), "more than a day in the past")
         XCTAssertNotNil(due("2026-10-12", false), "yesterday, said late at night")
         XCTAssertNil(due("2026-10-11", false), "the day before yesterday")
@@ -88,7 +92,7 @@ final class TodoExtractionTests: XCTestCase {
     func testAnEmptyAnswerKeepsTheWholeNote() async {
         let drafts = TodoValidation.validate([], transcript: "  um so I need to sort out the garage  ", context: context)
         XCTAssertEqual(drafts.map(\.title), ["Um so I need to sort out the garage"])
-        XCTAssertNil(drafts.first?.dueDate)
+        XCTAssertNil(drafts.first?.due)
         XCTAssertTrue(TodoValidation.validate([], transcript: "   ", context: context).isEmpty, "no words, no task")
 
         let fallback = await FallbackExtractor().extract(transcript: "call mum and buy milk", context: context)
@@ -99,6 +103,27 @@ final class TodoExtractionTests: XCTestCase {
         let whole = TodoValidation.wholeNote(long)
         XCTAssertEqual(whole.count, 1)
         XCTAssertLessThanOrEqual(whole[0].title.count, TodoValidation.maxNoteLength)
+    }
+
+    func testAClockTimeAlreadyGoneMovesToItsNextOccurrence() {
+        // 01:30 on Wednesday with the day starting at 04:00: the prompt says today is still Tuesday, so "today by 4"
+        // comes back as Tuesday 16:00, hours ago. It is Wednesday 16:00 that was meant.
+        let lateNight = TodoContext(now: at(2026, 10, 14, 1, 30), timeZone: london, dayStartHour: 4)
+        XCTAssertEqual(TodoValidation.parseDue("2026-10-13T16:00:00", hasTime: true, context: lateNight),
+                       .time(at(2026, 10, 14, 16)))
+        // 21:30: "call Sam at 9" is a bare 9, so the morning, and today's 09:00 has gone: tomorrow at 09:00.
+        let evening = TodoContext(now: at(2026, 10, 13, 21, 30), timeZone: london, dayStartHour: 4)
+        XCTAssertEqual(TodoValidation.parseDue("2026-10-13T09:00:00", hasTime: true, context: evening),
+                       .time(at(2026, 10, 14, 9)))
+        // Across the clocks going back (25 October 2026 in London): the same wall-clock time the next day, not 24 hours on.
+        let afterChange = TodoContext(now: at(2026, 10, 25, 8, 30), timeZone: london, dayStartHour: 4)
+        XCTAssertEqual(TodoValidation.parseDue("2026-10-24T10:00:00", hasTime: true, context: afterChange),
+                       .time(at(2026, 10, 25, 10)))
+        let plan = TodoNotifications.plan(tasks: [TodoTask(title: "Call Sam", due: .time(at(2026, 10, 14, 9)),
+                                                           createdAt: evening.now, noteId: UUID())],
+                                          now: evening.now, clock: londonClock())
+        XCTAssertEqual(plan.map(\.fireDate), [at(2026, 10, 14, 9)], "so it gets its notification")
+        XCTAssertTrue(TodoPrompt.instructions.contains("already passed today means that time tomorrow"))
     }
 
     func testTheExtractorsAnswerIsWhatIsSaved() async {

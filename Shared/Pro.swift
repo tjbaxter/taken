@@ -44,8 +44,8 @@ enum ProPlan: String, CaseIterable, Codable, Identifiable, Sendable {
 
     var isSubscription: Bool { self != .lifetime }
 
-    /// "YEARLY"
-    var title: String { rawValue.uppercased() }
+    /// "Yearly"
+    var title: String { rawValue.capitalized }
 }
 
 /// Where an App Store transaction was made.

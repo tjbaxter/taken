@@ -1,107 +1,125 @@
 import SwiftUI
 
-/// "[02] STACK - - - - - - - - 05 DUE"
+/// A section title over a card: "Stack", "Not today". Geist, sentence case, nothing else.
 struct SectionHeader: View {
     @Environment(\.theme) private var theme
-    let index: String
     let title: String
-    var trailing: String? = nil
-    var trailingColor: Color? = nil
+    var trailing: String?
 
-    init(index: String, title: String, trailing: String? = nil, trailingColor: Color? = nil) {
-        self.index = index
+    init(_ title: String, trailing: String? = nil) {
         self.title = title
         self.trailing = trailing
-        self.trailingColor = trailingColor
     }
 
     var body: some View {
-        HStack(spacing: 10) {
-            Text("[\(index)]").hud(11, theme.fgFaint, tracking: 0.06)
-            Text(title).hud(11, theme.fgMuted, tracking: 0.16)
-            DashedRule()
-                .frame(maxWidth: .infinity)
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text(title)
+                .font(.sans(15, .sansSemibold, relativeTo: .subheadline))
+                .foregroundStyle(theme.fgMuted)
+            Spacer(minLength: 8)
             if let trailing {
-                Text(trailing).hud(11, trailingColor ?? theme.fgSubtle, tracking: 0.12)
+                Text(trailing)
+                    .font(.sans(14, .sans, relativeTo: .footnote))
+                    .foregroundStyle(theme.fgSubtle)
             }
         }
         .padding(.top, 26)
-        .padding(.bottom, 12)
+        .padding(.bottom, 10)
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
     }
 }
 
-/// Small status lamp, lit = signal. Square in the HUD looks, round in Blush.
-struct Lamp: View {
+/// A raised surface with a hairline edge and the look's soft corners: the list cards on Today, History and the sheets.
+struct Card<Content: View>: View {
     @Environment(\.theme) private var theme
-    var on: Bool
-    var size: CGFloat = 6
+    var content: Content
 
-    init(on: Bool, size: CGFloat = 6) {
-        self.on = on
-        self.size = size
+    init(@ViewBuilder content: () -> Content) {
+        self.content = content()
     }
 
     var body: some View {
-        LampShape(roundness: theme.radius.lampRoundness)
-            .fill(on ? theme.signal : theme.fgFaint)
-            .frame(width: size, height: size)
-            .shadow(color: on ? theme.glow(0.7) : .clear, radius: on ? 4 : 0)
-            .accessibilityHidden(true)
+        let shape = RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous)
+        content
+            .background(theme.bgRaised, in: shape)
+            .clipShape(shape)
+            .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
     }
 }
 
-/// Solid button, the badline primary: light on the dark looks, ink on Blush.
+/// A hairline between rows in a card.
+struct RowDivider: View {
+    @Environment(\.theme) private var theme
+    var inset: CGFloat
+
+    init(inset: CGFloat = 16) {
+        self.inset = inset
+    }
+
+    var body: some View {
+        Rectangle()
+            .fill(theme.line)
+            .frame(height: 1)
+            .padding(.leading, inset)
+    }
+}
+
+/// The solid button: light on the dark looks, ink on Blush.
 struct PrimaryButton: View {
     @Environment(\.theme) private var theme
     let title: String
-    var lamp: Bool = false
-    /// Locked mode: a small lock where the lamp sits, because the tap opens Taken Pro.
+    /// Locked mode: a small lock, because the tap opens Taken Pro.
     var locked: Bool = false
     var enabled: Bool = true
+    /// A count shown after the title in Geist Mono: "Take all 2".
+    var count: Int?
     let action: () -> Void
 
-    init(title: String, lamp: Bool = false, locked: Bool = false, enabled: Bool = true, action: @escaping () -> Void) {
+    init(title: String, locked: Bool = false, enabled: Bool = true, count: Int? = nil, action: @escaping () -> Void) {
         self.title = title
-        self.lamp = lamp
         self.locked = locked
         self.enabled = enabled
+        self.count = count
         self.action = action
     }
 
     var body: some View {
         Button(action: action) {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 if locked {
                     Image(systemName: "lock.fill")
-                        .font(.system(size: 11, weight: .semibold))
-                } else if lamp {
-                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.buttonLamp).frame(width: 7, height: 7)
+                        .font(.system(size: 13, weight: .semibold))
                 }
                 Text(title)
-                    .font(.monoFixed(14, .monoSemibold))
-                    .tracking(14 * 0.12)
+                    .font(.sans(17, .sansSemibold, relativeTo: .body))
+                if let count {
+                    Text("\(count)")
+                        .font(.mono(16, .monoMedium, relativeTo: .body))
+                        .opacity(0.7)
+                }
             }
             .foregroundStyle(theme.buttonText)
             .frame(maxWidth: .infinity)
-            .frame(height: 56)
-            .background(theme.button.opacity(enabled ? 1 : 0.28), in: RoundedRectangle(cornerRadius: theme.radius.panel))
+            .frame(minHeight: 54)
+            .background(theme.button.opacity(enabled ? 1 : 0.28),
+                        in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+            .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
         .disabled(!enabled)
     }
 }
 
-/// Outline button for secondary actions.
+/// An outline button for secondary and destructive actions.
 struct OutlineButton: View {
     @Environment(\.theme) private var theme
     let title: String
-    var color: Color? = nil
-    var height: CGFloat = 44
+    var color: Color?
+    var height: CGFloat = 48
     let action: () -> Void
 
-    init(title: String, color: Color? = nil, height: CGFloat = 44, action: @escaping () -> Void) {
+    init(title: String, color: Color? = nil, height: CGFloat = 48, action: @escaping () -> Void) {
         self.title = title
         self.color = color
         self.height = height
@@ -112,12 +130,12 @@ struct OutlineButton: View {
         let color = self.color ?? theme.fg
         Button(action: action) {
             Text(title)
-                .font(.monoFixed(12, .monoSemibold))
-                .tracking(12 * 0.12)
+                .font(.sans(16, .sansSemibold, relativeTo: .body))
                 .foregroundStyle(color)
-                .padding(.horizontal, 14)
-                .frame(height: height)
-                .overlay(RoundedRectangle(cornerRadius: theme.radius.control).strokeBorder(color.opacity(0.45), lineWidth: 1))
+                .frame(maxWidth: .infinity)
+                .frame(minHeight: height)
+                .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous)
+                    .strokeBorder(color.opacity(0.45), lineWidth: 1))
                 .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -155,12 +173,12 @@ private struct RowPressLabel: View {
     }
 }
 
-/// Title bar for sheets.
+/// Title bar for sheets: a title, an optional line under it, and Close.
 struct SheetHeader: View {
     @Environment(\.theme) private var theme
     let title: String
-    var subtitle: String? = nil
-    var subtitleColor: Color? = nil
+    var subtitle: String?
+    var subtitleColor: Color?
     let onClose: () -> Void
 
     init(title: String, subtitle: String? = nil, subtitleColor: Color? = nil, onClose: @escaping () -> Void) {
@@ -171,99 +189,40 @@ struct SheetHeader: View {
     }
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            VStack(alignment: .leading, spacing: 6) {
+        HStack(alignment: .top, spacing: 12) {
+            VStack(alignment: .leading, spacing: 4) {
                 Text(title)
-                    .font(.monoFixed(16, .monoSemibold))
-                    .tracking(16 * 0.14)
+                    .font(.sans(22, .sansSemibold, relativeTo: .title2))
                     .foregroundStyle(theme.fg)
                 if let subtitle {
-                    Text(subtitle).hud(11, subtitleColor ?? theme.fgSubtle)
+                    Text(subtitle)
+                        .font(.sans(15, .sans, relativeTo: .subheadline))
+                        .foregroundStyle(subtitleColor ?? theme.fgSubtle)
                 }
             }
+            .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
-            Spacer()
             Button(action: onClose) {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(theme.fgMuted)
+                    .frame(width: 32, height: 32)
+                    .background(theme.bgInset, in: Circle())
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Close")
         }
         .padding(.leading, 20)
-        .padding(.trailing, 8)
-        .padding(.top, 18)
-        .padding(.bottom, 12)
-        .overlay(alignment: .bottom) {
-            Rectangle().fill(theme.line).frame(height: 1)
-        }
+        .padding(.trailing, 10)
+        .padding(.top, 16)
+        .padding(.bottom, 8)
     }
 }
 
-/// The code tag box: "VD3".
-struct CodeTag: View {
-    @Environment(\.theme) private var theme
-    let code: String
-    var lit: Bool = false
-    var dim: Bool = false
-
-    init(code: String, lit: Bool = false, dim: Bool = false) {
-        self.code = code
-        self.lit = lit
-        self.dim = dim
-    }
-
-    var body: some View {
-        Text(code)
-            .font(.monoFixed(12, .monoSemibold))
-            .tracking(12 * 0.08)
-            .foregroundStyle(lit ? theme.signalInk : (dim ? theme.fgFaint : theme.fgMuted))
-            .lineLimit(1)
-            .minimumScaleFactor(0.7)
-            .frame(width: 46, height: 28)
-            .background(theme.bgInset, in: RoundedRectangle(cornerRadius: theme.radius.control))
-            .overlay(
-                RoundedRectangle(cornerRadius: theme.radius.control)
-                    .strokeBorder(lit ? theme.signalEdge : theme.line, lineWidth: 1)
-            )
-            .accessibilityHidden(true)
-    }
-}
-
-/// A panel: raised surface, hairline border, and a second offset outline behind it (the badline stack).
-struct Panel<Content: View>: View {
-    @Environment(\.theme) private var theme
-    var stacked: Bool = true
-    var content: Content
-
-    init(stacked: Bool = true, @ViewBuilder content: () -> Content) {
-        self.stacked = stacked
-        self.content = content()
-    }
-
-    var body: some View {
-        let shape = RoundedRectangle(cornerRadius: theme.radius.panel)
-        content
-            .background(theme.bgRaised, in: shape)
-            .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
-            .background(alignment: .topLeading) {
-                if stacked {
-                    shape
-                        .strokeBorder(theme.line, lineWidth: 1)
-                        .offset(x: 5, y: 5)
-                }
-            }
-            // The offset outline's 5 pt is reserved either way, so stacked and flat panels share one width.
-            .padding(.trailing, 5)
-            .padding(.bottom, stacked ? 5 : 0)
-    }
-}
-
-/// A time setting in Geist Mono with a chevron, like the day-start control. A tap opens a wheel in a small
-/// sheet, so every time on screen stays in one type system.
+/// A time setting in Geist Mono with a chevron. A tap opens a wheel in a small sheet, so every time on screen stays in
+/// one type system.
 struct MonoTimeButton: View {
     @Environment(\.theme) private var theme
     let title: String
@@ -284,7 +243,7 @@ struct MonoTimeButton: View {
         } label: {
             HStack(spacing: 8) {
                 Text(Fmt.minutes(minutes))
-                    .font(.monoFixed(15, .monoMedium))
+                    .font(.mono(16, .monoMedium, relativeTo: .body))
                     .foregroundStyle(theme.fg)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 11, weight: .semibold))
@@ -294,7 +253,7 @@ struct MonoTimeButton: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("\(title.capitalized), \(Fmt.minutes(minutes))")
+        .accessibilityLabel("\(title), \(Fmt.minutes(minutes))")
         .accessibilityHint("Double tap to change.")
         .sheet(isPresented: $editing) {
             TimeWheelSheet(title: title, minutes: minutes, onSet: onSet)
@@ -327,8 +286,8 @@ struct TimeWheelSheet: View {
                 .labelsHidden()
                 .environment(\.locale, Locale(identifier: "en_GB"))
                 .frame(maxWidth: .infinity)
-                .padding(.top, 8)
-            PrimaryButton(title: "SET \(Fmt.minutes(picked))") {
+                .padding(.top, 4)
+            PrimaryButton(title: "Set \(Fmt.minutes(picked))") {
                 onSet(picked)
                 dismiss()
             }

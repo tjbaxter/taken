@@ -4,8 +4,9 @@ import SwiftUI
 /// makes of them. Tap a circle to finish a task, swipe to delete, tap the words to edit. Every colour comes from the
 /// look (`Theme`), so it reads the same in Signal, Blush, Phosphor and Ice.
 ///
-/// Tab bar: put `TodoRootView()` in the To-do tab and add `.opensTodoTab { selection = .todo }` to the TabView, so
-/// Siri, the control, the Lock Screen, links, notifications and the quick action (and `-screen todo`) land here.
+/// It is the To-do tab of RootView's tab bar, which follows every voice to-do request (`.opensTodoTab`): Siri, the
+/// control, the Lock Screen, links, notifications and the quick action land here. Its sheets (edit, type) are the
+/// root's, so a capture closes whatever is open before the mic starts.
 struct TodoRootView: View {
     @Environment(AppModel.self) private var app
     @Environment(\.theme) private var theme
@@ -13,8 +14,8 @@ struct TodoRootView: View {
     @Environment(\.openURL) private var openURL
     @State private var todo = TodoModel.shared
     @State private var route = TodoCaptureRoute.shared
-    @State private var editing: TodoTask?
-    @State private var typing = false
+
+    init() {}
 
     var body: some View {
         list
@@ -24,18 +25,6 @@ struct TodoRootView: View {
                 if todo.isEmpty && todo.phase == .idle && todo.blocker == nil {
                     emptyState
                 }
-            }
-            .sheet(item: $editing) { task in
-                TodoEditSheet(task: task, clock: todo.clock) { title, due, hasTime in
-                    todo.edit(task.id, title: title, dueDate: due, hasTime: hasTime)
-                } onDelete: {
-                    todo.delete(task)
-                }
-                .environment(\.theme, theme)
-            }
-            .sheet(isPresented: $typing) {
-                TodoTypeSheet { text in todo.submitTyped(text, app: app) }
-                    .environment(\.theme, theme)
             }
             .onAppear {
                 todo.attach(app)
@@ -60,12 +49,20 @@ struct TodoRootView: View {
             }
     }
 
-    /// A recording asked for by Siri, the control, the Lock Screen or the quick action starts once the tab is up.
+    /// A recording asked for by Siri, the control, the Lock Screen or the quick action starts once the To-do tab is in
+    /// front with nothing over it, so Listening and the stop button are on screen when the mic opens.
     private func consumeRequest() {
         guard route.takePendingRecording() else { return }
+        app.openTodoTab()
         Task {
-            // Let the tab settle and Siri hand back the microphone first.
+            // Let a closing sheet finish, the tab settle and Siri hand back the microphone first.
             try? await Task.sleep(for: .milliseconds(450))
+            var waited = 0
+            while !app.showsTodoTabUncovered && waited < 12 {
+                try? await Task.sleep(for: .milliseconds(150))
+                waited += 1
+            }
+            guard app.showsTodoTabUncovered else { return }
             todo.startFromRequest(app)
         }
     }
@@ -100,19 +97,7 @@ struct TodoRootView: View {
     }
 
     private var header: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("To-do")
-                .font(.sans(34, .sansSemibold, relativeTo: .largeTitle))
-                .foregroundStyle(theme.fg)
-            if !todo.isEmpty {
-                Text(summary)
-                    .font(.sans(15, .sans, relativeTo: .subheadline))
-                    .foregroundStyle(theme.fgSubtle)
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
+        TabHeader(title: "To-do", subtitle: todo.isEmpty ? nil : summary)
     }
 
     /// "3 open, 2 done today"
@@ -136,7 +121,7 @@ struct TodoRootView: View {
             .buttonStyle(.plain)
             .alignmentGuide(.firstTextBaseline) { dimensions in dimensions[VerticalAlignment.center] + 6 }
             Button {
-                editing = task
+                app.sheet = .todoEdit(task.id)
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
                     Text(task.title)
@@ -179,7 +164,7 @@ struct TodoRootView: View {
         .accessibilityAddTraits(.isButton)
         .accessibilityHint(done ? "Double tap to mark not done." : "Double tap to mark done.")
         .accessibilityAction { todo.toggle(task) }
-        .accessibilityAction(named: "Edit") { editing = task }
+        .accessibilityAction(named: "Edit") { app.sheet = .todoEdit(task.id) }
         .accessibilityAction(named: "Delete") { todo.delete(task) }
     }
 
@@ -273,7 +258,7 @@ struct TodoRootView: View {
                     }
                 }
                 TodoPillButton(title: TodoCopy.typeInstead, filled: blocker == .unavailable) {
-                    typing = true
+                    app.sheet = .todoType
                 }
             }
         }

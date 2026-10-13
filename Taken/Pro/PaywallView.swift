@@ -1,8 +1,8 @@
 import StoreKit
 import SwiftUI
 
-/// Taken Pro. One sheet: what Pro is, the person's own record so far, three plans, one button, the terms Apple
-/// requires, and the way out. No carousel, no countdown, nothing pressing (PRO.md).
+/// Taken Pro. One sheet: what Pro is, three plans, one button, the terms Apple requires, and the way out. No carousel,
+/// no countdown, nothing pressing (PRO.md).
 struct PaywallView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.purchase) private var purchase
@@ -16,9 +16,6 @@ struct PaywallView: View {
     @State private var note: Note?
     @State private var unlocked = false
     @State private var redeeming = false
-    @State private var bracket: CGFloat = 12
-    @State private var sweep: CGFloat = 0
-    @State private var sweeping = false
 
     init(request: PaywallRequest) {
         self.request = request
@@ -54,21 +51,18 @@ struct PaywallView: View {
     var body: some View {
         GeometryReader { geo in
             // Every plan sits above the button: with room to spare on a 6.9 inch iPhone, tighter on 6.1 and 6.3 inch
-            // ones; the smallest drop the ruler and scroll, with the button and terms always in view.
+            // ones, where the smallest scroll, with the button and terms always in view.
             let compact = geo.size.height < 820
-            let ruler = geo.size.height >= 740
             VStack(spacing: 0) {
                 topBar
                 GeometryReader { area in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
-                            header(compact: compact, ruler: ruler)
+                            header(compact: compact)
                             features(compact: compact)
-                                .padding(.top, compact ? 14 : 22)
+                                .padding(.top, compact ? 18 : 26)
                             // Spare height goes here, so the plans sit right above the button.
-                            Spacer(minLength: compact ? 14 : 22)
-                            planHeader
-                                .padding(.bottom, compact ? 10 : 12)
+                            Spacer(minLength: compact ? 18 : 26)
                             plans(compact: compact)
                         }
                         .padding(.horizontal, 20)
@@ -88,11 +82,6 @@ struct PaywallView: View {
         .offerCodeRedemption(isPresented: $redeeming) { _ in
             Task { await pro.refresh() }
         }
-        .onAppear {
-            withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.42, dampingFraction: 0.7).delay(0.12)) {
-                bracket = 18
-            }
-        }
         .onChange(of: pro.status) { _, _ in
             // Pro came on another way while the sheet was up: a restore, an offer code, an approved Ask to Buy.
             if pro.isActive(at: Date()) { celebrate() }
@@ -107,21 +96,16 @@ struct PaywallView: View {
 
     // MARK: Top
 
-    /// TODAY's wordmark with PRO lit, and the way out.
+    /// The glyph, Taken Pro, and the way out.
     private var topBar: some View {
         HStack(spacing: 10) {
             CapsuleGlyph()
-                .frame(width: 20, height: 20)
-                .shadow(color: theme.glow(0.5), radius: 6)
-            HStack(spacing: 9) {
-                Text("TAKEN").foregroundStyle(theme.fg)
-                Text("PRO").foregroundStyle(theme.signalInk)
-            }
-            .font(.monoFixed(15, .monoSemibold))
-            .tracking(15 * 0.3)
-            .accessibilityElement(children: .combine)
-            .accessibilityLabel("Taken Pro")
-            .accessibilityAddTraits(.isHeader)
+                .frame(width: 22, height: 22)
+                .scaleEffect(unlocked && !reduceMotion ? 1.12 : 1)
+            Text("Taken Pro")
+                .font(.sans(17, .sansSemibold, relativeTo: .body))
+                .foregroundStyle(theme.fg)
+                .accessibilityAddTraits(.isHeader)
             Spacer()
             Button {
                 model.closePaywall()
@@ -129,123 +113,58 @@ struct PaywallView: View {
                 Image(systemName: "xmark")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundStyle(theme.fgMuted)
+                    .frame(width: 32, height: 32)
+                    .background(theme.bgInset, in: Circle())
                     .frame(width: 44, height: 44)
                     .contentShape(Rectangle())
             }
             .accessibilityLabel("Close")
         }
         .padding(.leading, 20)
-        .padding(.trailing, 8)
+        .padding(.trailing, 10)
         .frame(height: 56)
     }
 
-    private func header(compact: Bool, ruler: Bool) -> some View {
-        let today = model.today
-        let frame = RoundedRectangle(cornerRadius: theme.radius.frame)
-        return VStack(alignment: .leading, spacing: 0) {
+    private func header(compact: Bool) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
             Text(ProCopy.headline)
-                .font(.sans(compact ? 30 : 34, .sansSemibold, relativeTo: .largeTitle))
+                .font(.sans(compact ? 32 : 36, .sansSemibold, relativeTo: .largeTitle))
                 .tracking(-0.6)
-                .foregroundStyle(theme.fg)
+                .foregroundStyle(unlocked ? theme.signalInk : theme.fg)
                 .fixedSize(horizontal: false, vertical: true)
             Text(ProCopy.sublineLines)
-                .font(.sans(compact ? 15 : 16, relativeTo: .body))
+                .font(.sans(compact ? 16 : 17, relativeTo: .body))
                 .foregroundStyle(theme.fgMuted)
                 .lineSpacing(3)
                 .fixedSize(horizontal: false, vertical: true)
-                .padding(.top, 8)
-            if ruler {
-                VStack(alignment: .leading, spacing: 8) {
-                    HStack(spacing: 8) {
-                        Text("TODAY").hud(10, theme.fgSubtle, tracking: 0.14)
-                        Text(loggedLabel(today))
-                            .hud(10, today.allDoses.isEmpty ? theme.fgFaint : theme.signalInk, tracking: 0.12)
-                    }
-                    // The record so far, on the ruler TODAY uses: every dose at its minute.
-                    DayRuler(dayStart: model.clock.start(of: today.day), dayEnd: model.clock.end(of: today.day),
-                             doses: today.allDoses.map(\.takenAt), now: model.now, dayStartHour: model.clock.dayStartHour)
-                }
-                .padding(.top, compact ? 16 : 20)
-                .accessibilityHidden(true)
-            }
         }
-        .padding(.horizontal, 20)
-        .padding(.top, compact ? 16 : 22)
-        .padding(.bottom, 16)
+        .padding(.top, compact ? 8 : 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background {
-            ZStack(alignment: .topLeading) {
-                (unlocked ? theme.signalWash.opacity(0.35) : theme.bgRaised.opacity(0.6))
-                // A faint signal glow behind the headline.
-                RadialGradient(colors: [theme.signal.opacity(unlocked ? 0.16 : 0.08), theme.signal.opacity(0)],
-                               center: .topLeading, startRadius: 0, endRadius: 260)
-            }
-            .clipShape(frame)
-        }
-        .overlay {
-            CornerBrackets(length: (unlocked ? 30 : bracket) * theme.brackets.scale,
-                           radius: theme.bracketRadius(theme.radius.frame))
-                .stroke(unlocked ? theme.signal : theme.bracket, style: theme.brackets.style)
-                .shadow(color: unlocked ? theme.glow(0.55) : .clear, radius: 6)
-                .padding(theme.brackets.width / 2)
-        }
-        .overlay(alignment: .top) { scanline }
-        .clipShape(frame)
         .accessibilityElement(children: .combine)
         .accessibilityLabel("\(ProCopy.headline) \(ProCopy.subline)")
     }
 
-    private func loggedLabel(_ today: DaySummary) -> String {
-        let count = today.allDoses.count
-        if count == 0 { return "NOTHING LOGGED YET" }
-        return count == 1 ? "1 DOSE LOGGED" : "\(count) DOSES LOGGED"
-    }
-
-    @ViewBuilder
-    private var scanline: some View {
-        if sweeping {
-            GeometryReader { geo in
-                Rectangle()
-                    .fill(theme.signal)
-                    .frame(height: 2)
-                    .shadow(color: theme.glow(0.9), radius: 8)
-                    .offset(y: sweep * geo.size.height)
-            }
-            .allowsHitTesting(false)
-            .transition(.opacity)
-        }
-    }
-
     private func features(compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: compact ? 9 : 11) {
+        VStack(alignment: .leading, spacing: compact ? 12 : 14) {
             ForEach(ProCopy.features, id: \.self) { line in
                 HStack(spacing: 12) {
-                    LampShape(roundness: theme.radius.lampRoundness)
-                        .fill(theme.signal)
-                        .frame(width: 6, height: 6)
-                        .shadow(color: theme.glow(0.7), radius: 3)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 12, weight: .bold))
+                        .foregroundStyle(theme.onSignal)
+                        .frame(width: 22, height: 22)
+                        .background(theme.signal, in: Circle())
                     Text(line)
-                        .hud(12, theme.fg, face: .monoMedium, tracking: 0.1)
+                        .font(.sans(16, .sansMedium, relativeTo: .body))
+                        .foregroundStyle(theme.fg)
                         .lineLimit(1)
-                        .minimumScaleFactor(0.75)
+                        .minimumScaleFactor(0.8)
                 }
             }
         }
-        .padding(.horizontal, 4)
         .accessibilityElement(children: .combine)
     }
 
     // MARK: Plans
-
-    private var planHeader: some View {
-        HStack(spacing: 10) {
-            Text("[01]").hud(11, theme.fgFaint, tracking: 0.06)
-            Text("PLAN").hud(11, theme.fgMuted, tracking: 0.16)
-            DashedRule().frame(maxWidth: .infinity)
-        }
-        .accessibilityElement(children: .combine)
-        .accessibilityAddTraits(.isHeader)
-    }
 
     private func plans(compact: Bool) -> some View {
         VStack(spacing: compact ? 8 : 10) {
@@ -253,33 +172,26 @@ struct PaywallView: View {
                 planCard(plan, compact: compact)
             }
         }
-        // Room for the brackets on the chosen plan.
-        .padding(.horizontal, 3)
-        .padding(.vertical, 3)
     }
 
     private func planCard(_ plan: ProPlan, compact: Bool) -> some View {
         let offer = pro.offers[plan]
         let isOn = selected == plan
         let tag = ProCopy.introTag(ProCopy.liveIntro(offer, eligible: eligible))
+        let shape = RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous)
         return Button {
             select(plan)
         } label: {
             HStack(alignment: .center, spacing: 14) {
                 radio(isOn)
-                VStack(alignment: .leading, spacing: 7) {
+                VStack(alignment: .leading, spacing: 5) {
                     Text(plan.title)
-                        .font(.monoFixed(13, .monoSemibold))
-                        .tracking(13 * 0.14)
-                        .foregroundStyle(isOn ? theme.fg : theme.fgMuted)
+                        .font(.sans(17, .sansSemibold, relativeTo: .body))
+                        .foregroundStyle(theme.fg)
                     if let tag {
                         Text(tag)
-                            .font(.monoFixed(9.5, .monoSemibold))
-                            .tracking(9.5 * 0.12)
+                            .font(.sans(13, .sansSemibold, relativeTo: .footnote))
                             .foregroundStyle(theme.signalInk)
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .overlay(RoundedRectangle(cornerRadius: theme.radius.mark).strokeBorder(theme.signalEdge, lineWidth: 1))
                     }
                 }
                 Spacer(minLength: 8)
@@ -287,19 +199,9 @@ struct PaywallView: View {
             }
             .padding(.horizontal, 16)
             .padding(.vertical, compact ? 10 : 12)
-            .frame(minHeight: compact ? 54 : 58)
-            .background(isOn ? theme.signalWash : theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
-            .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(isOn ? theme.signalEdge : theme.line, lineWidth: 1))
-            .overlay {
-                // The viewfinder locks onto the chosen plan.
-                if isOn {
-                    CornerBrackets(length: 9 * theme.brackets.scale, radius: theme.bracketRadius(theme.radius.panel + 3))
-                        .stroke(theme.signal, style: theme.brackets.style)
-                        .shadow(color: theme.glow(0.6), radius: 4)
-                        .padding(-3)
-                        .transition(.opacity.combined(with: .scale(scale: 1.04)))
-                }
-            }
+            .frame(minHeight: compact ? 58 : 64)
+            .background(isOn ? theme.signalWash : theme.bgRaised, in: shape)
+            .overlay(shape.strokeBorder(isOn ? theme.signal : theme.line, lineWidth: isOn ? 1.5 : 1))
             .contentShape(Rectangle())
         }
         .buttonStyle(PressStyle())
@@ -314,14 +216,14 @@ struct PaywallView: View {
     private func priceBlock(_ offer: PlanOffer?, isOn: Bool) -> some View {
         if let offer {
             let price = ProCopy.price(offer)
-            VStack(alignment: .trailing, spacing: 5) {
+            VStack(alignment: .trailing, spacing: 4) {
                 // The billed amount is the most prominent price on the card.
                 HStack(alignment: .firstTextBaseline, spacing: 5) {
                     Text(price.amount)
-                        .font(.monoFixed(20, .monoMedium))
+                        .font(.mono(20, .monoMedium, relativeTo: .title3))
                         .foregroundStyle(theme.fg)
                     Text(price.unit)
-                        .font(.monoFixed(12, .monoMedium))
+                        .font(.sans(14, .sans, relativeTo: .footnote))
                         .foregroundStyle(isOn ? theme.fgMuted : theme.fgSubtle)
                 }
                 .lineLimit(1)
@@ -329,7 +231,7 @@ struct PaywallView: View {
                 if let monthly = ProCopy.monthlyEquivalent(offer) {
                     // On the chosen card's signal wash the muted ink keeps it AA; the subtle one does on a plain card.
                     Text(monthly)
-                        .font(.monoFixed(11, .monoMedium))
+                        .font(.sans(13, .sans, relativeTo: .footnote))
                         .foregroundStyle(isOn ? theme.fgMuted : theme.fgSubtle)
                         .lineLimit(1)
                         .minimumScaleFactor(0.8)
@@ -337,30 +239,28 @@ struct PaywallView: View {
             }
         } else {
             Text(plansAnswered ? "--" : "\u{00B7}\u{00B7}\u{00B7}")
-                .font(.monoFixed(16, .monoMedium))
+                .font(.mono(16, .monoMedium, relativeTo: .body))
                 .foregroundStyle(theme.fgFaint)
         }
     }
 
-    /// Square radio (round in Blush), lit when chosen.
+    /// A round radio, filled with the signal when chosen.
     private func radio(_ on: Bool) -> some View {
         ZStack {
-            RoundedRectangle(cornerRadius: max(theme.radius.mark, theme.lampRadius(16)))
-                .strokeBorder(on ? theme.signal : theme.fgFaint, lineWidth: 1.2)
-                .frame(width: 16, height: 16)
+            Circle()
+                .strokeBorder(on ? theme.signal : theme.lineStrong, lineWidth: 1.5)
             if on {
-                LampShape(roundness: theme.radius.lampRoundness)
+                Circle()
                     .fill(theme.signal)
-                    .frame(width: 8, height: 8)
-                    .shadow(color: theme.glow(0.8), radius: 4)
+                    .padding(5)
                     .transition(.scale(scale: 0.4).combined(with: .opacity))
             }
         }
-        .frame(width: 18, height: 18)
+        .frame(width: 22, height: 22)
     }
 
     private func cardLabel(_ plan: ProPlan, offer: PlanOffer?, tag: String?) -> String {
-        var parts = [plan.rawValue.capitalized]
+        var parts = [plan.title]
         if isMissing(plan) { parts.append("Not available right now") }
         if let offer {
             if let period = offer.period {
@@ -372,7 +272,7 @@ struct PaywallView: View {
                 parts.append(monthly.replacingOccurrences(of: " / ", with: " per "))
             }
         }
-        if let tag { parts.append(tag.lowercased()) }
+        if let tag { parts.append(tag) }
         return parts.joined(separator: ". ")
     }
 
@@ -407,14 +307,14 @@ struct PaywallView: View {
     }
 
     private var ctaTitle: String {
-        if unlocked { return "PRO ACTIVE" }
+        if unlocked { return "Taken Pro is on" }
         switch busy {
-        case .buying: return "CONFIRMING"
-        case .restoring: return "RESTORING"
+        case .buying: return "Confirming"
+        case .restoring: return "Restoring"
         case nil: break
         }
         // A plan the App Store did not return is never left on a spinner: the button asks it again.
-        if offer == nil { return plansAnswered ? "TRY AGAIN" : "LOADING PLANS" }
+        if offer == nil { return plansAnswered ? "Try again" : "Loading plans" }
         return ProCopy.cta(offer, eligible: eligible)
     }
 
@@ -430,15 +330,11 @@ struct PaywallView: View {
                         .tint(theme.buttonText)
                         .controlSize(.small)
                 } else if unlocked {
-                    CheckShape()
-                        .stroke(theme.buttonText, style: StrokeStyle(lineWidth: 2.2, lineCap: .square, lineJoin: .miter))
-                        .frame(width: 14, height: 14)
-                } else {
-                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.buttonLamp).frame(width: 7, height: 7)
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 15, weight: .bold))
                 }
                 Text(ctaTitle)
-                    .font(.monoFixed(14, .monoSemibold))
-                    .tracking(14 * 0.12)
+                    .font(.sans(17, .sansSemibold, relativeTo: .body))
                     .lineLimit(1)
                     .minimumScaleFactor(0.8)
             }
@@ -447,8 +343,7 @@ struct PaywallView: View {
             .frame(height: height)
             // Pro on: the button lights in the signal, the readable shade of it in Blush.
             .background(unlocked ? theme.signalInk : theme.button.opacity(ctaEnabled || busy != nil ? 1 : 0.35),
-                        in: RoundedRectangle(cornerRadius: theme.radius.panel))
-            .shadow(color: unlocked ? theme.glow(0.5) : .clear, radius: 12)
+                        in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
         }
         .buttonStyle(PressStyle())
         .disabled(!ctaEnabled)
@@ -483,50 +378,52 @@ struct PaywallView: View {
     }
 
     private var restoreLink: some View {
-        Button { restore() } label: { footerLabel("RESTORE") }
+        Button { restore() } label: { footerLabel("Restore") }
             .buttonStyle(.plain)
             .disabled(busy != nil || unlocked)
             .accessibilityLabel("Restore purchases")
     }
 
     private var redeemLink: some View {
-        Button { redeeming = true } label: { footerLabel("REDEEM CODE") }
+        Button { redeeming = true } label: { footerLabel("Redeem code") }
             .buttonStyle(.plain)
             .disabled(busy != nil || unlocked)
             .accessibilityLabel("Redeem code")
     }
 
     private var termsLink: some View {
-        Link(destination: ProCopy.termsOfUseURL) { footerLabel("TERMS OF USE") }
+        Link(destination: ProCopy.termsOfUseURL) { footerLabel("Terms of Use") }
             .accessibilityLabel("Terms of Use")
     }
 
     private var privacyLink: some View {
-        Link(destination: ProCopy.privacyURL) { footerLabel("PRIVACY") }
+        Link(destination: ProCopy.privacyURL) { footerLabel("Privacy") }
             .accessibilityLabel("Privacy Policy")
     }
 
     private func footerLabel(_ title: String) -> some View {
         Text(title)
-            .hudFixed(10, theme.fgMuted, face: .monoMedium, tracking: 0.1)
+            .font(.sans(13, .sansMedium, relativeTo: .footnote))
+            .foregroundStyle(theme.fgMuted)
             .lineLimit(1)
             .fixedSize()
-            .padding(.horizontal, 5)
+            .padding(.horizontal, 6)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
     }
 
     private var separator: some View {
         Text("\u{00B7}")
-            .hudFixed(10, theme.fgFaint, tracking: 0)
+            .font(.sans(13, .sans, relativeTo: .footnote))
+            .foregroundStyle(theme.fgFaint)
             .accessibilityHidden(true)
     }
 
     private func noteView(_ note: Note) -> some View {
         HStack(alignment: .top, spacing: 10) {
-            LampShape(roundness: theme.radius.lampRoundness)
+            Circle()
                 .fill(note.lit ? theme.signal : theme.fgSubtle)
-                .frame(width: 6, height: 6)
+                .frame(width: 7, height: 7)
                 .padding(.top, 6)
             Text(note.text)
                 .font(.sans(14, relativeTo: .callout))
@@ -598,7 +495,8 @@ struct PaywallView: View {
         }
     }
 
-    /// Pro is on: the lock-in, the success haptic, then the sheet closes and the tap that opened it is applied.
+    /// Pro is on: the button lights with a check, the success haptic, then the sheet closes and the tap that opened it
+    /// is applied.
     private func celebrate() {
         guard !unlocked else { return }
         model.paywallUnlocked()
@@ -607,22 +505,10 @@ struct PaywallView: View {
         withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.32, dampingFraction: 0.62)) {
             unlocked = true
         }
-        runSweep()
         UIAccessibility.post(notification: .announcement, argument: "Taken Pro is on.")
         Task {
             try? await Task.sleep(for: .milliseconds(reduceMotion ? 700 : 1150))
             model.closePaywall()
-        }
-    }
-
-    private func runSweep() {
-        guard !reduceMotion else { return }
-        sweep = 0
-        sweeping = true
-        withAnimation(.easeInOut(duration: 0.55)) { sweep = 1 }
-        Task {
-            try? await Task.sleep(for: .milliseconds(620))
-            withAnimation(.easeOut(duration: 0.2)) { sweeping = false }
         }
     }
 }

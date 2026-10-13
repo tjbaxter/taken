@@ -1,6 +1,6 @@
 import SwiftUI
 
-/// One day from the log: what was taken and when. The backfill path for a forgotten day.
+/// One day from History: what was taken and when. The backfill path for a forgotten day.
 struct DaySheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -9,7 +9,8 @@ struct DaySheet: View {
 
     let day: DayKey
 
-    @State private var logMinutes: Int = 9 * 60
+    /// Set on appear: now for today, an hour after the wake-up time for an earlier day.
+    @State private var logMinutes: Int = 0
     @State private var removing: Dose?
 
     init(day: DayKey) {
@@ -20,22 +21,24 @@ struct DaySheet: View {
         let summary = model.sheetSummary(for: day)
         let future = isFuture
         VStack(spacing: 0) {
-            SheetHeader(title: Fmt.dayHeader(day), subtitle: Fmt.daySheetStatus(summary, isToday: isToday),
+            SheetHeader(title: Fmt.longDay(day), subtitle: Fmt.daySheetStatus(summary, isToday: isToday),
                         subtitleColor: summary.allTaken ? theme.signalInk : theme.fgSubtle) {
                 dismiss()
             }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    SectionHeader(index: "01", title: "LOG AT", trailing: isToday ? "TODAY" : nil)
                     logTimeRow(isFuture: future)
-                    SectionHeader(index: "02", title: "ITEMS", trailing: "\(summary.items.count)")
+                        .padding(.top, 12)
+                    SectionHeader("Items", trailing: summary.items.isEmpty ? nil : "Tap a time to remove it")
                     if summary.items.isEmpty {
-                        Text("NOTHING IN YOUR STACK").hud(11, theme.fgSubtle)
+                        Text("Nothing in your stack yet")
+                            .font(.sans(16, .sans, relativeTo: .body))
+                            .foregroundStyle(theme.fgSubtle)
                     } else {
-                        Panel {
+                        Card {
                             VStack(spacing: 0) {
                                 ForEach(Array(summary.items.enumerated()), id: \.element.id) { index, row in
-                                    if index > 0 { DashedRule().padding(.horizontal, 14) }
+                                    if index > 0 { RowDivider() }
                                     DayItemRow(row: row, clock: model.clock, isToday: isToday,
                                                logLabel: Fmt.minutes(logMinutes), canLog: !future,
                                                onLog: { backfill(row.item) },
@@ -44,10 +47,6 @@ struct DaySheet: View {
                             }
                         }
                     }
-                    Text("Tap a time to remove that dose.")
-                        .font(.sans(13))
-                        .foregroundStyle(theme.fgSubtle)
-                        .padding(.top, 14)
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 30)
@@ -57,9 +56,7 @@ struct DaySheet: View {
         .presentationDetents([.large])
         .presentationBackground(theme.bg)
         .onAppear {
-            if isToday {
-                logMinutes = model.clock.minutesOfDay(model.now)
-            }
+            logMinutes = isToday ? model.clock.minutesOfDay(model.now) : model.settings.backfillMinutes
         }
         .confirmationDialog(
             removalTitle,
@@ -98,22 +95,25 @@ struct DaySheet: View {
     }
 
     private func logTimeRow(isFuture: Bool) -> some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 4) {
-                Text("NEW ENTRIES").hud(12, theme.fg)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text("Log at")
+                    .font(.sans(17, .sans, relativeTo: .body))
+                    .foregroundStyle(theme.fg)
                 Text(isFuture ? "That time is still to come. Pick an earlier one."
-                              : (isToday ? "Defaults to now." : "Defaults to 09:00. Change it if you remember."))
-                    .font(.sans(13))
+                              : (isToday ? "Defaults to now." : "An hour after you wake up. Change it if you remember."))
+                    .font(.sans(14, .sans, relativeTo: .footnote))
                     .foregroundStyle(isFuture ? theme.fg : theme.fgSubtle)
             }
             Spacer()
-            MonoTimeButton(title: "LOG AT", minutes: logMinutes) { minutes in
+            MonoTimeButton(title: "Log at", minutes: logMinutes) { minutes in
                 logMinutes = minutes
             }
         }
-        .padding(14)
-        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
-        .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.line, lineWidth: 1))
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
     }
 }
 
@@ -140,24 +140,25 @@ private struct DayItemRow: View {
 
     var body: some View {
         HStack(alignment: .center, spacing: 12) {
-            CodeTag(code: row.item.code, lit: row.isDue && row.isDone, dim: !row.isDue && row.doses.isEmpty)
-            VStack(alignment: .leading, spacing: 5) {
+            VStack(alignment: .leading, spacing: 3) {
                 Text(row.item.name)
-                    .font(.sans(16, .sansMedium))
+                    .font(.sans(16, .sansMedium, relativeTo: .body))
                     .foregroundStyle(theme.fg)
                     .lineLimit(1)
-                Text(Fmt.dayItemStatus(row, isToday: isToday)).hud(10, subtitleColor, tracking: 0.12)
+                Text(Fmt.dayItemStatus(row, isToday: isToday))
+                    .font(.sans(14, .sans, relativeTo: .footnote))
+                    .foregroundStyle(row.isDue && row.isDone ? theme.signalInk : theme.fgSubtle)
                     .lineLimit(1)
-                    .minimumScaleFactor(0.75)
+                    .minimumScaleFactor(0.8)
             }
             .layoutPriority(0)
             Spacer(minLength: 8)
             actions
                 .layoutPriority(1)
         }
-        .padding(.horizontal, 14)
+        .padding(.horizontal, 16)
         .padding(.vertical, 8)
-        .frame(minHeight: 70)
+        .frame(minHeight: 64)
     }
 
     private var showsLog: Bool { row.isPending || row.doses.isEmpty }
@@ -179,17 +180,17 @@ private struct DayItemRow: View {
             } label: {
                 HStack(spacing: 6) {
                     Text(Fmt.clock(dose.takenAt, clock))
-                        .font(.monoFixed(13, .monoMedium))
+                        .font(.monoFixed(14, .monoMedium))
                         .foregroundStyle(theme.signalInk)
                         .fixedSize()
                     Image(systemName: "xmark")
                         .font(.system(size: 8, weight: .bold))
                         .foregroundStyle(theme.fgSubtle)
                 }
-                .padding(.horizontal, 9)
+                .padding(.horizontal, 10)
                 .frame(height: 32)
-                .background(theme.signalWash, in: RoundedRectangle(cornerRadius: theme.radius.control))
-                .overlay(RoundedRectangle(cornerRadius: theme.radius.control).strokeBorder(theme.signalEdge, lineWidth: 1))
+                .background(theme.signalWash, in: Capsule())
+                .overlay(Capsule().strokeBorder(theme.signalEdge, lineWidth: 1))
                 .frame(minHeight: 44)
                 .contentShape(Rectangle())
             }
@@ -198,27 +199,25 @@ private struct DayItemRow: View {
         }
         if showsLog {
             Button(action: onLog) {
-                Text("+ LOG \(logLabel)")
-                    .font(.monoFixed(11, .monoSemibold))
-                    .tracking(11 * 0.1)
-                    .foregroundStyle(theme.fg)
-                    .fixedSize()
-                    .padding(.horizontal, 10)
-                    .frame(height: 32)
-                    .overlay(RoundedRectangle(cornerRadius: theme.radius.control).strokeBorder(theme.lineStrong, lineWidth: 1))
-                    .frame(minHeight: 44)
-                    .contentShape(Rectangle())
+                HStack(spacing: 4) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 11, weight: .bold))
+                    Text(logLabel)
+                        .font(.monoFixed(14, .monoMedium))
+                }
+                .foregroundStyle(theme.fg)
+                .fixedSize()
+                .padding(.horizontal, 12)
+                .frame(height: 32)
+                .overlay(Capsule().strokeBorder(theme.lineStrong, lineWidth: 1))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
             .disabled(!canLog)
             .opacity(canLog ? 1 : 0.4)
             .accessibilityLabel("Log \(row.item.name) at \(logLabel)")
         }
-    }
-
-    private var subtitleColor: Color {
-        if row.isDue && row.isDone { return theme.signalInk }
-        return theme.fgSubtle
     }
 }
 
@@ -248,14 +247,14 @@ struct SetTimeSheet: View {
     }
 
     private var buttonTitle: String {
-        if isFuture { return "IN THE FUTURE" }
-        return lastDose == nil ? "LOG AT \(timeLabel)" : "SET TO \(timeLabel)"
+        if isFuture { return "That time is still to come" }
+        return lastDose == nil ? "Log at \(timeLabel)" : "Set to \(timeLabel)"
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            SheetHeader(title: "SET TIME \u{00B7} \(item.code)",
-                        subtitle: lastDose == nil ? "LOG A DOSE AT THE TIME YOU TOOK IT" : "CORRECT THE LAST DOSE") {
+            SheetHeader(title: item.name,
+                        subtitle: lastDose == nil ? "Log a dose at the time you took it." : "Correct the last dose.") {
                 dismiss()
             }
             DatePicker("", selection: $time, displayedComponents: .hourAndMinute)
@@ -264,7 +263,7 @@ struct SetTimeSheet: View {
                 .environment(\.locale, Locale(identifier: "en_GB"))
                 .environment(\.colorScheme, theme.scheme)
                 .frame(maxWidth: .infinity)
-                .padding(.top, 8)
+                .padding(.top, 4)
             PrimaryButton(title: buttonTitle, enabled: !isFuture) {
                 let c = Calendar.current.dateComponents([.hour, .minute], from: time)
                 let item = self.item

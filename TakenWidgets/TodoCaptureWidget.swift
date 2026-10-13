@@ -3,14 +3,8 @@ import SwiftUI
 import WidgetKit
 
 // Quick capture from the Lock Screen and Control Center (REDESIGN.md, voice to-dos): the mic opens Taken already
-// listening; the list shows what is still open. Both read todos.json in the App Group.
-
-struct TodoEntry: TimelineEntry {
-    let date: Date
-    /// Open tasks, due first (the To-do tab's order), at most three.
-    let open: [String]
-    let openCount: Int
-}
+// listening; the list shows what is still open. Both read todos.json in the App Group. The faces are in
+// Shared/TodoWidgetViews.swift, so the app's widget gallery draws the same ones.
 
 struct TodoProvider: TimelineProvider {
     func placeholder(in context: Context) -> TodoEntry {
@@ -34,8 +28,7 @@ struct TodoProvider: TimelineProvider {
 
     static func entry(at date: Date) -> TodoEntry {
         let dayStartHour = TakenStore.shared.load().settings.dayStartHour
-        let open = TodoStore.shared.load().openTasks(clock: DayClock(dayStartHour: dayStartHour))
-        return TodoEntry(date: date, open: open.prefix(3).map(\.title), openCount: open.count)
+        return TodoEntry(date: date, state: TodoStore.shared.load(), clock: DayClock(dayStartHour: dayStartHour))
     }
 }
 
@@ -62,54 +55,18 @@ struct TodoCaptureWidgetView: View {
     var body: some View {
         switch family {
         case .accessoryRectangular:
-            rectangular
+            TodoRectangularView(entry: entry)
                 .containerBackground(for: .widget) { Color.clear }
                 .widgetURL(TodoCaptureRoute.listURL)
         case .accessoryInline:
-            Label(entry.openCount == 1 ? "1 to-do" : "\(entry.openCount) to-dos", systemImage: "mic.fill")
+            TodoInlineView(entry: entry)
                 .containerBackground(for: .widget) { Color.clear }
                 .widgetURL(TodoCaptureRoute.recordURL)
         default:
-            circular
+            TodoCircularView()
                 .containerBackground(for: .widget) { Color.clear }
                 .widgetURL(TodoCaptureRoute.recordURL)
         }
-    }
-
-    private var circular: some View {
-        ZStack {
-            AccessoryWidgetBackground()
-            Image(systemName: "mic.fill")
-                .font(.system(size: 22, weight: .semibold))
-                .widgetAccentable()
-        }
-        .accessibilityLabel("New voice to-do")
-    }
-
-    private var rectangular: some View {
-        VStack(alignment: .leading, spacing: 1) {
-            HStack(spacing: 4) {
-                Image(systemName: "mic.fill")
-                    .font(.system(size: 11, weight: .bold))
-                    .widgetAccentable()
-                Text(entry.openCount == 0 ? "To-do" : "To-do \u{00B7} \(entry.openCount)")
-                    .font(.sans(13, .sansSemibold))
-                    .widgetAccentable()
-            }
-            if entry.open.isEmpty {
-                Text("Tap to see your list")
-                    .font(.sans(13))
-                    .foregroundStyle(.secondary)
-            } else {
-                ForEach(Array(entry.open.prefix(2).enumerated()), id: \.offset) { _, title in
-                    Text(title)
-                        .font(.sans(13))
-                        .lineLimit(1)
-                }
-            }
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .combine)
     }
 }
 

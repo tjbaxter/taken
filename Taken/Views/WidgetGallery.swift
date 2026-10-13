@@ -1,15 +1,28 @@
 import SwiftUI
 
 /// Design check for the widgets, rendered in the app with demo data (`-demo -screen widgets`, `-screen widgets-locked`
-/// for the read-only states without Taken Pro, `-screen widgets-standby` for the small widget with its canvas removed),
-/// in the look chosen with `-theme`. Not reachable from the UI; CI captures it so the widget look can be reviewed
-/// without a Home Screen.
+/// for the read-only states without Taken Pro, `-screen widgets-standby` for the small widget with its canvas removed,
+/// `-screen widgets-todo` for voice to-dos' Lock Screen widget and the Control Center controls), in the look chosen with
+/// `-theme`. Not reachable from the UI; CI captures it so the widget look can be reviewed without a Home Screen.
 struct WidgetGallery: View {
     enum Mode {
         case home
         case locked
         /// StandBy and CarPlay: the system removes the canvas and draws the small widget on black.
         case standBy
+        /// Voice to-dos: the Lock Screen mic, list and count, and the New voice to-do control.
+        case todo
+
+        /// The gallery a `-screen` names, or nil for an app screen.
+        init?(screen: String?) {
+            switch screen {
+            case "widgets": self = .home
+            case "widgets-locked": self = .locked
+            case "widgets-standby": self = .standBy
+            case "widgets-todo": self = .todo
+            default: return nil
+            }
+        }
     }
 
     @Environment(AppModel.self) private var model
@@ -27,6 +40,7 @@ struct WidgetGallery: View {
                 case .home: states
                 case .locked: lockedStates
                 case .standBy: standByStates
+                case .todo: todoStates
                 }
             }
             .padding(.horizontal, 20)
@@ -48,7 +62,7 @@ struct WidgetGallery: View {
         let partial = WidgetSnapshot(state: model.state, now: now)
         let done = WidgetSnapshot(state: demo(allTaken: true), now: now)
         let empty = WidgetSnapshot(state: StackState(), now: now)
-        SectionHeader(index: "W1", title: "HOME SCREEN", trailing: "SMALL \u{00B7} MEDIUM")
+        SectionHeader("Home Screen", trailing: "Small and medium")
         HStack(spacing: 22) {
             tile(width: 170, height: 170) { SmallStackView(snapshot: partial) }
             tile(width: 170, height: 170) { SmallStackView(snapshot: done) }
@@ -56,7 +70,7 @@ struct WidgetGallery: View {
         tile(width: 364, height: 170) { MediumStackView(snapshot: partial) }
             .padding(.top, 18)
 
-        SectionHeader(index: "W2", title: "LOCK SCREEN", trailing: "ACCESSORY")
+        SectionHeader("Lock Screen", trailing: "Accessory")
         HStack(spacing: 14) {
             accessory(width: 76, height: 76) { CircularStackView(snapshot: partial) }
             accessory(width: 76, height: 76) { CircularStackView(snapshot: done) }
@@ -68,7 +82,7 @@ struct WidgetGallery: View {
         }
         .padding(.top, 14)
 
-        SectionHeader(index: "W3", title: "MORE STATES")
+        SectionHeader("More states")
         tile(width: 364, height: 170) { MediumStackView(snapshot: done) }
         HStack(spacing: 22) {
             tile(width: 170, height: 170) { SmallStackView(snapshot: empty) }
@@ -82,7 +96,7 @@ struct WidgetGallery: View {
         let now = model.now
         let partial = WidgetSnapshot(state: model.state, now: now, locked: true)
         let done = WidgetSnapshot(state: demo(allTaken: true), now: now, locked: true)
-        SectionHeader(index: "W1", title: "HOME SCREEN", trailing: "NO PRO", trailingColor: theme.signalInk)
+        SectionHeader("Home Screen", trailing: "Without Pro")
         HStack(spacing: 22) {
             tile(width: 170, height: 170) { SmallStackView(snapshot: partial) }
             tile(width: 170, height: 170) { SmallStackView(snapshot: done) }
@@ -90,7 +104,7 @@ struct WidgetGallery: View {
         tile(width: 364, height: 170) { MediumStackView(snapshot: partial) }
             .padding(.top, 18)
 
-        SectionHeader(index: "W2", title: "LOCK SCREEN", trailing: "NO PRO", trailingColor: theme.signalInk)
+        SectionHeader("Lock Screen", trailing: "Without Pro")
         HStack(spacing: 14) {
             accessory(width: 76, height: 76) { CircularStackView(snapshot: partial) }
             accessory(width: 172, height: 76) { RectangularStackView(snapshot: partial) }
@@ -100,8 +114,8 @@ struct WidgetGallery: View {
         }
         .padding(.top, 14)
 
-        SectionHeader(index: "W3", title: "TAPS")
-        Text("Every tap on a locked widget opens Taken Pro. A row tapped on the medium widget is logged once Pro is on. The Control Center control shows a lock and logs nothing; Taken offers that TAKE ALL when it opens.")
+        SectionHeader("Taps")
+        Text("Every tap on a locked widget opens Taken Pro. A row tapped on the medium widget is logged once Pro is on. The Control Center control shows a lock and logs nothing; Taken offers that Take all when it opens.")
             .font(.sans(14))
             .foregroundStyle(theme.fgSubtle)
             .fixedSize(horizontal: false, vertical: true)
@@ -116,21 +130,64 @@ struct WidgetGallery: View {
         let done = WidgetSnapshot(state: demo(allTaken: true), now: now)
         let lockedPartial = WidgetSnapshot(state: model.state, now: now, locked: true)
         let lockedDone = WidgetSnapshot(state: demo(allTaken: true), now: now, locked: true)
-        SectionHeader(index: "W1", title: "STANDBY", trailing: "NO BACKGROUND")
+        SectionHeader("StandBy", trailing: "No background")
         HStack(spacing: 22) {
             standByTile { SmallStackView(snapshot: partial) }
             standByTile { SmallStackView(snapshot: done) }
         }
-        SectionHeader(index: "W2", title: "STANDBY", trailing: "NO PRO", trailingColor: theme.signalInk)
+        SectionHeader("StandBy", trailing: "Without Pro")
         HStack(spacing: 22) {
             standByTile { SmallStackView(snapshot: lockedPartial) }
             standByTile { SmallStackView(snapshot: lockedDone) }
         }
-        SectionHeader(index: "W3", title: "WHY")
+        SectionHeader("Why")
         Text("StandBy and CarPlay draw the small widget on black without its canvas. A light look keeps its signal there and switches its text to the dark canvas roles, so it stays readable.")
             .font(.sans(14))
             .foregroundStyle(theme.fgSubtle)
             .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// Voice to-dos away from the app: the Lock Screen widget in its three sizes (the mic opens Taken listening, the list
+    /// opens the To-do tab), and the Control Center controls, drawn as Control Center draws them in the look's tint.
+    @ViewBuilder
+    private var todoStates: some View {
+        let open = TodoEntry(date: model.now, state: TodoModel.shared.state, clock: model.clock)
+        let empty = TodoEntry(date: model.now, open: [], openCount: 0)
+        SectionHeader("Lock Screen", trailing: "Voice to-do")
+        HStack(spacing: 14) {
+            accessory(width: 76, height: 76) { TodoCircularView() }
+            accessory(width: 172, height: 76) { TodoRectangularView(entry: open) }
+        }
+        HStack(spacing: 14) {
+            accessory(width: 172, height: 76) { TodoRectangularView(entry: empty) }
+            accessory(width: 150, height: 26) { TodoInlineView(entry: open) }
+        }
+        .padding(.top, 14)
+
+        SectionHeader("Control Center", trailing: "Controls")
+        HStack(spacing: 22) {
+            control(symbol: "mic.fill", title: "New voice to-do")
+            control(symbol: "pill.fill", title: "Take all")
+        }
+        Text("The mic, the list, the control, the Action button, Siri and the app icon's quick action all open Taken on the To-do tab. The mic, the control and Siri start listening.")
+            .font(.sans(14))
+            .foregroundStyle(theme.fgSubtle)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.top, 18)
+    }
+
+    /// A Control Center button: the system draws the glyph in the control's tint (the look's signal) on a dark plate.
+    private func control(symbol: String, title: String) -> some View {
+        VStack(spacing: 8) {
+            Image(systemName: symbol)
+                .font(.system(size: 24, weight: .semibold))
+                .foregroundStyle(theme.signal)
+                .frame(width: 72, height: 72)
+                .background(theme.lockScreenPlate, in: Circle())
+            Text(title)
+                .font(.sans(12, .sansMedium))
+                .foregroundStyle(theme.fgMuted)
+        }
     }
 
     private func standByTile<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {

@@ -1,5 +1,46 @@
 import SwiftUI
 
+/// The History tab (REDESIGN.md): the streak and 30-day completion, then five weeks of days. A tap on a day opens it, to
+/// see when everything was taken or to log a dose that was forgotten.
+struct HistoryScreen: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+
+    init() {}
+
+    var body: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 0) {
+                TabHeader(title: "History", subtitle: "The last five weeks")
+                if model.hasStack || !model.state.doses.isEmpty {
+                    StatsRow(streak: model.streak, adherence: model.adherence)
+                        .padding(.top, 22)
+                    Card {
+                        HistoryGrid(rows: model.history) { day in
+                            model.sheet = .day(day)
+                        }
+                        .padding(14)
+                    }
+                    .padding(.top, 16)
+                    Text("Tap a day to see it, or to log a dose you forgot.")
+                        .font(.sans(14, .sans, relativeTo: .footnote))
+                        .foregroundStyle(theme.fgSubtle)
+                        .padding(.top, 12)
+                } else {
+                    Text("Your days show up here once your stack is in.")
+                        .font(.sans(16, .sans, relativeTo: .body))
+                        .foregroundStyle(theme.fgMuted)
+                        .padding(.top, 28)
+                }
+            }
+            .padding(.horizontal, 20)
+            .padding(.bottom, 28)
+        }
+        .scrollIndicators(.hidden)
+        .background(theme.bg.ignoresSafeArea())
+    }
+}
+
 /// Five weeks, Monday first, today in the last row. Lit = everything due was taken.
 struct HistoryGrid: View {
     @Environment(\.theme) private var theme
@@ -16,8 +57,10 @@ struct HistoryGrid: View {
             HStack(spacing: 6) {
                 ForEach(0..<7, id: \.self) { index in
                     Text(Fmt.weekdayLetters[index])
-                        .hudFixed(10, theme.fgFaint, tracking: 0.1)
+                        .font(.sans(12, .sansMedium, relativeTo: .caption))
+                        .foregroundStyle(theme.fgSubtle)
                         .frame(maxWidth: .infinity)
+                        .accessibilityHidden(true)
                 }
             }
             .padding(.bottom, 2)
@@ -39,7 +82,7 @@ struct HistoryGrid: View {
     }
 
     private func accessibilityLabel(for cell: HistoryCell) -> String {
-        let date = Fmt.dayHeader(cell.day).capitalized
+        let date = Fmt.longDay(cell.day)
         switch cell.status {
         case .complete: return "\(date), all taken"
         case .partial: return "\(date), partly taken"
@@ -59,8 +102,9 @@ struct DayCell: View {
     }
 
     var body: some View {
+        let shape = RoundedRectangle(cornerRadius: theme.radius.card / 2, style: .continuous)
         ZStack(alignment: .topLeading) {
-            background
+            background(shape)
             mark
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
             Text("\(cell.day.dayOfMonth)")
@@ -72,16 +116,14 @@ struct DayCell: View {
         .aspectRatio(1, contentMode: .fit)
         .overlay {
             if cell.isToday {
-                RoundedRectangle(cornerRadius: theme.radius.control)
-                    .strokeBorder(theme.fg, lineWidth: 1.5)
+                shape.strokeBorder(theme.fg, lineWidth: 1.5)
             }
         }
         .frame(maxWidth: .infinity)
     }
 
     @ViewBuilder
-    private var background: some View {
-        let shape = RoundedRectangle(cornerRadius: theme.radius.control)
+    private func background(_ shape: RoundedRectangle) -> some View {
         switch cell.status {
         case .complete:
             shape
@@ -89,33 +131,31 @@ struct DayCell: View {
                 .overlay(shape.strokeBorder(theme.signalEdge, lineWidth: 1))
         case .partial, .missed, .nothingDue:
             shape
-                .fill(theme.bgRaised)
-                .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
+                .fill(theme.bgInset)
         case .future:
             shape
-                .strokeBorder(theme.lineDash, style: StrokeStyle(lineWidth: 1, dash: [3, 3]))
+                .strokeBorder(theme.line, lineWidth: 1)
         }
     }
 
-    /// Lit check when everything due was taken, a half-lit dash for some, a dim tick for none.
+    /// A lit check when everything due was taken, a half-lit bar for some, a dim dot for none.
     @ViewBuilder
     private var mark: some View {
         switch cell.status {
         case .complete:
             CheckShape()
-                .stroke(theme.signalInk, style: StrokeStyle(lineWidth: 2.2, lineCap: .square, lineJoin: .miter))
-                .frame(width: 18, height: 18)
-                .shadow(color: theme.glow(0.75), radius: 5)
+                .stroke(theme.signalInk, style: StrokeStyle(lineWidth: 2.2, lineCap: .round, lineJoin: .round))
+                .frame(width: 16, height: 16)
                 .offset(y: 3)
         case .partial:
-            Rectangle()
+            Capsule()
                 .fill(theme.signalInk.opacity(0.7))
-                .frame(width: 11, height: 2)
+                .frame(width: 11, height: 3)
                 .offset(y: 3)
         case .missed, .nothingDue:
-            Rectangle()
-                .fill(theme.tick)
-                .frame(width: 6, height: 1.5)
+            Circle()
+                .fill(theme.fgFaint)
+                .frame(width: 3, height: 3)
                 .offset(y: 3)
         case .future:
             EmptyView()
@@ -128,13 +168,13 @@ struct DayCell: View {
         // Full strength: on the signal wash the readable signal is AA in every look, a faded one is not (Blush).
         case .complete: return theme.signalInk
         case .partial: return theme.fgSubtle
-        case .missed, .nothingDue: return theme.fgFaint
-        case .future: return theme.fgFaint.opacity(0.6)
+        case .missed, .nothingDue: return theme.fgSubtle
+        case .future: return theme.fgFaint
         }
     }
 }
 
-/// STREAK 14D and 30D 97%.
+/// The streak and 30-day completion.
 struct StatsRow: View {
     @Environment(\.theme) private var theme
     let streak: Int
@@ -147,27 +187,33 @@ struct StatsRow: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            stat(label: "STREAK", value: "\(streak)D", lit: streak > 0)
-            stat(label: "30D", value: adherence.percent.map { "\($0)%" } ?? "--", lit: false)
+            stat(label: "Streak", value: "\(streak)", unit: streak == 1 ? "day" : "days",
+                 spoken: "Streak, \(streak) \(streak == 1 ? "day" : "days")")
+            stat(label: "Last 30 days", value: adherence.percent.map { "\($0)" } ?? "--", unit: adherence.percent == nil ? "" : "%",
+                 spoken: adherence.percent.map { "Last 30 days, \($0) percent taken" } ?? "Last 30 days, nothing due yet")
         }
     }
 
-    private func stat(label: String, value: String, lit: Bool) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 7) {
-                Lamp(on: lit, size: 5)
-                Text(label).hud(10.5, theme.fgSubtle)
+    private func stat(label: String, value: String, unit: String, spoken: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(label)
+                .font(.sans(14, .sansMedium, relativeTo: .footnote))
+                .foregroundStyle(theme.fgSubtle)
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
+                Text(value)
+                    .font(.mono(28, .monoMedium, relativeTo: .title))
+                    .foregroundStyle(theme.fg)
+                Text(unit)
+                    .font(.sans(16, .sans, relativeTo: .body))
+                    .foregroundStyle(theme.fgMuted)
             }
-            Text(value)
-                .font(.monoFixed(28, .monoMedium))
-                .tracking(-0.5)
-                .foregroundStyle(theme.fg)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.panel))
-        .overlay(RoundedRectangle(cornerRadius: theme.radius.panel).strokeBorder(theme.line, lineWidth: 1))
-        .accessibilityElement(children: .combine)
+        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken)
     }
 }

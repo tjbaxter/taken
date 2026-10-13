@@ -105,18 +105,18 @@ enum ProCopy {
     /// The subline as the paywall sets it: one thought per line.
     static let sublineLines = "Every dose, logged to the minute.\nWidgets, Lock Screen, Siri."
     /// What Pro unlocks, and only that: the log, the history and CSV export stay open without it.
-    static let features = ["ONE TAP LOGGING + TAKE ALL", "HOME, LOCK SCREEN + CONTROL CENTER", "SIRI + THE EVENING NUDGE",
-                           "VOICE TO-DOS"]
+    static let features = ["One-tap logging and Take all", "Home Screen, Lock Screen and Control Center",
+                           "Siri and the evening nudge", "Voice to-dos"]
 
     /// What Siri, Shortcuts and a nudge say when logging needs Pro.
     static let lockedDialog = "Logging needs Taken Pro. Open Taken to continue."
-    /// Settings > REMINDER without Pro: no nudge is scheduled.
-    static let nudgeLocked = "THE NUDGE NEEDS TAKEN PRO"
+    /// Profile > Reminder without Pro: no nudge is scheduled.
+    static let nudgeLocked = "The nudge needs Taken Pro"
     /// Restore found Pro.
     static let restored = "Restored. Taken Pro is on."
     /// Restore found nothing active: true for someone who never bought and for a plan that ended.
     static let nothingToRestore = "No active Taken Pro on this Apple Account."
-    /// Settings > PRO for a lifetime or founding member whose subscription still renews.
+    /// Profile > Taken Pro for a lifetime or founding member whose subscription still renews.
     static let renewingNextToProForGood = "Your subscription still renews. Taken Pro is yours for good, so you can cancel it."
     static let renewalTerms = "Renews automatically until cancelled. Cancel anytime in Settings at least 24 hours before renewal."
     static let lifetimeTerms = "One payment. Yours for good."
@@ -132,10 +132,10 @@ enum ProCopy {
         return total == 1 ? "1 \(word)" : "\(total) \(word)s"
     }
 
-    /// "7 DAYS ON US", for an introductory offer that costs nothing. Nil for any other kind.
+    /// "7 days on us", for an introductory offer that costs nothing. Nil for any other kind.
     static func introTag(_ intro: IntroTerms?) -> String? {
         guard let intro, intro.mode == .onUs else { return nil }
-        return "\(span(intro).uppercased()) ON US"
+        return "\(span(intro)) on us"
     }
 
     /// The card's billed amount and its unit: ("$19.99", "/ year"), ("$49.99", "once").
@@ -158,10 +158,10 @@ enum ProCopy {
         return offer.intro
     }
 
-    /// The primary button: START 7 DAYS ON US while the offer applies, CONTINUE otherwise.
+    /// The primary button: "Start 7 days on us" while the offer applies, "Continue" otherwise.
     static func cta(_ offer: PlanOffer?, eligible: Bool) -> String {
-        if let tag = introTag(liveIntro(offer, eligible: eligible)) { return "START \(tag)" }
-        return "CONTINUE"
+        if let tag = introTag(liveIntro(offer, eligible: eligible)) { return "Start \(tag)" }
+        return "Continue"
     }
 
     /// The plain terms line under the button, for the selected plan.
@@ -194,36 +194,36 @@ enum ProCopy {
         period.value == 1 ? "per \(period.unitWord)" : "every \(period.value) \(period.unitWord)s"
     }
 
-    /// The slim bar under the status panel in locked mode.
+    /// The slim bar under Today's progress line in locked mode.
     static func lockedBar(eligible: Bool?, intro: IntroTerms?) -> String {
-        if eligible == true, let tag = introTag(intro) { return "START \(tag)" }
-        if eligible == false { return "PRO ENDED \u{00B7} TAP TO CONTINUE" }
-        return "TAKEN PRO \u{00B7} TAP TO CONTINUE"
+        if eligible == true, let tag = introTag(intro) { return "Start \(tag)" }
+        if eligible == false { return "Pro ended. Tap to continue" }
+        return "Taken Pro. Tap to continue"
     }
 
-    /// Settings > PRO status line: "FOUNDING MEMBER · PRO FOR LIFE", "PRO YEARLY · RENEWS 12 OCT 2027",
-    /// "PRO LIFETIME", "TRIAL · ENDS 19 OCT", "PRO YEARLY · RENEWING" (the period ended and the renewal has not
-    /// shown yet), "NOT ACTIVE".
+    /// Profile > Taken Pro status line: "Founding member · Pro for life", "Pro yearly · renews 12 Oct 2027",
+    /// "Pro lifetime", "Trial · ends 19 Oct", "Pro yearly · renewing" (the period ended and the renewal has not
+    /// shown yet), "Not active".
     static func statusLine(_ status: ProStatus?, now: Date, timeZone: TimeZone = .current) -> String {
-        guard let status, status.isActive(at: now) else { return "NOT ACTIVE" }
+        guard let status, status.isActive(at: now) else { return "Not active" }
         switch status.reason {
         case .founding:
-            return "FOUNDING MEMBER \u{00B7} PRO FOR LIFE"
+            return "Founding member \u{00B7} Pro for life"
         case .lifetime:
-            return "PRO LIFETIME"
+            return "Pro lifetime"
         case .trial:
-            if status.awaitingRenewal(at: now) { return "TRIAL \u{00B7} RENEWING" }
-            guard let end = status.expiresAt else { return "TRIAL" }
-            return "TRIAL \u{00B7} ENDS \(Fmt.shortDate(end, year: false, timeZone: timeZone))"
+            if status.awaitingRenewal(at: now) { return "Trial \u{00B7} renewing" }
+            guard let end = status.expiresAt else { return "Trial" }
+            return "Trial \u{00B7} ends \(Fmt.shortDate(end, year: false, timeZone: timeZone))"
         case .yearly, .monthly:
-            let name = status.reason == .yearly ? "PRO YEARLY" : "PRO MONTHLY"
-            if status.billingIssue { return "\(name) \u{00B7} BILLING ISSUE" }
-            if status.awaitingRenewal(at: now) { return "\(name) \u{00B7} RENEWING" }
+            let name = status.reason == .yearly ? "Pro yearly" : "Pro monthly"
+            if status.billingIssue { return "\(name) \u{00B7} billing issue" }
+            if status.awaitingRenewal(at: now) { return "\(name) \u{00B7} renewing" }
             guard let end = status.expiresAt else { return name }
-            let verb = status.willRenew == false ? "ENDS" : "RENEWS"
+            let verb = status.willRenew == false ? "ends" : "renews"
             return "\(name) \u{00B7} \(verb) \(Fmt.shortDate(end, year: true, timeZone: timeZone))"
         case .none:
-            return "NOT ACTIVE"
+            return "Not active"
         }
     }
 }

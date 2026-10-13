@@ -52,7 +52,8 @@ final class ThemeTests: XCTestCase {
                                settings: StackSettings(dayStartHour: 2, reminderEnabled: true, theme: .ice))
         state.eraseAll()
         XCTAssertTrue(state.items.isEmpty)
-        XCTAssertEqual(state.settings.dayStartHour, 4, "settings reset")
+        XCTAssertEqual(state.settings.wakeMinutes, StackSettings.defaultWakeMinutes, "settings reset")
+        XCTAssertEqual(state.settings.dayStartHour, StackSettings().dayStartHour)
         XCTAssertFalse(state.settings.reminderEnabled)
         XCTAssertEqual(state.settings.theme, .ice, "the look is how the phone shows Taken, not data")
     }

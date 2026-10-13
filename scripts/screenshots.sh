@@ -124,20 +124,42 @@ for look in blush phosphor ice; do
 done
 shoot 32-todo-recording-blush todo-recording blush
 shoot 33-todo-empty todo-empty
-# Links still reach SwiftUI with the quick action's scene delegate in place: Taken opens its own link after launch
-# (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). taken://pro over
-# TODAY locked opens the paywall; taken://todo opens the To-do tab.
+# The item sheet a tap on an item's name opens (Finasteride, every other day), and voice to-dos away from the app: the
+# Lock Screen mic, list and count, and the Control Center controls.
+shoot 36-item item
+shoot 37-widgets-todo widgets-todo
+shoot 38-widgets-todo-blush widgets-todo blush
+# Links reach the right screen with the quick action's scene delegate in place: Taken opens its own link after launch
+# (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). The demo app writes
+# what is in front to tmp/taken-ui-state.txt (DemoProbe), and the check fails unless the link landed there:
+# taken://pro over Today locked opens the paywall; taken://todo and taken://todo/record open the To-do tab, over Profile.
 link() {
-  local name="$1" screen="$2" url="$3"
+  local name="$1" screen="$2" url="$3" expect="$4"
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
   sleep 1
+  local container
+  container="$(xcrun simctl get_app_container "$udid" "$bundle_id" data)"
+  rm -f "$container/tmp/taken-ui-state.txt"
   xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -open-url "$url" >/dev/null
   sleep 9
   xcrun simctl io "$udid" screenshot --type=png "$out/$name.png" >/dev/null
-  echo "captured $out/$name.png after $url"
+  local state
+  state="$(cat "$container/tmp/taken-ui-state.txt" 2>/dev/null || true)"
+  echo "captured $out/$name.png after $url; in front: $(echo "$state" | tr '\n' ' ')"
+  for line in $expect; do
+    if ! grep -qx "$line" <<<"$state"; then
+      echo "::error::$name: $url should leave $line in front, found: $(echo "$state" | tr '\n' ' ')"
+      exit 1
+    fi
+  done
 }
-link 34-link-pro locked "taken://pro"
-link 35-link-todo today "taken://todo"
+link 34-link-pro locked "taken://pro" "paywall=1"
+link 35-link-todo settings "taken://todo" "tab=todo sheet=none"
+link 39-link-record settings "taken://todo/record" "tab=todo sheet=none"
+if cmp -s "$out/35-link-todo.png" "$out/04-settings.png"; then
+  echo "::error::35-link-todo is the Profile screen it started on: taken://todo did not open the To-do tab"
+  exit 1
+fi
 
 # The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
 if [ -n "$small" ] && [ "$small" != "$udid" ]; then

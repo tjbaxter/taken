@@ -1,38 +1,32 @@
 import SwiftUI
 
+/// How often an item is taken, as the Add sheet and the item sheet offer it.
 enum FrequencyChoice: String, CaseIterable, Identifiable, Sendable {
-    case daily, twice, thrice, alternate, days
+    case daily, alternate, twice, thrice, days
 
     var id: String { rawValue }
 
-    var label: String {
+    var title: String {
         switch self {
-        case .daily: return "DAILY"
-        case .twice: return "2X DAILY"
-        case .thrice: return "3X DAILY"
-        case .alternate: return "ALT DAYS"
-        case .days: return "CUSTOM DAYS"
+        case .daily: return "Daily"
+        case .alternate: return "Every other day"
+        case .twice: return "2x daily"
+        case .thrice: return "3x daily"
+        case .days: return "Days"
         }
     }
 
-    /// Five segments in the item editor. ALT DAYS stays whole so it never reads as two options.
-    var shortLabel: String {
-        switch self {
-        case .daily: return "DAILY"
-        case .twice: return "2X"
-        case .thrice: return "3X"
-        case .alternate: return "ALT DAYS"
-        case .days: return "CUSTOM"
-        }
-    }
+    /// Monday to Friday until other days are picked.
+    static let defaultDays: Set<Int> = [2, 3, 4, 5, 6]
 
+    /// The frequency to save. Days with none picked is every day, so an item is never added that is never due.
     func frequency(weekdays: Set<Int>) -> Frequency {
         switch self {
         case .daily: return .daily(times: 1)
         case .twice: return .daily(times: 2)
         case .thrice: return .daily(times: 3)
         case .alternate: return .alternateDays
-        case .days: return .weekdays(weekdays)
+        case .days: return weekdays.isEmpty ? .daily(times: 1) : .weekdays(weekdays)
         }
     }
 
@@ -48,7 +42,27 @@ enum FrequencyChoice: String, CaseIterable, Identifiable, Sendable {
     }
 }
 
-/// No typing needed: tap chips, pick a frequency, ADD.
+/// What the Add sheet hands to the stack: every picked chip and the typed name, each with its own frequency.
+enum AddPlan {
+    /// The key a typed name's frequency is kept under.
+    static let customKey = "\u{0}custom"
+
+    static func drafts(selected: [String], custom: String?, choices: [String: FrequencyChoice],
+                       days: [String: Set<Int>]) -> [ItemDraft] {
+        func frequency(_ key: String) -> Frequency {
+            (choices[key] ?? .daily).frequency(weekdays: days[key] ?? FrequencyChoice.defaultDays)
+        }
+        var drafts = selected.map { name in
+            ItemDraft(name: name, code: Catalog.presets.first { $0.name == name }?.code, frequency: frequency(name))
+        }
+        if let custom = custom?.trimmingCharacters(in: .whitespacesAndNewlines), !custom.isEmpty {
+            drafts.append(ItemDraft(name: custom, code: nil, frequency: frequency(customKey)))
+        }
+        return drafts
+    }
+}
+
+/// No typing needed: tap chips, set how often each is taken, add.
 struct AddSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -56,7 +70,8 @@ struct AddSheet: View {
     @Environment(\.theme) private var theme
 
     @State private var selected: [String] = []
-    @State private var choice: FrequencyChoice = .daily
+    @State private var choices: [String: FrequencyChoice] = [:]
+    @State private var days: [String: Set<Int>] = [:]
     @State private var showCustom = false
     @State private var customName = ""
     @FocusState private var customFocused: Bool
@@ -71,34 +86,49 @@ struct AddSheet: View {
         customName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    private var count: Int {
-        selected.count + (showCustom && !customTrimmed.isEmpty ? 1 : 0)
+    /// One pick: the key its frequency is kept under, and its name.
+    private struct Pick: Identifiable {
+        let key: String
+        let name: String
+        var id: String { key }
+    }
+
+    /// Every pick in the order it was made, the typed name last.
+    private var picked: [Pick] {
+        var list = selected.map { Pick(key: $0, name: $0) }
+        if showCustom && !customTrimmed.isEmpty { list.append(Pick(key: AddPlan.customKey, name: customTrimmed)) }
+        return list
     }
 
     var body: some View {
         VStack(spacing: 0) {
-            SheetHeader(title: "ADD TO STACK", subtitle: "TAP WHAT YOU TAKE") { dismiss() }
+            SheetHeader(title: "Add to stack", subtitle: "Tap what you take.") { dismiss() }
             ScrollView {
                 VStack(alignment: .leading, spacing: 0) {
-                    SectionHeader(index: "01", title: "PICK", trailing: String(format: "%02d SELECTED", count),
-                                  trailingColor: count > 0 ? theme.signalInk : theme.fgSubtle)
                     FlowLayout(spacing: 8, lineSpacing: 8) {
                         ForEach(Catalog.presets) { preset in
                             chip(preset)
                         }
                         customChip
                     }
+                    .padding(.top, 12)
                     if showCustom {
                         customField
                             .padding(.top, 14)
                             .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    SectionHeader(index: "02", title: "FREQUENCY", trailing: count > 1 ? "APPLIES TO ALL" : nil)
-                    FrequencyPicker(choice: $choice, includeDays: false)
-                    Text("Change any item later in settings.")
-                        .font(.sans(13))
-                        .foregroundStyle(theme.fgSubtle)
-                        .padding(.top, 10)
+                    if !picked.isEmpty {
+                        SectionHeader("How often")
+                        Card {
+                            VStack(spacing: 0) {
+                                ForEach(Array(picked.enumerated()), id: \.element.id) { index, pick in
+                                    if index > 0 { RowDivider() }
+                                    frequencyRow(key: pick.key, name: pick.name)
+                                }
+                            }
+                        }
+                        .transition(.opacity)
+                    }
                 }
                 .padding(.horizontal, 20)
                 .padding(.bottom, 24)
@@ -106,7 +136,7 @@ struct AddSheet: View {
             .scrollDismissesKeyboard(.interactively)
             VStack(spacing: 0) {
                 Rectangle().fill(theme.line).frame(height: 1)
-                PrimaryButton(title: count > 0 ? "ADD (\(count))" : "ADD", enabled: count > 0) {
+                PrimaryButton(title: picked.isEmpty ? "Add" : "Add \(picked.count)", enabled: !picked.isEmpty) {
                     add()
                 }
                 .padding(.horizontal, 20)
@@ -120,8 +150,12 @@ struct AddSheet: View {
         .presentationDragIndicator(.hidden)
         .presentationBackground(theme.bg)
         .animation(.snappy(duration: 0.22), value: showCustom)
+        .animation(.snappy(duration: 0.22), value: picked.count)
         .onAppear {
-            if selected.isEmpty && !model.demoPreselect.isEmpty { selected = model.demoPreselect }
+            if selected.isEmpty && !model.demoPreselect.isEmpty {
+                selected = model.demoPreselect
+                choices = model.demoChoices
+            }
         }
     }
 
@@ -173,8 +207,7 @@ struct AddSheet: View {
                 .frame(height: 44)
                 .overlay(
                     RoundedRectangle(cornerRadius: theme.radius.control)
-                        .strokeBorder(showCustom ? theme.signalEdge : theme.lineDash,
-                                      style: StrokeStyle(lineWidth: 1, dash: [4, 3]))
+                        .strokeBorder(showCustom ? theme.signalEdge : theme.lineStrong, lineWidth: 1)
                 )
                 .contentShape(Rectangle())
         }
@@ -183,24 +216,44 @@ struct AddSheet: View {
     }
 
     private var customField: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("NAME").hud(10.5, theme.fgSubtle)
-            TextField("", text: $customName, prompt: Text("e.g. Lion's Mane").foregroundStyle(theme.fgFaint))
-                .font(.sans(17))
-                .foregroundStyle(theme.fg)
-                .textInputAutocapitalization(.words)
-                .autocorrectionDisabled()
-                .submitLabel(.done)
-                .focused($customFocused)
-                .padding(.horizontal, 14)
-                .frame(height: 50)
-                .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.control))
-                .overlay(
-                    RoundedRectangle(cornerRadius: theme.radius.control)
-                        .strokeBorder(customFocused ? theme.signalEdge : theme.line, lineWidth: 1)
-                )
-            if !customTrimmed.isEmpty {
-                Text("CODE \(Catalog.code(for: customTrimmed))").hud(10.5, theme.fgFaint)
+        TextField("", text: $customName, prompt: Text("Name, like Lion's Mane").foregroundStyle(theme.fgFaint))
+            .font(.sans(17, .sans, relativeTo: .body))
+            .foregroundStyle(theme.fg)
+            .textInputAutocapitalization(.words)
+            .autocorrectionDisabled()
+            .submitLabel(.done)
+            .focused($customFocused)
+            .padding(.horizontal, 14)
+            .frame(height: 50)
+            .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card / 2, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: theme.radius.card / 2, style: .continuous)
+                    .strokeBorder(customFocused ? theme.signalEdge : theme.line, lineWidth: 1)
+            )
+            .accessibilityLabel("Custom item name")
+    }
+
+    /// One picked item and how often it is taken. Days shows the weekdays under it.
+    private func frequencyRow(key: String, name: String) -> some View {
+        let choice = choices[key] ?? .daily
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 12) {
+                Text(name)
+                    .font(.sans(16, .sansMedium, relativeTo: .body))
+                    .foregroundStyle(theme.fg)
+                    .lineLimit(1)
+                Spacer(minLength: 8)
+                FrequencyMenu(choice: Binding(get: { choices[key] ?? .daily }, set: { choices[key] = $0 }))
+                    .accessibilityLabel("\(name), how often")
+            }
+            .padding(.leading, 16)
+            .padding(.trailing, 10)
+            .frame(minHeight: 52)
+            if choice == .days {
+                WeekdayPicker(selection: Binding(get: { days[key] ?? FrequencyChoice.defaultDays },
+                                                 set: { days[key] = $0 }))
+                    .padding(.horizontal, 16)
+                    .padding(.bottom, 12)
             }
         }
     }
@@ -215,13 +268,8 @@ struct AddSheet: View {
     }
 
     private func add() {
-        let frequency = choice.frequency(weekdays: [])
-        var drafts = selected.map { name in
-            ItemDraft(name: name, code: Catalog.presets.first { $0.name == name }?.code, frequency: frequency)
-        }
-        if showCustom && !customTrimmed.isEmpty {
-            drafts.append(ItemDraft(name: customTrimmed, code: nil, frequency: frequency))
-        }
+        let drafts = AddPlan.drafts(selected: selected, custom: showCustom ? customName : nil, choices: choices,
+                                    days: days)
         guard !drafts.isEmpty else { return }
         let dismiss = self.dismiss
         // Adding needs no Pro until the first dose; in locked mode it opens the paywall over this sheet.
@@ -232,50 +280,39 @@ struct AddSheet: View {
     }
 }
 
-/// Compact segmented control in mono caps.
-struct FrequencyPicker: View {
+/// How often, as a compact menu: the choice in the look's readable signal with a chevron.
+struct FrequencyMenu: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
     @Binding var choice: FrequencyChoice
-    var includeDays: Bool
 
-    init(choice: Binding<FrequencyChoice>, includeDays: Bool) {
+    init(choice: Binding<FrequencyChoice>) {
         self._choice = choice
-        self.includeDays = includeDays
-    }
-
-    private var options: [FrequencyChoice] {
-        includeDays ? FrequencyChoice.allCases : [.daily, .twice, .thrice, .alternate]
     }
 
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(Array(options.enumerated()), id: \.element) { index, option in
-                if index > 0 {
-                    Rectangle().fill(theme.line).frame(width: 1)
+        Menu {
+            Picker("How often", selection: Binding(get: { choice }, set: { newValue in
+                if newValue != choice { Haptics.selection(model.hapticsOn) }
+                choice = newValue
+            })) {
+                ForEach(FrequencyChoice.allCases) { option in
+                    Text(option.title).tag(option)
                 }
-                Button {
-                    if choice != option { Haptics.selection(model.hapticsOn) }
-                    choice = option
-                } label: {
-                    Text(includeDays ? option.shortLabel : option.label)
-                        .font(.monoFixed(11, choice == option ? .monoSemibold : .monoMedium))
-                        .tracking(11 * 0.08)
-                        .lineLimit(1)
-                        .minimumScaleFactor(0.7)
-                        .foregroundStyle(choice == option ? theme.buttonText : theme.fgMuted)
-                        .frame(maxWidth: .infinity)
-                        .frame(height: 44)
-                        .background(choice == option ? theme.button : Color.clear)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(PressStyle())
-                .accessibilityAddTraits(choice == option ? .isSelected : [])
             }
+        } label: {
+            HStack(spacing: 6) {
+                Text(choice.title)
+                    .font(.sans(15, .sansMedium, relativeTo: .subheadline))
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+            }
+            .foregroundStyle(theme.signalInk)
+            .padding(.horizontal, 6)
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
         }
-        .background(theme.bgRaised)
-        .clipShape(RoundedRectangle(cornerRadius: theme.radius.control))
-        .overlay(RoundedRectangle(cornerRadius: theme.radius.control).strokeBorder(theme.line, lineWidth: 1))
+        .accessibilityValue(choice.title)
     }
 }
 
@@ -298,12 +335,12 @@ struct WeekdayPicker: View {
                     if on { selection.remove(weekday) } else { selection.insert(weekday) }
                 } label: {
                     Text(Fmt.weekdayLetters[index])
-                        .font(.monoFixed(12, .monoSemibold))
+                        .font(.sans(14, .sansSemibold, relativeTo: .subheadline))
                         .foregroundStyle(on ? theme.buttonText : theme.fgMuted)
                         .frame(maxWidth: .infinity)
                         .frame(height: 44)
-                        .background(on ? theme.button : theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.control))
-                        .overlay(RoundedRectangle(cornerRadius: theme.radius.control).strokeBorder(theme.line, lineWidth: 1))
+                        .background(on ? theme.button : theme.bgInset,
+                                    in: RoundedRectangle(cornerRadius: theme.radius.card / 2, style: .continuous))
                 }
                 .buttonStyle(PressStyle())
                 .accessibilityLabel(["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"][index])

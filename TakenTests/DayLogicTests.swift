@@ -68,8 +68,10 @@ final class DayLogicTests: XCTestCase {
         state.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8), timeZone: london)
         engine = StackEngine(state: state, clock: c)
         XCTAssertFalse(engine.isDue(zinc, on: monday), "taken yesterday: not due")
-        XCTAssertEqual(engine.nextDueDay(for: zinc, after: monday), monday.adding(1), "NEXT: TOMORROW")
-        XCTAssertEqual(Fmt.next(engine.nextDueDay(for: zinc, after: monday), today: monday), "NEXT: TOMORROW")
+        XCTAssertEqual(engine.nextDueDay(for: zinc, after: monday), monday.adding(1), "next due tomorrow")
+        XCTAssertEqual(Fmt.next(engine.nextDueDay(for: zinc, after: monday), today: monday), "Next: tomorrow")
+        XCTAssertEqual(Fmt.next(monday.adding(3), today: monday), "Next: Thursday", "the Not today group names the day")
+        XCTAssertEqual(Fmt.next(monday.adding(9), today: monday), "Next: 21 Oct")
         XCTAssertTrue(engine.isDue(zinc, on: monday.adding(1)), "two days after the last dose: due")
 
         state = StackState(items: [zinc])
@@ -104,8 +106,10 @@ final class DayLogicTests: XCTestCase {
         XCTAssertTrue(engine.isDue(mwf, on: monday.adding(2)))
         XCTAssertFalse(engine.isDue(mwf, on: monday.adding(6)), "Sunday")
         XCTAssertEqual(engine.nextDueDay(for: mwf, after: monday.adding(4)), monday.adding(7), "Friday to next Monday")
-        XCTAssertEqual(Fmt.frequency(.weekdays([2, 4, 6])), "MON WED FRI")
-        XCTAssertEqual(Fmt.frequency(.weekdays([2, 3, 4, 5, 6])), "WEEKDAYS")
+        XCTAssertEqual(Fmt.frequency(.weekdays([2, 4, 6])), "Mon Wed Fri")
+        XCTAssertEqual(Fmt.frequency(.weekdays([2, 3, 4, 5, 6])), "Weekdays")
+        XCTAssertEqual(Fmt.frequency(.alternateDays), "Every other day")
+        XCTAssertEqual(Fmt.frequency(.daily(times: 2)), "2x daily")
     }
 
     func testMultiDoseCompletion() {
@@ -324,14 +328,14 @@ final class DayLogicTests: XCTestCase {
         let today = engine.sheetSummary(for: DayKey(year: 2026, month: 10, day: 12))
         let sunday = engine.sheetSummary(for: DayKey(year: 2026, month: 10, day: 11))
 
-        XCTAssertEqual(Fmt.daySheetStatus(today, isToday: true), "1/2 TAKEN \u{00B7} 1 PENDING")
-        XCTAssertEqual(Fmt.daySheetStatus(sunday, isToday: false), "1/2 TAKEN \u{00B7} 1 MISSING")
-        XCTAssertEqual(Fmt.dayItemStatus(today.items[1], isToday: true), "DAILY \u{00B7} PENDING")
-        XCTAssertEqual(Fmt.dayItemStatus(sunday.items[1], isToday: false), "DAILY \u{00B7} MISSED")
-        XCTAssertEqual(Fmt.dayItemStatus(today.items[0], isToday: true), "DAILY \u{00B7} TAKEN")
+        XCTAssertEqual(Fmt.daySheetStatus(today, isToday: true), "1 of 2 taken \u{00B7} 1 pending")
+        XCTAssertEqual(Fmt.daySheetStatus(sunday, isToday: false), "1 of 2 taken \u{00B7} 1 missed")
+        XCTAssertEqual(Fmt.dayItemStatus(today.items[1], isToday: true), "Daily \u{00B7} pending")
+        XCTAssertEqual(Fmt.dayItemStatus(sunday.items[1], isToday: false), "Daily \u{00B7} missed")
+        XCTAssertEqual(Fmt.dayItemStatus(today.items[0], isToday: true), "Daily \u{00B7} taken")
     }
 
-    func testStackHeaderCountsItemsLeftNotItemsScheduled() {
+    func testTodaysProgressLineCountsDosesAsTheWidgetsDo() {
         let c = londonClock()
         let created = at(2026, 10, 1, 8)
         let vd3 = makeItem("Vitamin D3", "VD3", created: created, sortIndex: 0)
@@ -342,13 +346,14 @@ final class DayLogicTests: XCTestCase {
         state.logDose(itemId: vd3.id, at: at(2026, 10, 12, 8), timeZone: london)
         state.logDose(itemId: fish.id, at: at(2026, 10, 12, 8), timeZone: london)
         let now = at(2026, 10, 12, 21)
-        XCTAssertEqual(Fmt.stackProgress(StackEngine(state: state, clock: c).todaySummary(now: now)), "1 LEFT")
+        let partly = StackEngine(state: state, clock: c).todaySummary(now: now)
+        XCTAssertEqual(Fmt.progress(partly), "2 of 3 taken", "doses: Fish Oil is 1 of 2, the not-due item is not counted")
+        XCTAssertEqual(WidgetSnapshot(state: state, now: now, timeZone: london).takenDue, 2, "the widget says 2/3 too")
         state.logDose(itemId: fish.id, at: at(2026, 10, 12, 19), timeZone: london)
-        XCTAssertEqual(Fmt.stackProgress(StackEngine(state: state, clock: c).todaySummary(now: now)), "2 TAKEN",
-                       "the not-due item is not counted")
+        XCTAssertEqual(Fmt.progress(StackEngine(state: state, clock: c).todaySummary(now: now)), "All taken")
         var onlyZinc = StackState(items: [zinc])
         onlyZinc.logDose(itemId: zinc.id, at: at(2026, 10, 11, 8), timeZone: london)
-        XCTAssertNil(Fmt.stackProgress(StackEngine(state: onlyZinc, clock: c).todaySummary(now: now)), "nothing due today")
+        XCTAssertNil(Fmt.progress(StackEngine(state: onlyZinc, clock: c).todaySummary(now: now)), "nothing due today")
     }
 
     // MARK: Stats
@@ -493,7 +498,7 @@ final class DayLogicTests: XCTestCase {
 
         // The day sheet still offers the archived days, and a dose logged there counts.
         let row = after.sheetSummary(for: thursday).items.first { $0.item.id == mag.id }
-        XCTAssertEqual(row.map { Fmt.dayItemStatus($0, isToday: false) }, "DAILY \u{00B7} ARCHIVED")
+        XCTAssertEqual(row.map { Fmt.dayItemStatus($0, isToday: false) }, "Daily \u{00B7} archived")
         state.logDose(itemId: mag.id, at: at(2026, 10, 8, 21), timeZone: london)
         XCTAssertEqual(StackEngine(state: state, clock: c).summary(for: thursday).dueDoses, 2)
     }

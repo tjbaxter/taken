@@ -46,6 +46,31 @@ struct DayKey: Hashable, Comparable, Codable, Sendable {
     func distance(to other: DayKey) -> Int { other.ordinal - ordinal }
 
     static func < (lhs: DayKey, rhs: DayKey) -> Bool { lhs.ordinal < rhs.ordinal }
+
+    /// "2026-10-13"
+    var iso: String {
+        let (year, month, day) = ymd
+        return String(format: "%04d-%02d-%02d", year, month, day)
+    }
+
+    /// "2026-10-13", a date that exists. Nil for anything else.
+    init?(iso text: String) {
+        let parts = text.trimmingCharacters(in: .whitespaces).split(separator: "-", omittingEmptySubsequences: false)
+        guard parts.count == 3, parts[0].count == 4, let year = Int(parts[0]), let month = Int(parts[1]),
+              let day = Int(parts[2]), (1...12).contains(month), (1...31).contains(day) else { return nil }
+        let key = DayKey(year: year, month: month, day: day)
+        // 31 February would land in March: not a date.
+        guard key.ymd.month == month, key.ymd.day == day else { return nil }
+        self = key
+    }
+
+    /// The calendar date a moment falls on in a time zone (midnight to midnight, no day start).
+    init(calendarDateOf date: Date, in timeZone: TimeZone) {
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let c = calendar.dateComponents([.year, .month, .day], from: date)
+        self.init(year: c.year ?? 1970, month: c.month ?? 1, day: c.day ?? 1)
+    }
 }
 
 /// Maps absolute moments to the day the user was living, using the day-start hour.

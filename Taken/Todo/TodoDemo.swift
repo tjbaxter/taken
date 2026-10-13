@@ -13,13 +13,16 @@ enum TodoDemo {
             let day = calendar.date(byAdding: .day, value: dayOffset, to: start) ?? start
             return calendar.date(bySettingHour: hour, minute: minute, second: 0, of: day) ?? day
         }
+        func day(_ dayOffset: Int) -> DayKey {
+            DayKey(calendarDateOf: at(dayOffset: dayOffset, 12), in: timeZone)
+        }
         let morning = UUID()
         let lunch = UUID()
         let evening = UUID()
         var tasks: [TodoTask] = [
-            TodoTask(title: "Take the bins out", dueDate: at(dayOffset: 0, 22, 30), hasTime: true,
+            TodoTask(title: "Take the bins out", due: .time(at(dayOffset: 0, 22, 30)),
                      createdAt: at(dayOffset: 0, 18, 5), noteId: evening, order: 0),
-            TodoTask(title: "Renew the car insurance", dueDate: at(dayOffset: 3, 12), hasTime: false,
+            TodoTask(title: "Renew the car insurance", due: .day(day(3)),
                      createdAt: at(dayOffset: 0, 12, 40), noteId: lunch, order: 0),
             TodoTask(title: "Send Mum the photos", createdAt: at(dayOffset: 0, 12, 40), noteId: lunch, order: 1),
             TodoTask(title: "Buy milk", createdAt: at(dayOffset: 0, 8, 12), completedAt: at(dayOffset: 0, 18, 12),
@@ -31,11 +34,11 @@ enum TodoDemo {
             // What the recording screenshot's ramble becomes.
             let note = UUID()
             tasks += [
-                TodoTask(title: "Call the dentist", dueDate: at(dayOffset: 1, 9), hasTime: true,
+                TodoTask(title: "Call the dentist", due: .time(at(dayOffset: 1, 9)),
                          createdAt: at(dayOffset: 0, 21, 30), noteId: note, order: 0),
-                TodoTask(title: "Pick up the dry cleaning", dueDate: at(dayOffset: 1, 9), hasTime: true,
+                TodoTask(title: "Pick up the dry cleaning", due: .time(at(dayOffset: 1, 9)),
                          createdAt: at(dayOffset: 0, 21, 30), noteId: note, order: 1),
-                TodoTask(title: "Email Sam the deck", dueDate: at(dayOffset: 1, 9), hasTime: true,
+                TodoTask(title: "Email Sam the deck", due: .time(at(dayOffset: 1, 9)),
                          createdAt: at(dayOffset: 0, 21, 30), noteId: note, order: 2),
                 TodoTask(title: "Book flights for March", createdAt: at(dayOffset: 0, 21, 30), noteId: note, order: 3),
             ]

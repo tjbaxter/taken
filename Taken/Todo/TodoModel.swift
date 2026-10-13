@@ -48,6 +48,8 @@ final class TodoModel {
     private(set) var completing: Set<UUID> = []
     /// A swiped-away task, offered back for a few seconds.
     private(set) var deleted: TodoTask?
+    /// The note being sorted: saved whole already, kept out of the list until its tasks replace it.
+    private(set) var sortingNote: UUID?
     /// The moment the list reads from (due labels, Done today). Moves with the clock while the tab is open.
     private(set) var now: Date
 
@@ -112,7 +114,7 @@ final class TodoModel {
     // MARK: Reading
 
     var clock: DayClock { DayClock(dayStartHour: dayStartHour) }
-    var openTasks: [TodoTask] { state.openTasks(clock: clock) }
+    var openTasks: [TodoTask] { state.openTasks(clock: clock).filter { $0.id != sortingNote } }
     var doneToday: [TodoTask] { state.doneTasks(on: clock.day(for: now), clock: clock) }
     var isEmpty: Bool { openTasks.isEmpty && doneToday.isEmpty }
     var isListening: Bool { phase == .listening }
@@ -302,12 +304,15 @@ final class TodoModel {
         return elapsed >= nothingHeardAfter && quiet >= silenceToStop
     }
 
-    /// Stops listening and sorts what was said.
+    /// Stops listening and sorts what was said. Locking the phone or leaving Taken mid-note lands here too, so iOS is
+    /// asked for the time to finish: the words are saved the moment they are known, sorted or not.
     func finishListening() async {
         guard phase == .listening, let capture else { return }
         phase = .sorting
         watchTask?.cancel()
         TodoHaptics.light(hapticsOn)
+        let background = BackgroundTime.begin("Saving a voice note")
+        defer { background.end() }
         let finalText = await capture.finish()
         eventsTask?.cancel()
         self.capture = nil
@@ -330,10 +335,12 @@ final class TodoModel {
         guard !words.isEmpty, phase == .idle else { return }
         attach(app)
         whenAllowed(app) { [weak self] in
-            guard let self else { return }
+            guard let self, self.phase == .idle else { return }
+            self.phase = .sorting
+            self.transcript = words
             Task {
-                self.phase = .sorting
-                self.transcript = words
+                let background = BackgroundTime.begin("Saving typed to-dos")
+                defer { background.end() }
                 await self.save(note: words)
             }
         }
@@ -341,12 +348,19 @@ final class TodoModel {
 
     private func save(note words: String) async {
         let context = TodoContext(now: clockNow(), timeZone: .current, dayStartHour: dayStartHour)
+        // Saved whole first, out of sight, so nothing said is lost if iOS ends Taken before the model answers.
+        let whole = write { $0.add(TodoValidation.wholeNote(words), at: context.now) }?.first
+        sortingNote = whole?.id
         let extractor = self.extractor ?? TodoExtractors.best()
         self.extractor = nil
         let extraction = await Self.extract(words, with: extractor, context: context)
         let drafts = extraction.drafts.isEmpty ? TodoValidation.wholeNote(words) : extraction.drafts
-        let added = withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
-            write { $0.add(drafts, at: context.now) } ?? []
+        let added = withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { () -> [TodoTask] in
+            defer { sortingNote = nil }
+            if let whole {
+                return write { $0.replaceNote(whole.id, with: drafts, at: context.now) } ?? [whole]
+            }
+            return write { $0.add(drafts, at: context.now) } ?? []
         }
         transcript = ""
         phase = .idle
@@ -401,11 +415,8 @@ final class TodoModel {
         }
     }
 
-    func edit(_ id: UUID, title: String, dueDate: Date?, hasTime: Bool) {
-        // A day without a time is kept at noon that day, as the model's are.
-        let calendar = clock.calendar
-        let due = dueDate.map { hasTime ? $0 : (calendar.date(bySettingHour: 12, minute: 0, second: 0, of: $0) ?? $0) }
-        write { $0.update(id, title: title, dueDate: due, hasTime: hasTime) }
+    func edit(_ id: UUID, title: String, due: TodoDue?) {
+        write { $0.update(id, title: title, due: due) }
     }
 
     func delete(_ task: TodoTask) {
@@ -446,7 +457,7 @@ final class TodoModel {
             now = clockNow()
             if !isDemo {
                 let tasks = result.state.tasks
-                Task { await TodoNotifications.reschedule(tasks: tasks, now: Date()) }
+                Task { await TodoNotificationScheduler.shared.reschedule(tasks) }
                 WidgetCenter.shared.reloadTimelines(ofKind: TodoCaptureRoute.widgetKind)
             }
             return result.value
@@ -563,22 +574,37 @@ enum TodoNotifications {
 
     /// Pure planning, unit tested: open tasks with a clock time still to come, soonest first.
     static func plan(tasks: [TodoTask], now: Date, clock: DayClock = DayClock(dayStartHour: 4)) -> [Plan] {
-        tasks.filter { !$0.isDone && $0.hasTime && ($0.dueDate ?? .distantPast) > now }
-            .sorted { ($0.dueDate ?? .distantPast) < ($1.dueDate ?? .distantPast) }
-            .prefix(limit)
-            .compactMap { task in
-                guard let due = task.dueDate else { return nil }
-                return Plan(identifier: prefix + task.id.uuidString, fireDate: due, title: task.title,
-                            body: "Due \(TodoText.clockTime(due, clock: clock))")
-            }
+        tasks.compactMap { task -> (task: TodoTask, due: Date)? in
+            guard !task.isDone, let due = task.dueTime, due > now else { return nil }
+            return (task, due)
+        }
+        .sorted { $0.due < $1.due }
+        .prefix(limit)
+        .map { open in
+            Plan(identifier: identifier(open.task.id), fireDate: open.due, title: open.task.title,
+                 body: "Due \(TodoText.clockTime(open.due, clock: clock))")
+        }
     }
+
+    static func identifier(_ id: UUID) -> String { prefix + id.uuidString }
 
     static func isTodo(_ identifier: String) -> Bool { identifier.hasPrefix(prefix) }
 
-    static func reschedule(tasks: [TodoTask], now: Date) async {
+    /// Delivered due-time notifications to withdraw: every one whose to-do is done or deleted.
+    static func staleDelivered(_ identifiers: [String], tasks: [TodoTask]) -> [String] {
+        let open = Set(tasks.filter { !$0.isDone }.map { identifier($0.id) })
+        return identifiers.filter { isTodo($0) && !open.contains($0) }
+    }
+
+    /// Replaces every pending due-time notification with a fresh plan and withdraws delivered ones that no longer
+    /// apply. Runs through `TodoNotificationScheduler`, one rebuild at a time.
+    static func apply(tasks: [TodoTask], now: Date) async {
         let center = UNUserNotificationCenter.current()
         let ours = await center.pendingNotificationRequests().map(\.identifier).filter(isTodo)
         if !ours.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ours) }
+        let delivered = await center.deliveredNotifications().map(\.request.identifier)
+        let stale = staleDelivered(delivered, tasks: tasks)
+        if !stale.isEmpty { center.removeDeliveredNotifications(withIdentifiers: stale) }
         let settings = await center.notificationSettings()
         switch settings.authorizationStatus {
         case .authorized, .provisional, .ephemeral: break
@@ -597,5 +623,56 @@ enum TodoNotifications {
             let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
             try? await center.add(UNNotificationRequest(identifier: plan.identifier, content: content, trigger: trigger))
         }
+    }
+}
+
+/// Rebuilds the due-time notifications one run at a time, the newest tasks winning: two changes a moment apart never
+/// interleave, so a finished to-do's notification is never left scheduled. Every rebuild comes through here: a change to
+/// the list, Taken coming to the front, and notifications being allowed.
+actor TodoNotificationScheduler {
+    static let shared = TodoNotificationScheduler { tasks in
+        await TodoNotifications.apply(tasks: tasks, now: Date())
+    }
+
+    private let apply: @Sendable ([TodoTask]) async -> Void
+    private var latest: [TodoTask]?
+    private var running = false
+
+    init(apply: @escaping @Sendable ([TodoTask]) async -> Void) {
+        self.apply = apply
+    }
+
+    /// Asks for a rebuild with these tasks. While one runs, a newer request replaces any waiting one and runs next.
+    func reschedule(_ tasks: [TodoTask]) async {
+        latest = tasks
+        guard !running else { return }
+        running = true
+        while let next = latest {
+            latest = nil
+            await apply(next)
+        }
+        running = false
+    }
+}
+
+/// Time iOS gives Taken to finish a voice note after it leaves the foreground (a lock, a swipe home).
+@MainActor
+final class BackgroundTime {
+    private var identifier: UIBackgroundTaskIdentifier = .invalid
+
+    private init() {}
+
+    static func begin(_ name: String) -> BackgroundTime {
+        let time = BackgroundTime()
+        time.identifier = UIApplication.shared.beginBackgroundTask(withName: name) { [weak time] in
+            time?.end()
+        }
+        return time
+    }
+
+    func end() {
+        guard identifier != .invalid else { return }
+        UIApplication.shared.endBackgroundTask(identifier)
+        identifier = .invalid
     }
 }
