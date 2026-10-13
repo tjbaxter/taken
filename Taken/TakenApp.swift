@@ -18,6 +18,8 @@ struct TakenApp: App {
                 .tint(model.theme.signalInk)
                 .dynamicTypeSize(...DynamicTypeSize.accessibility1)
                 .onOpenURL { model.handle(url: $0) }
+                // taken://todo and taken://todo/record (the Lock Screen to-do widget): the To-do tab, listening or not.
+                .onOpenURL { TodoCaptureRoute.shared.handle(url: $0) }
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.didBecomeActive() }
@@ -47,6 +49,11 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         let request = response.notification.request
+        // A to-do's due-time notification opens the To-do tab.
+        if TodoNotifications.isTodo(request.identifier) {
+            await MainActor.run { TodoCaptureRoute.shared.showList() }
+            return
+        }
         let day = Reminders.nudgeDay(identifier: request.identifier, userInfo: request.content.userInfo)
         let action = response.actionIdentifier
         let now = Date()

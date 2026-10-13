@@ -18,6 +18,10 @@ struct RootView: View {
                 WidgetGallery(mode: .locked)
             } else if model.isDemo && model.launchScreen == "widgets-standby" {
                 WidgetGallery(mode: .standBy)
+            } else if model.isDemo && TodoModel.opensOnTodo(model.launchScreen) {
+                // -screen todo and todo-recording (SPEC 3.10).
+                TodoRootView()
+                    .paywallHost(.root)
             } else {
                 main
             }

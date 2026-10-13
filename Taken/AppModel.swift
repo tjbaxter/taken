@@ -665,6 +665,8 @@ final class AppModel {
 
     func eraseAll() {
         write { $0.eraseAll() }
+        // The to-dos go too (the first voice note stays used).
+        TodoModel.shared.eraseAll()
         expandedItemID = nil
         refreshShortcuts()
     }

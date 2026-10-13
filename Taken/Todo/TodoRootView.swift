@@ -142,13 +142,18 @@ struct TodoRootView: View {
                         .strikethrough(done || filling, color: theme.fgSubtle)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .multilineTextAlignment(.leading)
-                    if let trailing = done ? todo.doneLabel(task) : todo.dueLabel(task) {
-                        Text(trailing)
-                            .font(.mono(13, .monoMedium, relativeTo: .footnote))
-                            .monospacedDigit()
-                            .foregroundStyle(done ? theme.fgFaint : (todo.isOverdue(task) ? theme.signalInk : theme.fgSubtle))
-                            .lineLimit(1)
-                            .fixedSize()
+                    if let parts = trailingParts(task) {
+                        HStack(alignment: .firstTextBaseline, spacing: 4) {
+                            if let day = parts.day {
+                                Text(day).font(.sans(14, .sans, relativeTo: .footnote))
+                            }
+                            if let time = parts.time {
+                                Text(time).font(.mono(13, .monoMedium, relativeTo: .footnote))
+                            }
+                        }
+                        .foregroundStyle(done ? theme.fgFaint : (todo.isOverdue(task) ? theme.signalInk : theme.fgSubtle))
+                        .lineLimit(1)
+                        .fixedSize()
                     }
                 }
                 .padding(.vertical, 10)
@@ -173,6 +178,15 @@ struct TodoRootView: View {
         .accessibilityAction { todo.toggle(task) }
         .accessibilityAction(named: "Edit") { editing = task }
         .accessibilityAction(named: "Delete") { todo.delete(task) }
+    }
+
+    /// "Tomorrow 09:00": the day in Geist, the time in Geist Mono. A done task shows when it was done.
+    private func trailingParts(_ task: TodoTask) -> (day: String?, time: String?)? {
+        if task.isDone {
+            guard let time = todo.doneLabel(task) else { return nil }
+            return (day: nil, time: time)
+        }
+        return todo.dueParts(task)
     }
 
     private var emptyState: some View {

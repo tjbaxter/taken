@@ -117,6 +117,7 @@ final class TodoModel {
     var isListening: Bool { phase == .listening }
 
     func dueLabel(_ task: TodoTask) -> String? { TodoText.dueLabel(task, now: now, clock: clock) }
+    func dueParts(_ task: TodoTask) -> (day: String?, time: String?)? { TodoText.dueParts(task, now: now, clock: clock) }
     func isOverdue(_ task: TodoTask) -> Bool { TodoText.isOverdue(task, now: now, clock: clock) }
 
     /// "16:00" for a done task: when it was done.
@@ -218,10 +219,16 @@ final class TodoModel {
         let capture = SpeechCapture()
         do {
             try await capture.start(locale: .current)
-        } catch {
+        } catch SpeechCaptureError.unavailable {
             self.extractor = nil
             blocker = .unavailable
             phase = .idle
+            return
+        } catch {
+            // A call or another app has the microphone.
+            self.extractor = nil
+            phase = .idle
+            show(TodoCopy.microphoneBusy)
             return
         }
         self.capture = capture
@@ -230,8 +237,8 @@ final class TodoModel {
         noiseFloor = -60
         wordCount = 0
         phase = .listening
+        // No spoken "listening" for VoiceOver: the microphone would hear it. The haptic and the button say it.
         TodoHaptics.soft(hapticsOn)
-        announce("Listening.")
         eventsTask = Task { [weak self] in
             for await event in capture.events {
                 self?.handle(event)
@@ -499,12 +506,13 @@ enum TodoCopy {
     static let microphoneOff = "Microphone access is off for Taken."
     static let speechOff = "Speech recognition is off for Taken."
     static let unavailable = "Voice to-dos need on-device speech recognition, which this iPhone does not have for your language."
+    static let microphoneBusy = "The microphone is busy. Try again in a moment."
     static let openSettings = "Open Settings"
     static let typeInstead = "Type it instead"
     static let doneToday = "Done today"
 
     static let all: [String] = [empty, listening, sorting, tapToFinish, needsAppleIntelligence, couldNotSort,
-                                microphoneOff, speechOff, unavailable, openSettings, typeInstead, doneToday]
+                                microphoneOff, speechOff, unavailable, microphoneBusy, openSettings, typeInstead, doneToday]
 }
 
 @MainActor

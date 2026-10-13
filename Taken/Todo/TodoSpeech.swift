@@ -161,6 +161,8 @@ final class AudioInput: @unchecked Sendable {
     func prepare() throws -> AVAudioFormat {
         let session = AVAudioSession.sharedInstance()
         try session.setCategory(.record, mode: .measurement, options: [.duckOthers])
+        // The tap on the mic and the stop still get their haptics while recording.
+        try? session.setAllowHapticsAndSystemSoundsDuringRecording(true)
         try session.setActive(true, options: .notifyOthersOnDeactivation)
         let format = engine.inputNode.outputFormat(forBus: 0)
         guard format.sampleRate > 0, format.channelCount > 0 else {
@@ -188,7 +190,10 @@ final class AudioInput: @unchecked Sendable {
             throw SpeechCaptureError.noMicrophone
         }
         let center = NotificationCenter.default
-        let interruption = center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { _ in
+        let interruption = center.addObserver(forName: AVAudioSession.interruptionNotification, object: nil, queue: nil) { note in
+            // Only a call or Siri taking the microphone; the end of someone else's interruption is not ours to act on.
+            guard let raw = note.userInfo?[AVAudioSessionInterruptionTypeKey] as? UInt,
+                  AVAudioSession.InterruptionType(rawValue: raw) == .began else { return }
             onInterruption()
         }
         let change = center.addObserver(forName: .AVAudioEngineConfigurationChange, object: engine, queue: nil) { _ in

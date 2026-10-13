@@ -119,6 +119,24 @@ jobs:
             fi
           done
           test -f "$app/Metadata.appintents/extract.actionsdata" && echo "App Intents metadata present"
+          # Voice to-dos (SPEC 3.10): Foundation Models exists only on iOS 26, so it must be weak-linked or iOS 17 to 25
+          # would fail to launch.
+          loads="$(otool -l "$app/Taken")"
+          if grep -q "FoundationModels.framework" <<<"$loads"; then
+            linked="$(grep -B2 "FoundationModels.framework" <<<"$loads")"
+            echo "$linked"
+            if grep -q "LC_LOAD_WEAK_DYLIB" <<<"$linked"; then
+              echo "FoundationModels is weak-linked"
+            else
+              echo "::error::FoundationModels is strongly linked; iOS 17 to 25 would not launch"
+              exit 1
+            fi
+          else
+            echo "FoundationModels is not linked"
+          fi
+          for key in NSMicrophoneUsageDescription NSSpeechRecognitionUsageDescription UIApplicationShortcutItems; do
+            /usr/libexec/PlistBuddy -c "Print :$key" "$app/Info.plist" >/dev/null || { echo "::error::$key missing"; exit 1; }
+          done
           # The looks (SPEC 4): Signal is the primary icon, every other look ships an alternate icon, and the app is no
           # longer forced dark (Blush is light; each look sets its own colour scheme).
           for icon in AppIcon-Blush AppIcon-Phosphor AppIcon-Ice; do

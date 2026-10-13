@@ -234,6 +234,12 @@ enum TodoText {
     /// "16:00" today, "Today", "Tomorrow 09:00", "Thu", "14 Oct 16:00", "Yesterday". Days are the days being lived
     /// (the day-start hour), the same as everywhere else in Taken.
     static func dueLabel(_ task: TodoTask, now: Date, clock: DayClock) -> String? {
+        guard let parts = dueParts(task, now: now, clock: clock) else { return nil }
+        return [parts.day, parts.time].compactMap { $0 }.joined(separator: " ")
+    }
+
+    /// The day word and the clock time of a due label, apart, so the time can be set in mono: ("Tomorrow", "09:00").
+    static func dueParts(_ task: TodoTask, now: Date, clock: DayClock) -> (day: String?, time: String?)? {
         guard let due = task.dueDate else { return nil }
         let today = clock.day(for: now)
         let day = task.hasTime ? clock.day(for: due) : calendarDay(due, clock: clock)
@@ -249,7 +255,7 @@ enum TodoText {
             let (_, month, dayOfMonth) = day.ymd
             dayWord = "\(dayOfMonth) \(months[max(0, min(11, month - 1))])"
         }
-        return [dayWord, time].compactMap { $0 }.joined(separator: " ")
+        return (dayWord, time)
     }
 
     /// Past its time (or its day) and still open.

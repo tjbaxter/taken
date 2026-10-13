@@ -115,6 +115,15 @@ shoot 26-widgets-standby-signal widgets-standby signal
 shoot 27-settings-locked settings-locked
 shoot 28-paywall-no-yearly paywall-no-yearly
 
+# Voice to-dos (SPEC 3.10): the To-do tab with demo tasks (a time today, tomorrow at 09:00, done today) in every look,
+# and listening with the words on screen.
+shoot 29-todo todo
+shoot 30-todo-recording todo-recording
+for look in blush phosphor ice; do
+  shoot "31-todo-$look" todo "$look"
+done
+shoot 32-todo-recording-blush todo-recording blush
+
 # The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
 if [ -n "$small" ] && [ "$small" != "$udid" ]; then
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
