@@ -105,7 +105,8 @@ enum ProCopy {
     /// The subline as the paywall sets it: one thought per line.
     static let sublineLines = "Every dose, logged to the minute.\nWidgets, Lock Screen, Siri."
     /// What Pro unlocks, and only that: the log, the history and CSV export stay open without it.
-    static let features = ["ONE TAP LOGGING + TAKE ALL", "HOME, LOCK SCREEN + CONTROL CENTER", "SIRI + THE EVENING NUDGE"]
+    static let features = ["ONE TAP LOGGING + TAKE ALL", "HOME, LOCK SCREEN + CONTROL CENTER", "SIRI + THE EVENING NUDGE",
+                           "VOICE TO-DOS"]
 
     /// What Siri, Shortcuts and a nudge say when logging needs Pro.
     static let lockedDialog = "Logging needs Taken Pro. Open Taken to continue."

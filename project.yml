@@ -60,6 +60,9 @@ targets:
         ASSETCATALOG_COMPILER_INCLUDE_ALL_APPICON_ASSETS: NO
         ENABLE_PREVIEWS: YES
         CODE_SIGN_STYLE: Automatic
+        # Voice to-dos use Apple Foundation Models on iOS 26 only. Weak-linked, so iOS 17 to 25 never need the framework
+        # at launch (every use sits behind #available(iOS 26.0, *)).
+        OTHER_LDFLAGS: ["$(inherited)", "-weak_framework", "FoundationModels"]
       configs:
         Release:
           CODE_SIGN_STYLE: Manual

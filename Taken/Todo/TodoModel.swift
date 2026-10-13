@@ -1,0 +1,583 @@
+import Observation
+import SwiftUI
+import UIKit
+import UserNotifications
+import WidgetKit
+
+/// The To-do tab: one tap starts listening, the words show as they are said, a pause of about 1.5 s (or a second tap)
+/// stops, and the on-device model sorts the ramble into tasks. Reads and writes go through `TodoStore`.
+@MainActor
+@Observable
+final class TodoModel {
+    static let shared = TodoModel.fromLaunchArguments()
+
+    enum Phase: Equatable, Sendable {
+        case idle
+        /// Permissions and the microphone are coming up.
+        case starting
+        case listening
+        /// The note is being sorted into tasks.
+        case sorting
+    }
+
+    /// Why voice capture cannot run right now.
+    enum Blocker: Equatable, Sendable {
+        case microphone
+        case speech
+        /// No on-device speech recognition for this language on this iPhone.
+        case unavailable
+    }
+
+    let store: TodoStore
+    let isDemo: Bool
+    let launchScreen: String?
+    private let clockNow: @Sendable () -> Date
+
+    private(set) var state: TodoState
+    private(set) var phase: Phase = .idle
+    /// What has been heard so far.
+    private(set) var transcript = ""
+    /// Recent input levels from 0 to 1, oldest first, for the waveform.
+    private(set) var levels: [Double]
+    /// A one-line note under the list ("Nothing heard...", "Automatic sorting needs Apple Intelligence.").
+    private(set) var notice: String?
+    private(set) var blocker: Blocker?
+    /// Tasks that just came in from a note, drawn with a short highlight.
+    private(set) var arrived: Set<UUID> = []
+    /// Tasks whose check is filling before they move to Done today.
+    private(set) var completing: Set<UUID> = []
+    /// A swiped-away task, offered back for a few seconds.
+    private(set) var deleted: TodoTask?
+    /// The moment the list reads from (due labels, Done today). Moves with the clock while the tab is open.
+    private(set) var now: Date
+
+    @ObservationIgnored private var capture: SpeechCapture?
+    @ObservationIgnored private var extractor: (any TaskExtractor)?
+    @ObservationIgnored private var eventsTask: Task<Void, Never>?
+    @ObservationIgnored private var watchTask: Task<Void, Never>?
+    @ObservationIgnored private var noticeTask: Task<Void, Never>?
+    @ObservationIgnored private var deletedTask: Task<Void, Never>?
+    @ObservationIgnored private var startedAt = Date()
+    @ObservationIgnored private var lastVoiceAt = Date()
+    @ObservationIgnored private var noiseFloor: Float = -60
+    @ObservationIgnored private var wordCount = 0
+    @ObservationIgnored private var levelTick = 0
+    @ObservationIgnored private(set) var dayStartHour = 4
+    @ObservationIgnored private var hapticsOn = true
+
+    nonisolated static let levelCount = 32
+    /// Quiet after speech this long stops listening.
+    nonisolated static let silenceToStop: TimeInterval = 1.5
+    /// Nothing said this long after the tap stops listening.
+    nonisolated static let nothingHeardAfter: TimeInterval = 8
+    /// One note is at most this long.
+    nonisolated static let longestNote: TimeInterval = 120
+    /// The model gets this long to sort a note before it is saved whole.
+    nonisolated static let sortingLimit: Duration = .seconds(15)
+
+    init(store: TodoStore, isDemo: Bool, launchScreen: String?, clockNow: @escaping @Sendable () -> Date) {
+        self.store = store
+        self.isDemo = isDemo
+        self.launchScreen = launchScreen
+        self.clockNow = clockNow
+        self.state = store.load()
+        self.now = clockNow()
+        self.levels = Array(repeating: 0, count: Self.levelCount)
+    }
+
+    static func fromLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) -> TodoModel {
+        var screen: String?
+        if let index = arguments.firstIndex(of: "-screen"), index + 1 < arguments.count {
+            screen = arguments[index + 1]
+        }
+        guard arguments.contains("-demo") else {
+            return TodoModel(store: .shared, isDemo: false, launchScreen: nil, clockNow: { Date() })
+        }
+        // Screenshots: demo tasks in a temporary file, never the real one, at the demo's moment.
+        let demoNow = DemoData.referenceNow()
+        let url = FileManager.default.temporaryDirectory.appendingPathComponent("todos-demo-\(UUID().uuidString).json")
+        let store = TodoStore(fileURL: url)
+        try? store.replace(with: TodoDemo.state(now: demoNow, recording: screen == "todo-recording"))
+        let model = TodoModel(store: store, isDemo: true, launchScreen: screen, clockNow: { demoNow })
+        if screen == "todo-recording" { model.showDemoRecording() }
+        return model
+    }
+
+    /// `-screen todo` and `-screen todo-recording` open on the To-do tab.
+    static func opensOnTodo(_ launchScreen: String?) -> Bool {
+        launchScreen?.hasPrefix("todo") == true
+    }
+
+    // MARK: Reading
+
+    var clock: DayClock { DayClock(dayStartHour: dayStartHour) }
+    var openTasks: [TodoTask] { state.openTasks(clock: clock) }
+    var doneToday: [TodoTask] { state.doneTasks(on: clock.day(for: now), clock: clock) }
+    var isEmpty: Bool { openTasks.isEmpty && doneToday.isEmpty }
+    var isListening: Bool { phase == .listening }
+
+    func dueLabel(_ task: TodoTask) -> String? { TodoText.dueLabel(task, now: now, clock: clock) }
+    func isOverdue(_ task: TodoTask) -> Bool { TodoText.isOverdue(task, now: now, clock: clock) }
+
+    /// "16:00" for a done task: when it was done.
+    func doneLabel(_ task: TodoTask) -> String? {
+        task.completedAt.map { TodoText.clockTime($0, clock: clock) }
+    }
+
+    func spoken(_ task: TodoTask) -> String {
+        if let done = task.completedAt {
+            return "\(task.title), done at \(done.formatted(date: .omitted, time: .shortened))"
+        }
+        let due = TodoText.spokenDue(task, now: now, clock: clock).map { ", \($0)" } ?? ""
+        return "\(task.title)\(due)"
+    }
+
+    // MARK: Lifecycle
+
+    /// Follows the app's day-start hour (from the wake-up time) and haptics setting.
+    func attach(_ app: AppModel) {
+        dayStartHour = app.clock.dayStartHour
+        hapticsOn = app.hapticsOn
+        refresh()
+    }
+
+    /// Re-reads the file and the clock (on appear, on return to the foreground).
+    func refresh() {
+        now = clockNow()
+        let fresh = store.load()
+        if fresh != state { state = fresh }
+    }
+
+    /// Voice to-dos need Taken Pro after the first note (REDESIGN.md); the first note is on the house.
+    func access(_ app: AppModel) -> ProAccess {
+        TodoGate.access(firstNoteAt: state.firstNoteAt, status: app.pro.status, settled: app.pro.settled,
+                        legacyLog: app.pro.legacyLog, now: clockNow())
+    }
+
+    // MARK: Capture
+
+    /// The mic button: start, or stop and sort.
+    func micTapped(_ app: AppModel) {
+        attach(app)
+        switch phase {
+        case .listening:
+            Task { await finishListening() }
+        case .starting, .sorting:
+            break
+        case .idle:
+            whenAllowed(app) { [weak self] in
+                guard let self else { return }
+                Task { await self.startListening() }
+            }
+        }
+    }
+
+    /// A quick capture (Siri, the control, the Lock Screen, the quick action) asked to start listening.
+    func startFromRequest(_ app: AppModel) {
+        attach(app)
+        guard phase == .idle else { return }
+        whenAllowed(app) { [weak self] in
+            guard let self else { return }
+            Task { await self.startListening() }
+        }
+    }
+
+    /// Runs `action` when voice capture is open, otherwise opens the paywall and runs it once Pro is on.
+    func whenAllowed(_ app: AppModel, _ action: @escaping @MainActor () -> Void) {
+        switch access(app) {
+        case .pro, .firstSession, .pending:
+            action()
+        case .locked:
+            app.presentPaywall(anchor: .root, origin: .action, pending: action)
+        case .checking:
+            Task { [weak self, weak app] in
+                guard let app else { return }
+                await app.pro.settle()
+                self?.whenAllowed(app, action)
+            }
+        }
+    }
+
+    private func startListening() async {
+        guard phase == .idle, !isDemo else { return }
+        phase = .starting
+        blocker = nil
+        clearNotice()
+        transcript = ""
+        levels = Array(repeating: 0, count: Self.levelCount)
+        let permission = await VoicePermissions.request()
+        guard permission == .granted else {
+            blocker = permission == .microphoneDenied ? .microphone : .speech
+            phase = .idle
+            return
+        }
+        let extractor = TodoExtractors.best()
+        self.extractor = extractor
+        // The model loads while the person talks, so the tasks come back about a second after they stop.
+        Task.detached(priority: .userInitiated) { await extractor.prepare() }
+        let capture = SpeechCapture()
+        do {
+            try await capture.start(locale: .current)
+        } catch {
+            self.extractor = nil
+            blocker = .unavailable
+            phase = .idle
+            return
+        }
+        self.capture = capture
+        startedAt = Date()
+        lastVoiceAt = startedAt
+        noiseFloor = -60
+        wordCount = 0
+        phase = .listening
+        TodoHaptics.soft(hapticsOn)
+        announce("Listening.")
+        eventsTask = Task { [weak self] in
+            for await event in capture.events {
+                self?.handle(event)
+            }
+        }
+        watchTask = Task { [weak self] in
+            while !Task.isCancelled {
+                try? await Task.sleep(for: .milliseconds(150))
+                guard let self, self.phase == .listening else { return }
+                if TodoModel.shouldStop(now: Date(), startedAt: self.startedAt, lastVoiceAt: self.lastVoiceAt,
+                                        heardWords: self.wordCount > 0) {
+                    await self.finishListening()
+                    return
+                }
+            }
+        }
+    }
+
+    private func handle(_ event: SpeechCaptureEvent) {
+        guard phase == .listening else { return }
+        switch event {
+        case .text(let text):
+            let words = text.split(whereSeparator: { $0.isWhitespace }).count
+            if words > wordCount {
+                wordCount = words
+                lastVoiceAt = Date()
+            }
+            transcript = text
+        case .level(let decibels):
+            // A slow-rising noise floor: speech is anything clearly above the room.
+            if decibels < noiseFloor {
+                noiseFloor = decibels
+            } else {
+                noiseFloor += (decibels - noiseFloor) * 0.004
+            }
+            if decibels > max(noiseFloor + 10, -50) { lastVoiceAt = Date() }
+            levelTick += 1
+            guard levelTick % 2 == 0 else { return }
+            var next = levels
+            next.removeFirst()
+            next.append(Double(max(0, min(1, (decibels + 55) / 45))))
+            levels = next
+        case .interrupted:
+            Task { await finishListening() }
+        }
+    }
+
+    /// Stop listening: after a pause of about 1.5 s once words have come, after 8 s with nothing said, or at 2 minutes.
+    nonisolated static func shouldStop(now: Date, startedAt: Date, lastVoiceAt: Date, heardWords: Bool) -> Bool {
+        let elapsed = now.timeIntervalSince(startedAt)
+        if elapsed >= longestNote { return true }
+        let quiet = now.timeIntervalSince(lastVoiceAt)
+        if heardWords { return quiet >= silenceToStop }
+        return elapsed >= nothingHeardAfter && quiet >= silenceToStop
+    }
+
+    /// Stops listening and sorts what was said.
+    func finishListening() async {
+        guard phase == .listening, let capture else { return }
+        phase = .sorting
+        watchTask?.cancel()
+        TodoHaptics.light(hapticsOn)
+        let finalText = await capture.finish()
+        eventsTask?.cancel()
+        self.capture = nil
+        let heard = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
+        let words = heard.isEmpty ? transcript.trimmingCharacters(in: .whitespacesAndNewlines) : heard
+        guard !words.isEmpty else {
+            extractor = nil
+            transcript = ""
+            phase = .idle
+            show("Nothing heard. Tap the mic and try again.")
+            return
+        }
+        transcript = words
+        await save(note: words)
+    }
+
+    /// Typed instead of said (no microphone, or no on-device speech): the same sorting, the same Pro rule.
+    func submitTyped(_ text: String, app: AppModel) {
+        let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !words.isEmpty, phase == .idle else { return }
+        attach(app)
+        whenAllowed(app) { [weak self] in
+            guard let self else { return }
+            Task {
+                self.phase = .sorting
+                self.transcript = words
+                await self.save(note: words)
+            }
+        }
+    }
+
+    private func save(note words: String) async {
+        let context = TodoContext(now: clockNow(), timeZone: .current, dayStartHour: dayStartHour)
+        let extractor = self.extractor ?? TodoExtractors.best()
+        self.extractor = nil
+        let extraction = await Self.extract(words, with: extractor, context: context)
+        let drafts = extraction.drafts.isEmpty ? TodoValidation.wholeNote(words) : extraction.drafts
+        let added = withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) {
+            write { $0.add(drafts, at: context.now) } ?? []
+        }
+        transcript = ""
+        phase = .idle
+        guard !added.isEmpty else { return }
+        arrived = Set(added.map(\.id))
+        TodoHaptics.success(hapticsOn)
+        announce(added.count == 1 ? "1 to-do added: \(added[0].title)." : "\(added.count) to-dos added.")
+        switch extraction.sorting {
+        case .model:
+            break
+        case .needsAppleIntelligence:
+            show(TodoCopy.needsAppleIntelligence, for: .seconds(8))
+        case .couldNotSort:
+            show(TodoCopy.couldNotSort, for: .seconds(6))
+        }
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.6))
+            withAnimation(.easeOut(duration: 0.4)) { self?.arrived = [] }
+        }
+    }
+
+    /// The extractor's answer, or the whole note as one task when it takes too long.
+    nonisolated static func extract(_ words: String, with extractor: any TaskExtractor,
+                                    context: TodoContext) async -> TodoExtraction {
+        await withTaskGroup(of: TodoExtraction?.self) { group in
+            group.addTask { await extractor.extract(transcript: words, context: context) }
+            group.addTask {
+                try? await Task.sleep(for: sortingLimit)
+                return nil
+            }
+            let first = await group.next() ?? nil
+            group.cancelAll()
+            return first ?? TodoExtraction(drafts: TodoValidation.wholeNote(words), sorting: .couldNotSort)
+        }
+    }
+
+    /// Stops listening without saving (the tab or the app went away mid-note keeps what was said instead).
+    func stopIfListening() {
+        guard phase == .listening else { return }
+        Task { await finishListening() }
+    }
+
+    // MARK: Tasks
+
+    /// The circle: done (the check fills, then the task moves to Done today), or back to open.
+    func toggle(_ task: TodoTask) {
+        if task.isDone {
+            withAnimation(.snappy(duration: 0.28)) { _ = write { $0.reopen(task.id) } }
+            TodoHaptics.soft(hapticsOn)
+            announce("\(task.title), not done.")
+            return
+        }
+        guard !completing.contains(task.id) else { return }
+        withAnimation(.snappy(duration: 0.2)) { _ = completing.insert(task.id) }
+        TodoHaptics.impact(hapticsOn)
+        announce("\(task.title), done.")
+        let at = clockNow()
+        Task { [weak self] in
+            try? await Task.sleep(for: .milliseconds(420))
+            guard let self else { return }
+            withAnimation(.snappy(duration: 0.32)) {
+                _ = self.write { $0.complete(task.id, at: at) }
+                self.completing.remove(task.id)
+            }
+        }
+    }
+
+    func edit(_ id: UUID, title: String, dueDate: Date?, hasTime: Bool) {
+        write { $0.update(id, title: title, dueDate: dueDate, hasTime: hasTime) }
+    }
+
+    func delete(_ task: TodoTask) {
+        guard let removed = withAnimation(.snappy(duration: 0.25), { write { $0.delete(task.id) } }) ?? nil else { return }
+        TodoHaptics.soft(hapticsOn)
+        deletedTask?.cancel()
+        withAnimation(.snappy(duration: 0.2)) { deleted = removed }
+        announce("\(removed.title), deleted.")
+        deletedTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(4))
+            guard !Task.isCancelled else { return }
+            withAnimation(.snappy(duration: 0.2)) { self?.deleted = nil }
+        }
+    }
+
+    func undoDelete() {
+        guard let task = deleted else { return }
+        deletedTask?.cancel()
+        withAnimation(.snappy(duration: 0.25)) {
+            _ = write { $0.restore(task) }
+            deleted = nil
+        }
+        TodoHaptics.soft(hapticsOn)
+    }
+
+    /// Settings > Erase all data: the tasks go too. The first free note stays used.
+    func eraseAll() {
+        write { $0.eraseAll() }
+    }
+
+    // MARK: Writing
+
+    @discardableResult
+    private func write<T>(_ body: (inout TodoState) throws -> T) -> T? {
+        do {
+            let result = try store.update(body)
+            state = result.state
+            now = clockNow()
+            if !isDemo {
+                let tasks = result.state.tasks
+                Task { await TodoNotifications.reschedule(tasks: tasks, now: Date()) }
+                WidgetCenter.shared.reloadTimelines(ofKind: TodoCaptureRoute.widgetKind)
+            }
+            return result.value
+        } catch {
+            show("Could not save. Try again.")
+            return nil
+        }
+    }
+
+    // MARK: Notice
+
+    private func show(_ text: String, for duration: Duration = .seconds(5)) {
+        noticeTask?.cancel()
+        withAnimation(.snappy(duration: 0.2)) { notice = text }
+        noticeTask = Task { [weak self] in
+            try? await Task.sleep(for: duration)
+            guard !Task.isCancelled else { return }
+            withAnimation(.snappy(duration: 0.2)) { self?.notice = nil }
+        }
+    }
+
+    private func clearNotice() {
+        noticeTask?.cancel()
+        notice = nil
+    }
+
+    func dismissBlocker() {
+        blocker = nil
+    }
+
+    private func announce(_ text: String) {
+        guard !isDemo else { return }
+        UIAccessibility.post(notification: .announcement, argument: text)
+    }
+
+    // MARK: Demo
+
+    /// `-screen todo-recording`: listening, words on screen, a live-looking waveform. No microphone.
+    private func showDemoRecording() {
+        phase = .listening
+        transcript = TodoDemo.transcript
+        levels = TodoDemo.levels(count: Self.levelCount)
+    }
+}
+
+/// The copy of the To-do tab, in one place (no dashes, never "free", no exclamation marks).
+enum TodoCopy {
+    static let empty = "Tap the mic and say what you need to do"
+    static let listening = "Listening"
+    static let sorting = "Sorting into to-dos"
+    static let tapToFinish = "Tap to finish"
+    static let needsAppleIntelligence = "Saved as one to-do. Automatic sorting needs Apple Intelligence."
+    static let couldNotSort = "Saved as one to-do. Tap it to edit."
+    static let microphoneOff = "Microphone access is off for Taken."
+    static let speechOff = "Speech recognition is off for Taken."
+    static let unavailable = "Voice to-dos need on-device speech recognition, which this iPhone does not have for your language."
+    static let openSettings = "Open Settings"
+    static let typeInstead = "Type it instead"
+    static let doneToday = "Done today"
+
+    static let all: [String] = [empty, listening, sorting, tapToFinish, needsAppleIntelligence, couldNotSort,
+                                microphoneOff, speechOff, unavailable, openSettings, typeInstead, doneToday]
+}
+
+@MainActor
+enum TodoHaptics {
+    static func impact(_ enabled: Bool) {
+        guard enabled else { return }
+        UIImpactFeedbackGenerator(style: .light).impactOccurred()
+    }
+
+    static func light(_ enabled: Bool) {
+        guard enabled else { return }
+        UIImpactFeedbackGenerator(style: .rigid).impactOccurred(intensity: 0.6)
+    }
+
+    static func soft(_ enabled: Bool) {
+        guard enabled else { return }
+        UIImpactFeedbackGenerator(style: .soft).impactOccurred()
+    }
+
+    static func success(_ enabled: Bool) {
+        guard enabled else { return }
+        UINotificationFeedbackGenerator().notificationOccurred(.success)
+    }
+}
+
+/// Due-time reminders for tasks with a clock time, only when Taken may already notify (the nudge asked once).
+enum TodoNotifications {
+    static let prefix = "taken.todo."
+    /// iOS keeps 64 pending requests per app; the nudge uses up to 14.
+    static let limit = 30
+
+    struct Plan: Equatable, Sendable {
+        let identifier: String
+        let fireDate: Date
+        let title: String
+        let body: String
+    }
+
+    /// Pure planning, unit tested: open tasks with a clock time still to come, soonest first.
+    static func plan(tasks: [TodoTask], now: Date, clock: DayClock = DayClock(dayStartHour: 4)) -> [Plan] {
+        tasks.filter { !$0.isDone && $0.hasTime && ($0.dueDate ?? .distantPast) > now }
+            .sorted { ($0.dueDate ?? .distantPast) < ($1.dueDate ?? .distantPast) }
+            .prefix(limit)
+            .compactMap { task in
+                guard let due = task.dueDate else { return nil }
+                return Plan(identifier: prefix + task.id.uuidString, fireDate: due, title: task.title,
+                            body: "Due \(TodoText.clockTime(due, clock: clock))")
+            }
+    }
+
+    static func isTodo(_ identifier: String) -> Bool { identifier.hasPrefix(prefix) }
+
+    static func reschedule(tasks: [TodoTask], now: Date) async {
+        let center = UNUserNotificationCenter.current()
+        let ours = await center.pendingNotificationRequests().map(\.identifier).filter(isTodo)
+        if !ours.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ours) }
+        let settings = await center.notificationSettings()
+        switch settings.authorizationStatus {
+        case .authorized, .provisional, .ephemeral: break
+        default: return
+        }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = .current
+        for plan in plan(tasks: tasks, now: now, clock: DayClock(dayStartHour: 4)) {
+            let content = UNMutableNotificationContent()
+            content.title = plan.title
+            content.body = plan.body
+            content.sound = .default
+            content.threadIdentifier = "taken.todo"
+            var components = calendar.dateComponents([.year, .month, .day, .hour, .minute], from: plan.fireDate)
+            components.timeZone = .current
+            let trigger = UNCalendarNotificationTrigger(dateMatching: components, repeats: false)
+            try? await center.add(UNNotificationRequest(identifier: plan.identifier, content: content, trigger: trigger))
+        }
+    }
+}

@@ -32,5 +32,15 @@ struct TakenShortcuts: AppShortcutsProvider {
             shortTitle: "Log item",
             systemImageName: "pill"
         )
+        AppShortcut(
+            intent: NewVoiceTodoIntent(target: .recording),
+            phrases: [
+                "Add to-dos in \(.applicationName)",
+                "New voice to-do in \(.applicationName)",
+                "Add a to-do in \(.applicationName)",
+            ],
+            shortTitle: "New voice to-do",
+            systemImageName: "mic"
+        )
     }
 }

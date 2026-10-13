@@ -150,7 +150,8 @@ final class ProCopyTests: XCTestCase {
 
     func testThePaywallSellsOnlyWhatProUnlocks() {
         // The log, the history grid, the day sheet and CSV export stay open without Pro: no bullet may sell them.
-        XCTAssertEqual(ProCopy.features.count, 3)
+        XCTAssertEqual(ProCopy.features.count, 4)
+        XCTAssertEqual(ProCopy.features.last, "VOICE TO-DOS", "voice to-dos need Pro after the first note")
         for line in ProCopy.features {
             XCTAssertNil(line.range(of: "HISTORY"), line)
             XCTAssertNil(line.range(of: "CSV"), line)

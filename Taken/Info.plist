@@ -37,6 +37,10 @@
 	<string>public.app-category.healthcare-fitness</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>NSMicrophoneUsageDescription</key>
+	<string>Taken listens only while the mic is on, to turn what you say into to-dos. The audio stays on this iPhone and is never saved.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Taken turns your voice note into text on this iPhone to make your to-dos. Nothing you say is sent anywhere.</string>
 	<key>UIAppFonts</key>
 	<array>
 		<string>Geist-Regular.ttf</string>
@@ -51,6 +55,17 @@
 		<key>UIApplicationSupportsMultipleScenes</key>
 		<false/>
 	</dict>
+	<key>UIApplicationShortcutItems</key>
+	<array>
+		<dict>
+			<key>UIApplicationShortcutItemType</key>
+			<string>com.tombaxter.taken.voice-todo</string>
+			<key>UIApplicationShortcutItemTitle</key>
+			<string>New voice to-do</string>
+			<key>UIApplicationShortcutItemIconSymbolName</key>
+			<string>mic</string>
+		</dict>
+	</array>
 	<key>UILaunchScreen</key>
 	<dict>
 		<key>UIColorName</key>
