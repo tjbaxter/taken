@@ -132,7 +132,8 @@ shoot 38-widgets-todo-blush widgets-todo blush
 # Links reach the right screen with the quick action's scene delegate in place: Taken opens its own link after launch
 # (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). The demo app writes
 # what is in front to tmp/taken-ui-state.txt (DemoProbe), and the check fails unless the link landed there:
-# taken://pro over Today locked opens the paywall; taken://todo and taken://todo/record open the To-do tab, over Profile.
+# taken://pro over Today locked opens the paywall; taken://todo and taken://todo/record open the To-do tab, over Profile,
+# and the record link leaves it listening (the demo shows the listening state: CI has no microphone).
 link() {
   local name="$1" screen="$2" url="$3" expect="$4"
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
@@ -155,7 +156,7 @@ link() {
 }
 link 34-link-pro locked "taken://pro" "paywall=1"
 link 35-link-todo settings "taken://todo" "tab=todo sheet=none"
-link 39-link-record settings "taken://todo/record" "tab=todo sheet=none"
+link 39-link-record settings "taken://todo/record" "tab=todo sheet=none todo=listening"
 if cmp -s "$out/35-link-todo.png" "$out/04-settings.png"; then
   echo "::error::35-link-todo is the Profile screen it started on: taken://todo did not open the To-do tab"
   exit 1

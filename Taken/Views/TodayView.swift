@@ -63,6 +63,7 @@ struct RootView: View {
         .onChange(of: model.tab) { _, _ in DemoProbe.record(model) }
         .onChange(of: model.sheet) { _, _ in DemoProbe.record(model) }
         .onChange(of: model.paywall?.id) { _, _ in DemoProbe.record(model) }
+        .onChange(of: TodoModel.shared.phase) { _, _ in DemoProbe.record(model) }
     }
 
     private var tabBinding: Binding<AppTab> {

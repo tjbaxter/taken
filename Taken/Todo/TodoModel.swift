@@ -204,7 +204,12 @@ final class TodoModel {
     }
 
     private func startListening(busyRetries: Int = 0) async {
-        guard phase == .idle, !isDemo else { return }
+        guard phase == .idle else { return }
+        if isDemo {
+            // CI has no microphone: the demo shows the listening state a tap or a quick capture opens on.
+            showDemoRecording()
+            return
+        }
         phase = .starting
         blocker = nil
         clearNotice()
