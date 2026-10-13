@@ -23,6 +23,13 @@ build:
           # (generating into ios/ would break SRCROOT-relative Info.plist and entitlements paths).
           rm -rf ios && ln -sfn . ios
           ls ios/Taken.xcodeproj
+          # Owner-only TestFlight builds (eas.json profile "internal") unlock Pro via an Info.plist marker.
+          # App Store builds never set TAKEN_INTERNAL_PRO, so the key is absent and ProGate is unchanged.
+          if [ "${TAKEN_INTERNAL_PRO:-0}" = "1" ]; then
+            echo "INTERNAL BUILD: TakenInternalPro=YES (never submit this build to App Review)"
+            /usr/libexec/PlistBuddy -c "Add :TakenInternalPro bool true" Taken/Info.plist
+            /usr/libexec/PlistBuddy -c "Add :TakenInternalPro bool true" TakenWidgets/Info.plist
+          fi
     - eas/resolve_apple_team_id_from_credentials:
         id: resolve_apple_team_id_from_credentials
     - eas/configure_ios_credentials

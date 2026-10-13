@@ -12,10 +12,22 @@
         "image": "latest",
         "config": "build-ios.yml"
       }
+    },
+    "internal": {
+      "extends": "production",
+      "env": {
+        "TAKEN_INTERNAL_PRO": "1"
+      }
     }
   },
   "submit": {
     "production": {
+      "ios": {
+        "ascAppId": "6822086891",
+        "appleTeamId": "F7YRP3B2U8"
+      }
+    },
+    "internal": {
       "ios": {
         "ascAppId": "6822086891",
         "appleTeamId": "F7YRP3B2U8"
