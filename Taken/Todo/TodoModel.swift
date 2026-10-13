@@ -97,13 +97,14 @@ final class TodoModel {
         let demoNow = DemoData.referenceNow()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("todos-demo-\(UUID().uuidString).json")
         let store = TodoStore(fileURL: url)
-        try? store.replace(with: TodoDemo.state(now: demoNow, recording: screen == "todo-recording"))
+        let seeded = screen == "todo-empty" ? TodoState() : TodoDemo.state(now: demoNow, recording: screen == "todo-recording")
+        try? store.replace(with: seeded)
         let model = TodoModel(store: store, isDemo: true, launchScreen: screen, clockNow: { demoNow })
         if screen == "todo-recording" { model.showDemoRecording() }
         return model
     }
 
-    /// `-screen todo` and `-screen todo-recording` open on the To-do tab.
+    /// `-screen todo`, `todo-recording` and `todo-empty` open on the To-do tab.
     static func opensOnTodo(_ launchScreen: String?) -> Bool {
         launchScreen?.hasPrefix("todo") == true
     }
@@ -409,7 +410,10 @@ final class TodoModel {
     }
 
     func edit(_ id: UUID, title: String, dueDate: Date?, hasTime: Bool) {
-        write { $0.update(id, title: title, dueDate: dueDate, hasTime: hasTime) }
+        // A day without a time is kept at noon that day, as the model's are.
+        let calendar = clock.calendar
+        let due = dueDate.map { hasTime ? $0 : (calendar.date(bySettingHour: 12, minute: 0, second: 0, of: $0) ?? $0) }
+        write { $0.update(id, title: title, dueDate: due, hasTime: hasTime) }
     }
 
     func delete(_ task: TodoTask) {

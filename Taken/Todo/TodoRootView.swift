@@ -151,7 +151,7 @@ struct TodoRootView: View {
                                 Text(time).font(.mono(13, .monoMedium, relativeTo: .footnote))
                             }
                         }
-                        .foregroundStyle(done ? theme.fgFaint : (todo.isOverdue(task) ? theme.signalInk : theme.fgSubtle))
+                        .foregroundStyle(todo.isOverdue(task) ? theme.signalInk : theme.fgSubtle)
                         .lineLimit(1)
                         .fixedSize()
                     }

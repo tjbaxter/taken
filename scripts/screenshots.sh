@@ -123,6 +123,7 @@ for look in blush phosphor ice; do
   shoot "31-todo-$look" todo "$look"
 done
 shoot 32-todo-recording-blush todo-recording blush
+shoot 33-todo-empty todo-empty
 
 # The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
 if [ -n "$small" ] && [ "$small" != "$udid" ]; then
