@@ -190,7 +190,8 @@ private struct TakeAllWidgetButton: View {
         let shape = RoundedRectangle(cornerRadius: min(theme.radius.panel, 10))
         Button(intent: TakeAllIntent()) {
             HStack(spacing: 6) {
-                LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 5, height: 5)
+                LampShape(roundness: theme.radius.lampRoundness).fill(fullColor ? theme.buttonLamp : theme.signal)
+                    .frame(width: 5, height: 5)
                     .widgetAccentable()
                 Text("TAKE ALL")
                     .font(.monoFixed(11, .monoSemibold))

@@ -412,7 +412,7 @@ struct PaywallView: View {
                         .stroke(theme.buttonText, style: StrokeStyle(lineWidth: 2.2, lineCap: .square, lineJoin: .miter))
                         .frame(width: 14, height: 14)
                 } else {
-                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 7, height: 7)
+                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.buttonLamp).frame(width: 7, height: 7)
                 }
                 Text(ctaTitle)
                     .font(.monoFixed(14, .monoSemibold))

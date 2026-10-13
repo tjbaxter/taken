@@ -77,7 +77,7 @@ struct PrimaryButton: View {
                     Image(systemName: "lock.fill")
                         .font(.system(size: 11, weight: .semibold))
                 } else if lamp {
-                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.signal).frame(width: 7, height: 7)
+                    LampShape(roundness: theme.radius.lampRoundness).fill(theme.buttonLamp).frame(width: 7, height: 7)
                 }
                 Text(title)
                     .font(.monoFixed(14, .monoSemibold))

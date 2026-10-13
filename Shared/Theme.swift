@@ -82,9 +82,11 @@ struct ThemeTokens: Hashable, Sendable {
     var signalWash: Double
     /// Marks drawn on a signal fill: the check on a lit disc.
     var onSignal: UInt32
-    /// The solid primary button and its label.
+    /// The solid primary button, its label, and the signal lamp it carries (a deeper shade where the button is pale,
+    /// so the lamp still reads).
     var button: UInt32
     var buttonText: UInt32
+    var buttonLamp: UInt32
     /// Destructive confirms only.
     var danger: UInt32
 }
@@ -159,6 +161,7 @@ struct Theme: Hashable, Sendable {
     let onSignal: Color
     let button: Color
     let buttonText: Color
+    let buttonLamp: Color
     let danger: Color
 
     init(id: ThemeID, isLight: Bool, tokens: ThemeTokens, radius: ThemeRadius, brackets: ThemeBrackets,
@@ -188,6 +191,7 @@ struct Theme: Hashable, Sendable {
         onSignal = Color(hex: tokens.onSignal)
         button = Color(hex: tokens.button)
         buttonText = Color(hex: tokens.buttonText)
+        buttonLamp = Color(hex: tokens.buttonLamp)
         danger = Color(hex: tokens.danger)
     }
 
@@ -238,7 +242,7 @@ extension Theme {
             dashBase: 0xA1A1AA, lineDash: 0.20, tick: 0.34,
             bracket: 0x7C7C85,
             signal: 0xFFB000, signalInk: 0xFFB000, signalEdge: 0.45, signalWash: 0.10, onSignal: 0x08090A,
-            button: 0xE4E4E7, buttonText: 0x111113, danger: 0xFF5F57),
+            button: 0xE4E4E7, buttonText: 0x111113, buttonLamp: 0xFFB000, danger: 0xFF5F57),
         radius: .hud, brackets: .hud, glowStrength: 1)
 
     /// Light: a warm off-white canvas, ink type, a muted rose for what is taken (a deeper rose wherever it is text),
@@ -252,7 +256,7 @@ extension Theme {
             dashBase: 0x776A6E, lineDash: 0.30, tick: 0.42,
             bracket: 0xAEA1A5,
             signal: 0xD9667F, signalInk: 0xA8425C, signalEdge: 0.50, signalWash: 0.10, onSignal: 0xFFFFFF,
-            button: 0x2A2224, buttonText: 0xFBF6F3, danger: 0xC0392B),
+            button: 0x2A2224, buttonText: 0xFBF6F3, buttonLamp: 0xD9667F, danger: 0xC0392B),
         radius: .soft, brackets: .delicate, glowStrength: 0.35)
 
     /// Green phosphor on a green-black canvas.
@@ -265,7 +269,7 @@ extension Theme {
             dashBase: 0x9EAAA3, lineDash: 0.20, tick: 0.34,
             bracket: 0x78847D,
             signal: 0x3DFF8A, signalInk: 0x3DFF8A, signalEdge: 0.45, signalWash: 0.10, onSignal: 0x060908,
-            button: 0xE2EBE5, buttonText: 0x0C110E, danger: 0xFF5F57),
+            button: 0xE2EBE5, buttonText: 0x0C110E, buttonLamp: 0x12B55A, danger: 0xFF5F57),
         radius: .hud, brackets: .hud, glowStrength: 0.85)
 
     /// LUPO's cyan on a blue-black canvas.
@@ -278,7 +282,7 @@ extension Theme {
             dashBase: 0xA0A9B4, lineDash: 0.20, tick: 0.34,
             bracket: 0x7A838E,
             signal: 0x8FD3E8, signalInk: 0x8FD3E8, signalEdge: 0.45, signalWash: 0.10, onSignal: 0x07090C,
-            button: 0xE3E9F0, buttonText: 0x0D1015, danger: 0xFF5F57),
+            button: 0xE3E9F0, buttonText: 0x0D1015, buttonLamp: 0x2F9DC4, danger: 0xFF5F57),
         radius: .hud, brackets: .hud, glowStrength: 1)
 
     /// Settings order.

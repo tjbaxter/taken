@@ -125,7 +125,7 @@ final class ThemeTests: XCTestCase {
         XCTAssertEqual([t.lineDash, t.tick], [0.20, 0.34])
         XCTAssertEqual([t.signal, t.signalInk, t.onSignal, t.bracket], [0xFFB000, 0xFFB000, 0x08090A, 0x7C7C85])
         XCTAssertEqual([t.signalEdge, t.signalWash], [0.45, 0.10])
-        XCTAssertEqual([t.button, t.buttonText, t.danger], [0xE4E4E7, 0x111113, 0xFF5F57])
+        XCTAssertEqual([t.button, t.buttonText, t.buttonLamp, t.danger], [0xE4E4E7, 0x111113, 0xFFB000, 0xFF5F57])
         XCTAssertEqual(Theme.signal.radius, .hud)
         XCTAssertEqual(Theme.signal.radius.frame, 0, "square HUD frames")
         XCTAssertEqual(Theme.signal.radius.panel, 4)
