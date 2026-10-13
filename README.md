@@ -41,7 +41,7 @@ To buy Taken Pro in the simulator, run from Xcode: the scheme's Run action uses 
 
 ## Release to TestFlight
 
-`.github/workflows/release.yml` runs on demand or on a `v*` tag. It archives with manual signing, exports an App Store IPA and uploads it with the App Store Connect API key (`altool`, with `xcodebuild -exportArchive` upload as the fallback). The build number is the run number plus the optional `build_offset` input, so it always increases. A `v1.2.3` tag sets the version to 1.2.3.
+`.github/workflows/release.yml` runs on demand or on a `v*` tag. It first checks that a green ci.yml run on main covers the code (that commit or an ancestor, with nothing outside docs, brand and Markdown changed since), so nothing ships that the build, the tests and the screenshot link checks have not passed. It archives with manual signing, exports an App Store IPA and uploads it with the App Store Connect API key (`altool`, with `xcodebuild -exportArchive` upload as the fallback). The build number is the run number plus the optional `build_offset` input, so it always increases. A `v1.2.3` tag sets the version to 1.2.3.
 
 Repository secrets (names only, values never go in the repo):
 
