@@ -73,20 +73,28 @@ final class RedesignTests: XCTestCase {
     // MARK: Adding
 
     func testEachPickedItemKeepsItsOwnFrequency() {
-        let drafts = AddPlan.drafts(selected: ["Vitamin D3", "Fish Oil", "Finasteride"], custom: "  Lion's Mane ",
-                                    choices: ["Finasteride": .alternate, "Fish Oil": .twice, AddPlan.customKey: .days],
-                                    days: [AddPlan.customKey: [2, 4, 6]])
-        XCTAssertEqual(drafts.map(\.name), ["Vitamin D3", "Fish Oil", "Finasteride", "Lion's Mane"])
-        XCTAssertEqual(drafts.map(\.frequency), [.daily(times: 1), .daily(times: 2), .alternateDays, .weekdays([2, 4, 6])],
+        let drafts = AddPlan.drafts(selected: ["Vitamin D3", "Fish Oil", "Finasteride"],
+                                    extras: ["  Lion's Mane ", "Grandma's Tonic"],
+                                    choices: ["Finasteride": .alternate, "Fish Oil": .twice, "  Lion's Mane ": .days],
+                                    days: ["  Lion's Mane ": [2, 4, 6]], weekday: 2)
+        XCTAssertEqual(drafts.map(\.name), ["Vitamin D3", "Fish Oil", "Finasteride", "Lion's Mane", "Grandma's Tonic"])
+        XCTAssertEqual(drafts.map(\.frequency), [.daily(times: 1), .daily(times: 2), .alternateDays, .weekdays([2, 4, 6]),
+                                                 .daily(times: 1)],
                        "Finasteride every other day while D3 is daily, in one go")
         XCTAssertEqual(drafts[0].code, "VD3", "the chip's code")
-        XCTAssertNil(drafts[3].code, "a typed name gets one when it is added")
+        XCTAssertEqual(drafts[3].code, "LMN", "a suggestion brings its catalog code")
+        XCTAssertNil(drafts[4].code, "a name the catalog does not know gets one when it is added")
 
-        let noDays = AddPlan.drafts(selected: ["Zinc"], custom: nil, choices: ["Zinc": .days], days: ["Zinc": []])
+        let noDays = AddPlan.drafts(selected: ["Zinc"], extras: [], choices: ["Zinc": .days], days: ["Zinc": []],
+                                    weekday: 2)
         XCTAssertEqual(noDays.map(\.frequency), [.daily(times: 1)], "Days with none picked is never an item never due")
-        XCTAssertEqual(AddPlan.drafts(selected: ["Zinc"], custom: nil, choices: ["Zinc": .days], days: [:]).map(\.frequency),
+        XCTAssertEqual(AddPlan.drafts(selected: ["Zinc"], extras: [], choices: ["Zinc": .days], days: [:], weekday: 2)
+                        .map(\.frequency),
                        [.weekdays(FrequencyChoice.defaultDays)])
-        XCTAssertTrue(AddPlan.drafts(selected: [], custom: "   ", choices: [:], days: [:]).isEmpty)
+        XCTAssertTrue(AddPlan.drafts(selected: [], extras: ["   "], choices: [:], days: [:], weekday: 2).isEmpty)
+        XCTAssertEqual(AddPlan.drafts(selected: ["Zinc"], extras: ["zinc", " ZINC "], choices: [:], days: [:], weekday: 2)
+                        .map(\.name),
+                       ["Zinc"], "a name picked twice, in any case, is added once")
 
         var state = StackState()
         let added = state.addItems(drafts, now: at(2026, 10, 13, 9))
@@ -95,7 +103,76 @@ final class RedesignTests: XCTestCase {
         let tomorrow = StackEngine(state: state, clock: londonClock()).todaySummary(now: at(2026, 10, 14, 9))
         XCTAssertEqual(tomorrow.notDue.map(\.item.name), ["Finasteride"], "taken today, so not due tomorrow")
         XCTAssertEqual(engine.todaySummary(now: at(2026, 10, 13, 9)).due.count, 3)
-        XCTAssertEqual(FrequencyChoice.allCases.map(\.title), ["Daily", "Every other day", "2x daily", "3x daily", "Days"])
+        XCTAssertEqual(FrequencyChoice.allCases.map(\.title),
+                       ["Daily", "Every other day", "Weekly", "2x daily", "3x daily", "Days"])
+    }
+
+    func testWeeklyIsOneDayAndTheGLP1ChipsStartOnIt() {
+        let thursday = 5
+        let drafts = AddPlan.drafts(selected: ["Semaglutide", "Tirzepatide", "Birth Control", "Zinc"],
+                                    extras: ["Mounjaro"], choices: ["Zinc": .weekly], days: [:],
+                                    weekly: ["Tirzepatide": 2], weekday: thursday)
+        XCTAssertEqual(drafts.map(\.frequency), [.weekdays([5]), .weekdays([2]), .daily(times: 1), .weekdays([5]),
+                                                 .weekdays([5])],
+                       "Weekly starts on the day being lived until another day is tapped; Birth control is daily")
+        XCTAssertEqual(drafts.map(\.code), ["SEM", "TRZ", "BCP", "ZNC", "TRZ"], "a brand typed in full keeps the code")
+
+        let oral = AddPlan.drafts(selected: ["Semaglutide"], extras: [], choices: ["Semaglutide": .daily], days: [:],
+                                  weekday: thursday)
+        XCTAssertEqual(oral.map(\.frequency), [.daily(times: 1)], "oral semaglutide is one switch to Daily")
+
+        XCTAssertEqual(AddPlan.defaultChoice(for: "semaglutide"), .weekly)
+        XCTAssertEqual(AddPlan.defaultChoice(for: "Zepbound"), .weekly)
+        XCTAssertEqual(AddPlan.defaultChoice(for: "Birth Control"), .daily)
+        XCTAssertEqual(AddPlan.defaultChoice(for: "Lion's Mane"), .daily)
+
+        XCTAssertEqual(FrequencyChoice(.weekdays([5])), .weekly, "a one-day set reads back as Weekly")
+        XCTAssertEqual(FrequencyChoice(.weekdays([2, 4, 6])), .days)
+        XCTAssertEqual(FrequencyChoice(.weekdays([])), .days)
+        XCTAssertEqual(FrequencyChoice.weekly.frequency(weekdays: [2, 3], weekday: 1), .weekdays([1]), "Sunday is 1")
+        XCTAssertEqual(FrequencyChoice.weekly.frequency(weekdays: [], weekday: 12), .weekdays([7]))
+        XCTAssertEqual(FrequencyChoice.days.frequency(weekdays: [3], weekday: 5), .weekdays([3]))
+    }
+
+    func testAWeeklyItemKeepsTheFileFormat() throws {
+        let shot = makeItem("Tirzepatide", "TRZ", .weekdays([5]), created: at(2026, 10, 1, 8))
+        let data = try TakenStore.encode(StackState(items: [shot]))
+        let text = String(decoding: data, as: UTF8.self)
+        XCTAssertTrue(text.contains(#""kind":"weekdays""#), text)
+        XCTAssertEqual(try TakenStore.decode(data).items.first?.frequency, .weekdays([5]))
+    }
+
+    func testSuggestionRowsFitUnderThePinnedField() {
+        // An iPhone SE with the keyboard up leaves about 230 points under the field: four 48 pt rows.
+        XCTAssertEqual(AddSheet.rowCapacity(available: 230, rowHeight: 48), 4)
+        XCTAssertEqual(AddSheet.rowCapacity(available: 48, rowHeight: 48), 1)
+        XCTAssertEqual(AddSheet.rowCapacity(available: 47, rowHeight: 48), 0)
+        XCTAssertEqual(AddSheet.rowCapacity(available: 230, rowHeight: 96), 2, "large text: fewer rows, never a scroll")
+        XCTAssertEqual(AddSheet.rowCapacity(available: -20, rowHeight: 48), 0)
+    }
+
+    func testTheAddSheetCopyKeepsTheRules() {
+        let lines = AddCopy.all + [Fmt.frequency(.weekdays([5])), Fmt.notDue(.weekdays([5]), next: "Next: Thursday")]
+        for text in lines {
+            XCTAssertNil(text.range(of: "free", options: .caseInsensitive), text)
+            XCTAssertFalse(text.contains("\u{2014}") || text.contains("\u{2013}"), "no em or en dash: \(text)")
+            XCTAssertFalse(text.contains("!"), text)
+        }
+        XCTAssertEqual(AddCopy.fieldPrompt, "Search or type a name")
+        XCTAssertEqual(AddCopy.literal("Lion's Mane"), "Add \u{201C}Lion's Mane\u{201D}")
+        XCTAssertEqual(AddCopy.suggestions(0), "No suggestions")
+        XCTAssertEqual(AddCopy.suggestions(1), "1 suggestion")
+        XCTAssertEqual(AddCopy.suggestions(3), "3 suggestions")
+    }
+
+    @MainActor
+    func testTheAddSearchScreenOpensTypeModeWithTum() {
+        let model = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "add-search"])
+        XCTAssertEqual(model.demoQuery, "tum")
+        XCTAssertTrue(model.demoPreselect.isEmpty)
+        XCTAssertTrue(model.activeItems.isEmpty, "an empty stack, like the add screen")
+        XCTAssertEqual(Suggest.rank(model.demoQuery).first?.entry.name, "Turmeric", "no drug name in the screenshot")
+        XCTAssertEqual(AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "add"]).demoQuery, "")
     }
 
     // MARK: Profile

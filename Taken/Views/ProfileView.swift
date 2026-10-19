@@ -724,6 +724,8 @@ struct ItemEditorView: View {
     @State private var name = ""
     @State private var choice: FrequencyChoice = .daily
     @State private var weekdays: Set<Int> = FrequencyChoice.defaultDays
+    /// Weekly's one day (Calendar numbering): the item's own, else the day being lived.
+    @State private var weekday = 2
     @State private var archived = false
     @State private var loaded = false
     @State private var deleted = false
@@ -761,6 +763,11 @@ struct ItemEditorView: View {
                 .listRowBackground(theme.bgRaised)
                 if choice == .days {
                     WeekdayPicker(selection: $weekdays)
+                        .padding(.vertical, 6)
+                        .listRowBackground(theme.bgRaised)
+                } else if choice == .weekly {
+                    WeekdayPicker(selection: Binding(get: { [weekday] }, set: { if let day = $0.first { weekday = day } }),
+                                  single: true)
                         .padding(.vertical, 6)
                         .listRowBackground(theme.bgRaised)
                 }
@@ -853,13 +860,17 @@ struct ItemEditorView: View {
         loaded = true
         name = item.name
         choice = FrequencyChoice(item.frequency)
-        if case .weekdays(let days) = item.frequency, !days.isEmpty { weekdays = days }
+        weekday = model.today.day.weekday
+        if case .weekdays(let days) = item.frequency, !days.isEmpty {
+            weekdays = days
+            if days.count == 1, let day = days.first { weekday = day }
+        }
         archived = item.archived
     }
 
     private func save() {
         guard loaded, !deleted, let item = model.state.item(itemID) else { return }
-        let frequency = choice.frequency(weekdays: weekdays)
+        let frequency = choice.frequency(weekdays: weekdays, weekday: weekday)
         let cleanName = name.trimmingCharacters(in: .whitespacesAndNewlines)
         let newName = cleanName.isEmpty ? item.name : cleanName
         // The short code on the widgets and the nudge follows a new name.

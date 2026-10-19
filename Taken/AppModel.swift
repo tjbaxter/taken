@@ -83,6 +83,8 @@ final class AppModel {
     /// Chips pre-selected in the Add sheet for the `-demo -screen add` screenshot, and how often each is taken.
     let demoPreselect: [String]
     let demoChoices: [String: FrequencyChoice]
+    /// `-demo -screen add-search`: the Add sheet in type mode with "tum" typed, Turmeric suggested.
+    let demoQuery: String
     /// Profile: a name and a photo, both optional, on this iPhone.
     let profileStore: ProfileStore
     private(set) var profile: Profile
@@ -112,6 +114,7 @@ final class AppModel {
         let addScreen = isDemo && launchScreen == "add"
         self.demoPreselect = addScreen ? ["Vitamin D3", "Fish Oil", "Finasteride"] : []
         self.demoChoices = addScreen ? ["Finasteride": .alternate] : [:]
+        self.demoQuery = isDemo && launchScreen == "add-search" ? "tum" : ""
         self.profileStore = profileStore
         self.profile = profileStore.load()
         self.profilePhoto = profileStore.loadPhoto().flatMap { UIImage(data: $0) }
@@ -159,7 +162,7 @@ final class AppModel {
         let demoNow = DemoData.referenceNow()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("taken-demo-\(UUID().uuidString).json")
         let store = TakenStore(fileURL: url, postsChangeNotifications: false)
-        var seeded = screen == "add" || screen == "empty"
+        var seeded = screen == "add" || screen == "add-search" || screen == "empty"
             ? StackState(settings: StackSettings(reminderEnabled: true))
             : DemoData.state(now: demoNow, allTaken: screen == "today-done")
         seeded.settings.theme = look
@@ -278,7 +281,7 @@ final class AppModel {
         guard let launchScreen else { return }
         try? await Task.sleep(for: .milliseconds(450))
         switch launchScreen {
-        case "add": sheet = .add
+        case "add", "add-search": sheet = .add
         case "settings", "profile", "look", "settings-locked": sheet = .settings
         case "day": sheet = .day(DemoData.sheetDay(now: now))
         case "item":
