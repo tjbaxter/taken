@@ -102,7 +102,8 @@ final class RedesignTests: XCTestCase {
         state.logDose(itemId: added[2].id, at: at(2026, 10, 13, 9), timeZone: london)
         let tomorrow = StackEngine(state: state, clock: londonClock()).todaySummary(now: at(2026, 10, 14, 9))
         XCTAssertEqual(tomorrow.notDue.map(\.item.name), ["Finasteride"], "taken today, so not due tomorrow")
-        XCTAssertEqual(engine.todaySummary(now: at(2026, 10, 13, 9)).due.count, 3)
+        XCTAssertEqual(engine.todaySummary(now: at(2026, 10, 13, 9)).due.count, 4,
+                       "a Tuesday: D3, Fish Oil, Finasteride and Grandma's Tonic; Lion's Mane is Mon Wed Fri")
         XCTAssertEqual(FrequencyChoice.allCases.map(\.title),
                        ["Daily", "Every other day", "Weekly", "2x daily", "3x daily", "Days"])
     }
