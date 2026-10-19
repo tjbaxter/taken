@@ -96,8 +96,11 @@ final class SpeechCapture: @unchecked Sendable {
                         onLevel: { continuation.yield(.level($0)) },
                         onInterruption: { continuation.yield(.interrupted) })
         let onText: @Sendable (String) -> Void = { continuation.yield(.text($0)) }
+        // The names this person is likely to say, read now that the microphone is on and the relay holds what is said.
+        let vocabulary = TranscriptionVocabulary.current()
         do {
-            let backend = try await Self.makeBackend(locale: locale, inputFormat: format, onText: onText)
+            let backend = try await Self.makeBackend(locale: locale, inputFormat: format, vocabulary: vocabulary,
+                                                     onText: onText)
             lock.withLock { self.backend = backend }
             relay.attach { buffer in backend.append(buffer) }
         } catch {
@@ -133,14 +136,15 @@ final class SpeechCapture: @unchecked Sendable {
         continuation.finish()
     }
 
-    private static func makeBackend(locale: Locale, inputFormat: AVAudioFormat,
+    private static func makeBackend(locale: Locale, inputFormat: AVAudioFormat, vocabulary: [String],
                                     onText: @escaping @Sendable (String) -> Void) async throws -> any SpeechBackend {
         if #available(iOS 26.0, *) {
-            if let analyzer = try? await AnalyzerBackend.make(locale: locale, inputFormat: inputFormat, onText: onText) {
+            if let analyzer = try? await AnalyzerBackend.make(locale: locale, inputFormat: inputFormat,
+                                                              vocabulary: vocabulary, onText: onText) {
                 return analyzer
             }
         }
-        if let recognizer = RecognizerBackend(locale: locale, onText: onText) {
+        if let recognizer = RecognizerBackend(locale: locale, vocabulary: vocabulary, onText: onText) {
             return recognizer
         }
         throw SpeechCaptureError.unavailable
@@ -378,7 +382,7 @@ final class AnalyzerBackend: SpeechBackend, @unchecked Sendable {
 
     /// Nil-free or throws: the language must be supported and its model already on the phone. A missing model starts
     /// downloading for next time and this note uses SFSpeechRecognizer.
-    static func make(locale: Locale, inputFormat: AVAudioFormat,
+    static func make(locale: Locale, inputFormat: AVAudioFormat, vocabulary: [String] = [],
                      onText: @escaping @Sendable (String) -> Void) async throws -> AnalyzerBackend {
         guard SpeechTranscriber.isAvailable,
               let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
@@ -396,6 +400,7 @@ final class AnalyzerBackend: SpeechBackend, @unchecked Sendable {
             throw SpeechCaptureError.unavailable
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
+        await expect(vocabulary, on: analyzer)
         let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
         let backend = AnalyzerBackend(analyzer: analyzer, input: continuation, converter: converter)
         let transcript = backend.transcript
@@ -417,6 +422,17 @@ final class AnalyzerBackend: SpeechBackend, @unchecked Sendable {
             throw SpeechCaptureError.unavailable
         }
         return backend
+    }
+
+    /// The names to expect, as the analyzer's contextual strings (AnalysisContext, iOS 26). Apple's forum answer says
+    /// SpeechTranscriber does not read contextual strings yet (DictationTranscriber does), so this may change nothing
+    /// today; it costs nothing, waits at most 0.3 s, and a failure is ignored.
+    private static func expect(_ vocabulary: [String], on analyzer: SpeechAnalyzer) async {
+        guard !vocabulary.isEmpty else { return }
+        let context = AnalysisContext()
+        context.contextualStrings[.general] = vocabulary
+        _ = await firstResult(of: { (try? await analyzer.setContext(context)) != nil }, orAfter: .milliseconds(300),
+                              fallback: false)
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
@@ -499,7 +515,7 @@ final class RecognizerBackend: SpeechBackend, @unchecked Sendable {
     private var done = false
 
     /// Nil when this iPhone cannot recognise the language on the device: audio is never sent to a server.
-    init?(locale: Locale, onText: @escaping @Sendable (String) -> Void) {
+    init?(locale: Locale, vocabulary: [String] = [], onText: @escaping @Sendable (String) -> Void) {
         guard let recognizer = SFSpeechRecognizer(locale: locale) ?? SFSpeechRecognizer(),
               recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { return nil }
         let request = SFSpeechAudioBufferRecognitionRequest()
@@ -507,6 +523,8 @@ final class RecognizerBackend: SpeechBackend, @unchecked Sendable {
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
         request.taskHint = .dictation
+        // The names this person is likely to say (at most 100 short phrases, as Apple asks).
+        request.contextualStrings = vocabulary
         self.recognizer = recognizer
         self.request = request
         let transcript = self.transcript
