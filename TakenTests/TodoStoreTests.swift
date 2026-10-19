@@ -349,6 +349,77 @@ final class TodoStoreTests: XCTestCase {
                                            at: now).map(\.id), [done.id], "a note already done stays as it is")
     }
 
+    // MARK: Keep as one
+
+    func testKeepAsOneMergesOnlyTheGivenOpenTasksAndKeepsTheNoteAndTheEarliestDue() throws {
+        let clock = londonClock()
+        let now = at(2026, 10, 19, 10)
+        var state = TodoState()
+        let other = state.add([TodoDraft(title: "Ring Jo about the lease")], at: at(2026, 10, 19, 8))[0]
+        let note = state.add([TodoDraft(title: "Reach toothbrushes", due: .day(DayKey(year: 2026, month: 10, day: 21))),
+                              TodoDraft(title: "Order toothbrushes", due: .time(at(2026, 10, 20, 9))),
+                              TodoDraft(title: "Buy floss")], at: now)
+        let due = TodoMerge.earliestDue(note.map(\.due), clock: clock)
+        XCTAssertEqual(due, .time(at(2026, 10, 20, 9)), "Tuesday 09:00 comes before any time on Wednesday")
+        let title = try XCTUnwrap(TodoMerge.title(transcript: "order Reach toothbrushes on Amazon",
+                                                  titles: note.map(\.title)))
+        XCTAssertEqual(title, "Order Reach toothbrushes on Amazon", "a short note reads as it was said")
+
+        let merged = try XCTUnwrap(state.mergeNote(ids: note.map(\.id), title: title, due: due))
+        XCTAssertEqual(state.tasks.count, 2, "three became one; the other note is untouched")
+        XCTAssertEqual(state.task(other.id), other)
+        XCTAssertEqual(merged.title, "Order Reach toothbrushes on Amazon")
+        XCTAssertEqual(merged.due, .time(at(2026, 10, 20, 9)))
+        XCTAssertEqual(merged.noteId, note[0].noteId, "the same note")
+        XCTAssertEqual(merged.createdAt, now, "said when the note was said")
+        XCTAssertEqual(merged.order, 0)
+        XCTAssertEqual(merged.id, note[0].id, "the first task's row stays where it was")
+        XCTAssertNil(state.task(note[1].id))
+        XCTAssertNil(state.task(note[2].id))
+        XCTAssertFalse(merged.isDone)
+        XCTAssertNil(state.mergeNote(ids: note.map(\.id), title: title, due: due), "once only")
+    }
+
+    func testKeepAsOneLeavesTheListAloneWhenATaskWasDoneOrDeleted() {
+        let now = at(2026, 10, 19, 10)
+        var done = TodoState()
+        let first = done.add([TodoDraft(title: "Call the dentist"), TodoDraft(title: "Email Priya the deck")], at: now)
+        done.complete(first[1].id, at: now)
+        let before = done
+        XCTAssertNil(done.mergeNote(ids: first.map(\.id), title: "Call the dentist and email Priya", due: nil))
+        XCTAssertEqual(done, before, "one was done meanwhile: nothing changes")
+
+        var deleted = TodoState()
+        let second = deleted.add([TodoDraft(title: "Call the dentist"), TodoDraft(title: "Email Priya the deck")], at: now)
+        deleted.delete(second[0].id)
+        let left = deleted
+        XCTAssertNil(deleted.mergeNote(ids: second.map(\.id), title: "Call the dentist and email Priya", due: nil))
+        XCTAssertEqual(deleted, left, "one was deleted meanwhile: nothing changes")
+
+        var mixed = TodoState()
+        let a = mixed.add([TodoDraft(title: "Call the dentist")], at: now)[0]
+        let b = mixed.add([TodoDraft(title: "Buy milk")], at: now)[0]
+        XCTAssertNil(mixed.mergeNote(ids: [a.id, b.id], title: "Call the dentist, Buy milk", due: nil),
+                     "two notes are never merged")
+        XCTAssertNil(mixed.mergeNote(ids: [a.id], title: "Call the dentist", due: nil), "one task is already one")
+        XCTAssertEqual(mixed.tasks.count, 2)
+    }
+
+    func testKeepAsOneTitleIsTheWordsSaidForAShortNoteOtherwiseTheTitlesJoined() {
+        XCTAssertEqual(TodoMerge.title(transcript: "  um order Reach toothbrushes on Amazon. ", titles: ["A", "B"]),
+                       "Um order Reach toothbrushes on Amazon")
+        let long = "so I need to call the dentist and also email Priya the deck and then buy milk eggs and bread"
+        XCTAssertEqual(TodoMerge.title(transcript: long, titles: ["Call the dentist", "Email Priya the deck", "Buy milk"]),
+                       "Call the dentist, Email Priya the deck, Buy milk", "past 12 words: the titles, joined")
+        let titles = Array(repeating: "Pick up the parcel from the post office on the high street", count: 4)
+        let joined = TodoMerge.title(transcript: long, titles: titles) ?? ""
+        XCTAssertLessThanOrEqual(joined.count, TodoText.maxTitleLength, "never a paragraph")
+        XCTAssertNil(TodoMerge.earliestDue([nil, nil], clock: londonClock()))
+        XCTAssertEqual(TodoMerge.earliestDue([nil, .day(DayKey(year: 2026, month: 10, day: 22)),
+                                              .day(DayKey(year: 2026, month: 10, day: 20))], clock: londonClock()),
+                       .day(DayKey(year: 2026, month: 10, day: 20)))
+    }
+
     // MARK: Notifications
 
     func testDeliveredNotificationsForFinishedOrDeletedTasksAreWithdrawn() {

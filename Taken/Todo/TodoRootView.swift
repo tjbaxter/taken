@@ -33,10 +33,16 @@ struct TodoRootView: View {
             .onChange(of: route.pendingRecording) { _, pending in
                 if pending != nil { consumeRequest() }
             }
+            .onDisappear {
+                // Leaving the tab takes Keep as one away: it only makes sense with the note's tasks in view.
+                todo.dismissKeepOffer()
+            }
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active: todo.refresh()
-                case .background: todo.stopIfListening()
+                case .background:
+                    todo.dismissKeepOffer()
+                    todo.stopIfListening()
                 default: break
                 }
             }
@@ -124,10 +130,14 @@ struct TodoRootView: View {
                 app.sheet = .todoEdit(task.id)
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    // Two lines at most, so the list stays a list and never a page of paragraphs. The whole title is
+                    // in the edit sheet and in what VoiceOver reads.
                     Text(task.title)
                         .font(.sans(17, .sans, relativeTo: .body))
                         .foregroundStyle(done ? theme.fgSubtle : theme.fg)
                         .strikethrough(done || filling, color: theme.fgSubtle)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .multilineTextAlignment(.leading)
                     if let parts = trailingParts(task) {
@@ -166,6 +176,13 @@ struct TodoRootView: View {
         .accessibilityAction { todo.toggle(task) }
         .accessibilityAction(named: "Edit") { app.sheet = .todoEdit(task.id) }
         .accessibilityAction(named: "Delete") { todo.delete(task) }
+        .accessibilityActions {
+            // Keep as one is on the line under the list for a few seconds; VoiceOver and Switch Control users get it
+            // on each of the note's tasks for as long as it is offered.
+            if todo.keepOffer?.ids.contains(task.id) == true {
+                Button(TodoCopy.keepAsOne) { todo.keepAsOne() }
+            }
+        }
     }
 
     /// "Tomorrow 09:00": the day in Geist, the time in Geist Mono. A done task shows when it was done.
@@ -200,6 +217,9 @@ struct TodoRootView: View {
             } else if let blocker = todo.blocker {
                 blockerCard(blocker)
                     .transition(.opacity)
+            } else if let offer = todo.keepOffer {
+                keepLine(offer)
+                    .transition(.opacity)
             } else if let notice = todo.notice {
                 Text(notice)
                     .font(.sans(14, .sans, relativeTo: .footnote))
@@ -225,7 +245,32 @@ struct TodoRootView: View {
         .background(theme.bg)
         .animation(.snappy(duration: 0.28), value: todo.phase)
         .animation(.snappy(duration: 0.22), value: todo.notice)
+        .animation(.snappy(duration: 0.22), value: todo.keepOffer)
         .animation(.snappy(duration: 0.22), value: todo.deleted?.id)
+    }
+
+    /// "3 to-dos from your note   Keep as one": one quiet tap puts a split note back together.
+    private func keepLine(_ offer: TodoModel.KeepOffer) -> some View {
+        HStack(spacing: 4) {
+            Text(TodoCopy.fromYourNote(offer.ids.count))
+                .font(.sans(14, .sans, relativeTo: .footnote))
+                .foregroundStyle(theme.fgMuted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Button {
+                todo.keepAsOne()
+            } label: {
+                Text(TodoCopy.keepAsOne)
+                    .font(.sans(14, .sansSemibold, relativeTo: .footnote))
+                    .foregroundStyle(theme.signalInk)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func undoBar(_ task: TodoTask) -> some View {

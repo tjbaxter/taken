@@ -20,6 +20,16 @@ final class TodoModel {
         case sorting
     }
 
+    /// A note the model split into several to-dos, offered back as one ("Keep as one"): Apple's generative AI guidance
+    /// asks for results that are easy to revert, and one tap after the save does that without a review screen.
+    struct KeepOffer: Equatable, Sendable {
+        let noteId: UUID
+        /// The note's tasks, in the order said.
+        let ids: [UUID]
+        /// The words as they were said.
+        let transcript: String
+    }
+
     /// Why voice capture cannot run right now.
     enum Blocker: Equatable, Sendable {
         case microphone
@@ -48,6 +58,9 @@ final class TodoModel {
     private(set) var completing: Set<UUID> = []
     /// A swiped-away task, offered back for a few seconds.
     private(set) var deleted: TodoTask?
+    /// "3 to-dos from your note, Keep as one": for `keepOfferDuration`, or until the list changes, the mic is tapped or
+    /// the tab is left, whichever comes first. VoiceOver gets the same as an action on each of the note's tasks.
+    private(set) var keepOffer: KeepOffer?
     /// The note being sorted: saved whole already, kept out of the list until its tasks replace it.
     private(set) var sortingNote: UUID?
     /// The moment the list reads from (due labels, Done today). Moves with the clock while the tab is open.
@@ -59,6 +72,7 @@ final class TodoModel {
     @ObservationIgnored private var watchTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
     @ObservationIgnored private var deletedTask: Task<Void, Never>?
+    @ObservationIgnored private var keepTask: Task<Void, Never>?
     @ObservationIgnored private var startedAt = Date()
     @ObservationIgnored private var lastVoiceAt = Date()
     @ObservationIgnored private var noiseFloor: Float = -60
@@ -76,6 +90,8 @@ final class TodoModel {
     nonisolated static let longestNote: TimeInterval = 120
     /// The model gets this long to sort a note before it is saved whole.
     nonisolated static let sortingLimit: Duration = .seconds(15)
+    /// Keep as one stays on screen this long at most.
+    nonisolated static let keepOfferDuration: Duration = .seconds(10)
 
     init(store: TodoStore, isDemo: Bool, launchScreen: String?, clockNow: @escaping @Sendable () -> Date) {
         self.store = store
@@ -149,7 +165,11 @@ final class TodoModel {
     func refresh() {
         now = clockNow()
         let fresh = store.load()
-        if fresh != state { state = fresh }
+        if fresh != state {
+            state = fresh
+            // Changed elsewhere (a Shortcut, another build): the note's tasks may not be the ones offered.
+            dismissKeepOffer()
+        }
     }
 
     /// Voice to-dos need Taken Pro after the first note (REDESIGN.md); the first note is on the house.
@@ -162,6 +182,7 @@ final class TodoModel {
 
     /// The mic button: start, or stop and sort.
     func micTapped(_ app: AppModel) {
+        dismissKeepOffer()
         attach(app)
         switch phase {
         case .listening:
@@ -178,6 +199,7 @@ final class TodoModel {
 
     /// A quick capture (Siri, the control, the Lock Screen, the quick action) asked to start listening.
     func startFromRequest(_ app: AppModel) {
+        dismissKeepOffer()
         attach(app)
         guard phase == .idle else { return }
         whenAllowed(app) { [weak self] in
@@ -338,6 +360,7 @@ final class TodoModel {
     func submitTyped(_ text: String, app: AppModel) {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, phase == .idle else { return }
+        dismissKeepOffer()
         attach(app)
         whenAllowed(app) { [weak self] in
             guard let self, self.phase == .idle else { return }
@@ -373,7 +396,11 @@ final class TodoModel {
         arrived = Set(added.map(\.id))
         TodoHaptics.success(hapticsOn)
         announce(added.count == 1 ? "1 to-do added: \(added[0].title)." : "\(added.count) to-dos added.")
-        if let line = TodoCopy.sortingNote(extraction.sorting) {
+        // The sorting line only shows when the model did not sort, and Keep as one only when it did and split the
+        // note, so the two never compete for the line.
+        if extraction.sorting == .model && added.count >= 2 {
+            offerKeep(KeepOffer(noteId: added[0].noteId, ids: added.map(\.id), transcript: words))
+        } else if let line = TodoCopy.sortingNote(extraction.sorting) {
             show(line, for: .seconds(8))
         }
         Task { [weak self] in
@@ -457,6 +484,49 @@ final class TodoModel {
         write { $0.eraseAll() }
     }
 
+    // MARK: Keep as one
+
+    /// The note's tasks become one task again: the words as said for a short note (otherwise the titles joined), the
+    /// earliest due date, the same note. Nothing changes when one of them was done or deleted meanwhile.
+    func keepAsOne() {
+        guard let offer = keepOffer else { return }
+        dismissKeepOffer()
+        let tasks = offer.ids.compactMap { state.task($0) }
+        guard tasks.count == offer.ids.count,
+              let title = TodoMerge.title(transcript: offer.transcript, titles: tasks.map(\.title)) else { return }
+        let due = TodoMerge.earliestDue(tasks.map(\.due), clock: clock)
+        let merged = withAnimation(.snappy(duration: 0.3), {
+            write { $0.mergeNote(ids: offer.ids, title: title, due: due) }
+        }) ?? nil
+        guard let merged else { return }
+        TodoHaptics.soft(hapticsOn)
+        arrived = [merged.id]
+        announce(TodoCopy.keptAsOne)
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.6))
+            withAnimation(.easeOut(duration: 0.4)) { self?.arrived = [] }
+        }
+    }
+
+    /// Takes Keep as one away: any change to the list, a mic tap, leaving the tab, or its time running out.
+    func dismissKeepOffer() {
+        keepTask?.cancel()
+        keepTask = nil
+        guard keepOffer != nil else { return }
+        withAnimation(.snappy(duration: 0.2)) { keepOffer = nil }
+    }
+
+    private func offerKeep(_ offer: KeepOffer) {
+        clearNotice()
+        keepTask?.cancel()
+        withAnimation(.snappy(duration: 0.2)) { keepOffer = offer }
+        keepTask = Task { [weak self] in
+            try? await Task.sleep(for: Self.keepOfferDuration)
+            guard !Task.isCancelled else { return }
+            self?.dismissKeepOffer()
+        }
+    }
+
     // MARK: Writing
 
     @discardableResult
@@ -465,6 +535,8 @@ final class TodoModel {
             let result = try store.update(body)
             state = result.state
             now = clockNow()
+            // Any change to the list takes Keep as one away (a note just sorted offers it after its write).
+            dismissKeepOffer()
             if !isDemo {
                 let tasks = result.state.tasks
                 Task { await TodoNotificationScheduler.shared.reschedule(tasks) }
@@ -480,6 +552,8 @@ final class TodoModel {
     // MARK: Notice
 
     private func show(_ text: String, for duration: Duration = .seconds(5)) {
+        // One line under the list at a time.
+        dismissKeepOffer()
         noticeTask?.cancel()
         withAnimation(.snappy(duration: 0.2)) { notice = text }
         noticeTask = Task { [weak self] in
@@ -539,11 +613,17 @@ enum TodoCopy {
     static let openSettings = "Open Settings"
     static let typeInstead = "Type it instead"
     static let doneToday = "Done today"
+    /// Keep as one: the button beside the line, and what VoiceOver says once it is done.
+    static let keepAsOne = "Keep as one"
+    static let keptAsOne = "Kept as one to-do."
+
+    /// "3 to-dos from your note": the line beside Keep as one.
+    static func fromYourNote(_ count: Int) -> String { "\(count) to-dos from your note" }
 
     static let all: [String] = [empty, listening, sorting, tapToFinish, needsAppleIntelligence, couldNotSort,
                                 appleIntelligenceOff, modelNotReady,
                                 microphoneOff, speechOff, unavailable, microphoneBusy, nothingHeard, couldNotSave,
-                                openSettings, typeInstead, doneToday]
+                                openSettings, typeInstead, doneToday, keepAsOne, keptAsOne, fromYourNote(3)]
 }
 
 @MainActor

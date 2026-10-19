@@ -188,6 +188,28 @@ struct TodoState: Codable, Hashable, Sendable {
         return added
     }
 
+    /// Keep as one (REDESIGN.md): a note the model split into several to-dos becomes one to-do again. Replaces exactly
+    /// these tasks, while every one is still here, still open and from the same note, with one task that keeps the
+    /// note, the first task's place and when the note was said. Returns it; nil, with nothing changed, otherwise (one
+    /// was done or deleted meanwhile, or the title is empty).
+    @discardableResult
+    mutating func mergeNote(ids: [UUID], title: String, due: TodoDue?) -> TodoTask? {
+        var unique: [UUID] = []
+        for id in ids where !unique.contains(id) { unique.append(id) }
+        guard unique.count >= 2, let title = TodoText.clean(title) else { return nil }
+        let group = unique.compactMap { task($0) }
+        guard group.count == unique.count, group.allSatisfy({ !$0.isDone }), Set(group.map(\.noteId)).count == 1,
+              let first = group.min(by: { $0.order < $1.order }),
+              let index = tasks.firstIndex(where: { $0.id == first.id }) else { return nil }
+        var merged = first
+        merged.title = title
+        merged.due = due
+        tasks[index] = merged
+        let others = Set(unique).subtracting([first.id])
+        tasks.removeAll { others.contains($0.id) }
+        return merged
+    }
+
     /// Marks a task done. Done twice keeps the first time.
     mutating func complete(_ id: UUID, at now: Date) {
         guard let index = tasks.firstIndex(where: { $0.id == id }), tasks[index].completedAt == nil else { return }
@@ -265,7 +287,11 @@ enum TodoOrdering {
 
     /// The moment a task is due by: its time, or the end of its day where the iPhone is now.
     static func sortDate(_ task: TodoTask, clock: DayClock) -> Date? {
-        switch task.due {
+        sortDate(task.due, clock: clock)
+    }
+
+    static func sortDate(_ due: TodoDue?, clock: DayClock) -> Date? {
+        switch due {
         case .time(let date):
             return date
         case .day(let day):
@@ -282,6 +308,28 @@ enum TodoOrdering {
         if a.noteId != b.noteId { return a.noteId.uuidString < b.noteId.uuidString }
         if a.order != b.order { return a.order < b.order }
         return a.id.uuidString < b.id.uuidString
+    }
+}
+
+/// Keep as one: what a split note reads as once it is put back together. Pure, so the tests pin it.
+enum TodoMerge {
+    /// A note this short reads best as it was said.
+    static let maxSpokenWords = 12
+
+    /// The words as they were said when the note was 12 words or fewer ("Order Reach toothbrushes on Amazon"),
+    /// otherwise the tasks' titles in the order said, joined with commas. Cleaned like every title, so at most
+    /// `TodoText.maxTitleLength` characters: the list stays short lines, never paragraphs.
+    static func title(transcript: String, titles: [String]) -> String? {
+        let words = transcript.split(whereSeparator: { $0.isWhitespace }).count
+        if words > 0, words <= maxSpokenWords, let spoken = TodoText.clean(transcript) { return spoken }
+        return TodoText.clean(titles.joined(separator: ", "))
+    }
+
+    /// The soonest of the due dates, ordered as the list orders them (a day alone is due by its end), or nil.
+    static func earliestDue(_ dues: [TodoDue?], clock: DayClock) -> TodoDue? {
+        dues.compactMap { $0 }.min { a, b in
+            (TodoOrdering.sortDate(a, clock: clock) ?? .distantFuture) < (TodoOrdering.sortDate(b, clock: clock) ?? .distantFuture)
+        }
     }
 }
 
