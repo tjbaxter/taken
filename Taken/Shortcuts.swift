@@ -42,5 +42,15 @@ struct TakenShortcuts: AppShortcutsProvider {
             shortTitle: "New voice to-do",
             systemImageName: "mic"
         )
+        // Reads the list out, and hands it on in a shortcut (TodoAgentIntents.swift). "Add to-do" needs a title, which
+        // a phrase cannot carry, so it stays an action in Shortcuts.
+        AppShortcut(
+            intent: GetTodosIntent(),
+            phrases: [
+                "What's on my to-do list in \(.applicationName)",
+            ],
+            shortTitle: "Get to-dos",
+            systemImageName: "checklist"
+        )
     }
 }
