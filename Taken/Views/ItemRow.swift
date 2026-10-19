@@ -85,10 +85,10 @@ struct ItemRowView: View {
         .accessibilityAction(named: "Edit item") { onOpen() }
     }
 
-    /// "Daily", "2x daily · 1 of 2", "Every other day · Next: Thursday".
+    /// "Daily", "2x daily · 1 of 2", "Every other day · Next: Thursday", "Weekly · Next: Thursday".
     private var subtitle: String {
         let frequency = Fmt.frequency(row.frequency)
-        if let nextLabel, row.doses.isEmpty { return "\(frequency) \u{00B7} \(nextLabel)" }
+        if let nextLabel, row.doses.isEmpty { return Fmt.notDue(row.frequency, next: nextLabel) }
         if row.isDue && row.dosesPerDay > 1 { return "\(frequency) \u{00B7} \(row.takenCount) of \(row.dosesPerDay)" }
         return frequency
     }

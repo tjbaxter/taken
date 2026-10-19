@@ -67,7 +67,7 @@ enum Fmt {
         return year ? "\(dayMonth) \(c.year ?? 1970)" : dayMonth
     }
 
-    /// "Daily", "2x daily", "Every other day", "Weekdays", "Mon Wed Fri".
+    /// "Daily", "2x daily", "Every other day", "Weekly · Thu", "Weekdays", "Mon Wed Fri".
     static func frequency(_ frequency: Frequency) -> String {
         switch frequency {
         case .daily(let times):
@@ -77,12 +77,21 @@ enum Fmt {
         case .weekdays(let set):
             if set.isEmpty { return "No days set" }
             if set.count == 7 { return "Daily" }
+            // One day is Weekly: a weekly shot on its day.
+            if set.count == 1, let day = set.first { return "Weekly \u{00B7} \(weekdaysShort[(day + 5) % 7])" }
             if set == [2, 3, 4, 5, 6] { return "Weekdays" }
             if set == [1, 7] { return "Weekends" }
             // Monday-first order.
             let order = [2, 3, 4, 5, 6, 7, 1]
             return order.filter { set.contains($0) }.map { weekdaysShort[($0 + 5) % 7] }.joined(separator: " ")
         }
+    }
+
+    /// Under an item in Not today: "Every other day · Next: Thursday". A weekly item names its day once, "Weekly · Next:
+    /// Thursday", not "Weekly · Thu · Next: Thursday".
+    static func notDue(_ frequency: Frequency, next: String) -> String {
+        if case .weekdays(let set) = frequency, set.count == 1 { return "Weekly \u{00B7} \(next)" }
+        return "\(self.frequency(frequency)) \u{00B7} \(next)"
     }
 
     /// "Next: tomorrow", "Next: Thursday", "Next: 14 Oct"

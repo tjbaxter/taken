@@ -112,6 +112,37 @@ final class DayLogicTests: XCTestCase {
         XCTAssertEqual(Fmt.frequency(.daily(times: 2)), "2x daily")
     }
 
+    /// Weekly is a one-day Days set: due, pending and nudged on that day only, with no new streak or nudge logic.
+    func testAWeeklyItemIsPendingOnlyOnItsDayAndNudgedOnlyThen() {
+        let shot = makeItem("Semaglutide", "SEM", .weekdays([5]), created: at(2026, 10, 1, 8))
+        var state = StackState(items: [shot])
+        state.settings.reminderEnabled = true
+        state.settings.reminderMinutes = 21 * 60
+        let engine = StackEngine(state: state, clock: londonClock())
+        let monday = DayKey(year: 2026, month: 10, day: 12)
+        let thursday = monday.adding(3)
+        for offset in 0..<7 {
+            let day = monday.adding(offset)
+            XCTAssertEqual(engine.isDue(shot, on: day), day == thursday, "due only on Thursday, not \(Fmt.longDay(day))")
+        }
+        XCTAssertEqual(engine.todaySummary(now: at(2026, 10, 15, 9)).items.filter(\.isPending).map(\.item.name),
+                       ["Semaglutide"])
+        XCTAssertTrue(engine.todaySummary(now: at(2026, 10, 12, 9)).items.filter(\.isPending).isEmpty)
+        XCTAssertEqual(engine.todaySummary(now: at(2026, 10, 12, 9)).notDue.map(\.item.name), ["Semaglutide"])
+        XCTAssertEqual(engine.nextDueDay(for: shot, after: monday), thursday)
+
+        let plans = Reminders.plan(state: state, now: at(2026, 10, 12, 9), timeZone: london)
+        XCTAssertEqual(plans.map(\.day), [thursday, thursday.adding(7)], "the nudge fires on its day, and only then")
+        XCTAssertEqual(plans.first?.body, "1 pending: SEM")
+
+        XCTAssertEqual(Fmt.frequency(.weekdays([5])), "Weekly \u{00B7} Thu")
+        XCTAssertEqual(Fmt.frequency(.weekdays([1])), "Weekly \u{00B7} Sun")
+        XCTAssertEqual(Fmt.notDue(.weekdays([5]), next: Fmt.next(thursday, today: monday)),
+                       "Weekly \u{00B7} Next: Thursday", "the day once, not Weekly · Thu · Next: Thursday")
+        XCTAssertEqual(Fmt.notDue(.alternateDays, next: "Next: tomorrow"), "Every other day \u{00B7} Next: tomorrow")
+        XCTAssertEqual(Fmt.notDue(.weekdays([2, 4, 6]), next: "Next: Friday"), "Mon Wed Fri \u{00B7} Next: Friday")
+    }
+
     func testMultiDoseCompletion() {
         let c = londonClock()
         let fish = makeItem("Fish Oil", "FSH", .daily(times: 2), created: at(2026, 10, 1, 8))
