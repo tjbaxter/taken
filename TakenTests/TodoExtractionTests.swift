@@ -217,7 +217,7 @@ final class TodoExtractionTests: XCTestCase {
         let items = try XCTUnwrap(info["UIApplicationShortcutItems"] as? [[String: Any]])
         XCTAssertEqual(items.first?["UIApplicationShortcutItemType"] as? String, TodoCaptureRoute.quickActionType)
 
-        for text in [microphone, speech, TodoPrompt.instructions] + TodoCopy.all + ProCopy.features {
+        for text in [microphone, speech, TodoPrompt.instructions] + TodoCopy.all + ProCopy.features + TodoEvalCopy.all {
             XCTAssertNil(text.range(of: "free", options: .caseInsensitive), text)
             XCTAssertFalse(text.contains("\u{2014}") || text.contains("\u{2013}"), "no em or en dash: \(text)")
             XCTAssertFalse(text.contains("!"), text)
