@@ -22,7 +22,8 @@ struct TodoProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<TodoEntry>) -> Void) {
         let now = Date()
-        // The app reloads this whenever the tasks change; the hourly refresh keeps the order honest as times pass.
+        // The app reloads this whenever the tasks or the list in view (Personal or Work) change; the hourly refresh keeps
+        // the order honest as times pass.
         completion(Timeline(entries: [Self.entry(at: now)], policy: .after(now.addingTimeInterval(3600))))
     }
 

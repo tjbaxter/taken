@@ -12,6 +12,44 @@ enum TodoDue: Hashable, Sendable {
     case day(DayKey)
 }
 
+/// Which list a to-do is on (REDESIGN.md): personal things and work things are never mixed. One list shows at a time,
+/// and a note lands in the list in view. The names are Apple's own default Focus names.
+enum TodoArea: String, Codable, CaseIterable, Identifiable, Sendable {
+    case personal
+    case work
+
+    var id: String { rawValue }
+
+    /// "Personal", "Work"
+    var title: String {
+        switch self {
+        case .personal: return "Personal"
+        case .work: return "Work"
+        }
+    }
+
+    /// The SF Symbol on a move to this list.
+    var symbol: String {
+        switch self {
+        case .personal: return "person"
+        case .work: return "briefcase"
+        }
+    }
+
+    /// The other list.
+    var other: TodoArea { self == .personal ? .work : .personal }
+
+    /// A stored value; anything missing or unknown (a file from before lists, or from a later version with more) is
+    /// Personal, so no task is ever lost to a list this build cannot show.
+    init(stored: String?) {
+        self = stored.flatMap(TodoArea.init(rawValue:)) ?? .personal
+    }
+
+    init(from decoder: any Decoder) throws {
+        self.init(stored: try? decoder.singleValueContainer().decode(String.self))
+    }
+}
+
 /// One thing to do, from a voice note.
 struct TodoTask: Codable, Identifiable, Hashable, Sendable {
     var id: UUID
@@ -24,9 +62,11 @@ struct TodoTask: Codable, Identifiable, Hashable, Sendable {
     var noteId: UUID
     /// Where it came in its note, so a ramble keeps the order it was said in.
     var order: Int
+    /// Personal or Work: the list in view when it was said, or where it was moved since.
+    var area: TodoArea
 
     init(id: UUID = UUID(), title: String, due: TodoDue? = nil, createdAt: Date, completedAt: Date? = nil,
-         noteId: UUID, order: Int = 0) {
+         noteId: UUID, order: Int = 0, area: TodoArea = .personal) {
         self.id = id
         self.title = title
         self.due = due
@@ -34,6 +74,7 @@ struct TodoTask: Codable, Identifiable, Hashable, Sendable {
         self.completedAt = completedAt
         self.noteId = noteId
         self.order = order
+        self.area = area
     }
 
     var isDone: Bool { completedAt != nil }
@@ -48,7 +89,7 @@ struct TodoTask: Codable, Identifiable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, title, dueAt, dueDay, createdAt, completedAt, noteId, order
+        case id, title, dueAt, dueDay, createdAt, completedAt, noteId, order, area
         /// Builds before 1.1 shipped stored every due date as a moment, a day alone at noon.
         case dueDate, hasTime
     }
@@ -72,6 +113,8 @@ struct TodoTask: Codable, Identifiable, Hashable, Sendable {
         completedAt = try? c.decodeIfPresent(Date.self, forKey: .completedAt)
         noteId = (try? c.decodeIfPresent(UUID.self, forKey: .noteId)) ?? id
         order = (try? c.decodeIfPresent(Int.self, forKey: .order)) ?? 0
+        // Lists came in 1.1: every task saved before them is Personal.
+        area = TodoArea(stored: try? c.decodeIfPresent(String.self, forKey: .area))
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -87,6 +130,7 @@ struct TodoTask: Codable, Identifiable, Hashable, Sendable {
         try c.encodeIfPresent(completedAt, forKey: .completedAt)
         try c.encode(noteId, forKey: .noteId)
         try c.encode(order, forKey: .order)
+        try c.encode(area.rawValue, forKey: .area)
     }
 }
 
@@ -107,16 +151,21 @@ struct TodoState: Codable, Hashable, Sendable {
     var tasks: [TodoTask] = []
     /// The first voice note ever saved. That one needs no Taken Pro; after it the mic does. Erasing keeps it.
     var firstNoteAt: Date?
+    /// The list in view (Personal or Work). Taken reopens on it, quick captures record into it, and the Lock Screen
+    /// widget shows it.
+    var lastArea: TodoArea = .personal
 
     /// Done tasks are kept this long (for "Done today" and an undo), then dropped.
     static let doneRetention: TimeInterval = 30 * 24 * 60 * 60
 
-    init(tasks: [TodoTask] = [], firstNoteAt: Date? = nil) {
+    init(tasks: [TodoTask] = [], firstNoteAt: Date? = nil, lastArea: TodoArea = .personal) {
         self.tasks = tasks
         self.firstNoteAt = firstNoteAt
+        self.lastArea = lastArea
     }
 
-    private enum CodingKeys: String, CodingKey { case schemaVersion, tasks, firstNoteAt }
+    // Additive: the schema stays 1. A file from before lists loads with every task Personal and Personal in view.
+    private enum CodingKeys: String, CodingKey { case schemaVersion, tasks, firstNoteAt, lastArea }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -125,6 +174,15 @@ struct TodoState: Codable, Hashable, Sendable {
         let lossy = (try? c.decodeIfPresent([LossyTask].self, forKey: .tasks)) ?? []
         tasks = lossy.compactMap(\.task).filter { !$0.title.isEmpty }
         firstNoteAt = try? c.decodeIfPresent(Date.self, forKey: .firstNoteAt)
+        lastArea = TodoArea(stored: try? c.decodeIfPresent(String.self, forKey: .lastArea))
+    }
+
+    func encode(to encoder: any Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(schemaVersion, forKey: .schemaVersion)
+        try c.encode(tasks, forKey: .tasks)
+        try c.encodeIfPresent(firstNoteAt, forKey: .firstNoteAt)
+        try c.encode(lastArea.rawValue, forKey: .lastArea)
     }
 
     private struct LossyTask: Decodable {
@@ -139,10 +197,15 @@ struct TodoState: Codable, Hashable, Sendable {
 
     func task(_ id: UUID) -> TodoTask? { tasks.first { $0.id == id } }
 
-    /// Every open task, whenever it was said: yesterday's stay until they are done. Due first, soonest first; then
-    /// the newest note first, each note in the order it was said.
+    /// Every open task on both lists, whenever it was said: yesterday's stay until they are done. Due first, soonest
+    /// first; then the newest note first, each note in the order it was said. Due-time notifications cover both lists.
     func openTasks(clock: DayClock) -> [TodoTask] {
         TodoOrdering.sorted(tasks.filter { !$0.isDone }, clock: clock)
+    }
+
+    /// One list's open tasks, in the same order.
+    func openTasks(in area: TodoArea, clock: DayClock) -> [TodoTask] {
+        TodoOrdering.sorted(tasks.filter { !$0.isDone && $0.area == area }, clock: clock)
     }
 
     /// Tasks done on the day being lived (the day-start hour decides it, as it does for doses), newest first.
@@ -154,13 +217,18 @@ struct TodoState: Codable, Hashable, Sendable {
         .sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
     }
 
+    /// One list's Done today.
+    func doneTasks(on day: DayKey, in area: TodoArea, clock: DayClock) -> [TodoTask] {
+        doneTasks(on: day, clock: clock).filter { $0.area == area }
+    }
+
     // MARK: Changing
 
-    /// Adds a note's tasks in the order they were said. Returns what was added.
+    /// Adds a note's tasks, in the order they were said, to one list. Returns what was added.
     @discardableResult
-    mutating func add(_ drafts: [TodoDraft], noteId: UUID = UUID(), at now: Date) -> [TodoTask] {
+    mutating func add(_ drafts: [TodoDraft], area: TodoArea = .personal, noteId: UUID = UUID(), at now: Date) -> [TodoTask] {
         let added = drafts.enumerated().map { index, draft in
-            TodoTask(title: draft.title, due: draft.due, createdAt: now, noteId: noteId, order: index)
+            TodoTask(title: draft.title, due: draft.due, createdAt: now, noteId: noteId, order: index, area: area)
         }
         tasks.append(contentsOf: added)
         if !added.isEmpty && firstNoteAt == nil { firstNoteAt = now }
@@ -171,7 +239,7 @@ struct TodoState: Codable, Hashable, Sendable {
     /// A voice note is saved whole the moment its words are known (so nothing said is lost if iOS ends Taken while the
     /// model is still sorting), then replaced here by the tasks the model made of it. Returns the note's tasks as they
     /// now stand: the sorted ones; the whole note when the drafts are just that; nothing when the note was deleted or
-    /// erased meanwhile; and the note as it is when someone already changed it.
+    /// erased meanwhile; and the note as it is when someone already changed it. The tasks stay on the note's list.
     @discardableResult
     mutating func replaceNote(_ placeholder: UUID, with drafts: [TodoDraft], at now: Date) -> [TodoTask] {
         guard let index = tasks.firstIndex(where: { $0.id == placeholder }) else { return [] }
@@ -181,7 +249,8 @@ struct TodoState: Codable, Hashable, Sendable {
         guard !drafts.isEmpty else { return [whole] }
         tasks.remove(at: index)
         let added = drafts.enumerated().map { offset, draft in
-            TodoTask(title: draft.title, due: draft.due, createdAt: whole.createdAt, noteId: whole.noteId, order: offset)
+            TodoTask(title: draft.title, due: draft.due, createdAt: whole.createdAt, noteId: whole.noteId, order: offset,
+                     area: whole.area)
         }
         tasks.append(contentsOf: added)
         prune(now: now)
@@ -230,6 +299,14 @@ struct TodoState: Codable, Hashable, Sendable {
         tasks[index].due = due
     }
 
+    /// Moves a task to the other list (a swipe, or the edit sheet). Returns whether it moved.
+    @discardableResult
+    mutating func move(_ id: UUID, to area: TodoArea) -> Bool {
+        guard let index = tasks.firstIndex(where: { $0.id == id }), tasks[index].area != area else { return false }
+        tasks[index].area = area
+        return true
+    }
+
     @discardableResult
     mutating func delete(_ id: UUID) -> TodoTask? {
         guard let index = tasks.firstIndex(where: { $0.id == id }) else { return nil }
@@ -242,9 +319,10 @@ struct TodoState: Codable, Hashable, Sendable {
         tasks.append(task)
     }
 
-    /// Erase all data: the tasks go, the first free note stays used.
+    /// Erase all data: the tasks go and Personal is in view again; the first free note stays used.
     mutating func eraseAll() {
         tasks = []
+        lastArea = .personal
     }
 
     /// Drops tasks done more than `doneRetention` ago.

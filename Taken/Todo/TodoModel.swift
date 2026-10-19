@@ -63,6 +63,10 @@ final class TodoModel {
     private(set) var keepOffer: KeepOffer?
     /// The note being sorted: saved whole already, kept out of the list until its tasks replace it.
     private(set) var sortingNote: UUID?
+    /// The list a note goes to: the one in view when the mic was tapped (or a quick capture asked), fixed until the
+    /// note is saved. The live card names it, so the destination shows before a word is said. The model never
+    /// chooses the list.
+    private(set) var captureArea: TodoArea = .personal
     /// The moment the list reads from (due labels, Done today). Moves with the clock while the tab is open.
     private(set) var now: Date
 
@@ -115,14 +119,17 @@ final class TodoModel {
         let demoNow = DemoData.referenceNow()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("todos-demo-\(UUID().uuidString).json")
         let store = TodoStore(fileURL: url)
-        let seeded = screen == "todo-empty" ? TodoState() : TodoDemo.state(now: demoNow, recording: screen == "todo-recording")
+        let seeded = screen == "todo-empty"
+            ? TodoState()
+            : TodoDemo.state(now: demoNow, recording: screen == "todo-recording", inView: screen == "todo-work" ? .work : .personal)
         try? store.replace(with: seeded)
         let model = TodoModel(store: store, isDemo: true, launchScreen: screen, clockNow: { demoNow })
         if screen == "todo-recording" { model.showDemoRecording() }
         return model
     }
 
-    /// `-screen todo`, `todo-recording` and `todo-empty` open on the To-do tab.
+    /// `-screen todo`, `todo-work`, `todo-recording` and `todo-empty` open on the To-do tab (`todo-work` with Work in
+    /// view).
     static func opensOnTodo(_ launchScreen: String?) -> Bool {
         launchScreen?.hasPrefix("todo") == true
     }
@@ -130,10 +137,17 @@ final class TodoModel {
     // MARK: Reading
 
     var clock: DayClock { DayClock(dayStartHour: dayStartHour) }
-    var openTasks: [TodoTask] { state.openTasks(clock: clock).filter { $0.id != sortingNote } }
-    var doneToday: [TodoTask] { state.doneTasks(on: clock.day(for: now), clock: clock) }
+    /// The list in view: Personal or Work. One at a time, never mixed.
+    var area: TodoArea { state.lastArea }
+    var openTasks: [TodoTask] { openTasks(in: area) }
+    var doneToday: [TodoTask] { state.doneTasks(on: clock.day(for: now), in: area, clock: clock) }
     var isEmpty: Bool { openTasks.isEmpty && doneToday.isEmpty }
     var isListening: Bool { phase == .listening }
+
+    /// One list's open tasks, without the note still being sorted.
+    func openTasks(in area: TodoArea) -> [TodoTask] {
+        state.openTasks(in: area, clock: clock).filter { $0.id != sortingNote }
+    }
 
     func dueLabel(_ task: TodoTask) -> String? { TodoText.dueLabel(task, now: now, clock: clock) }
     func dueParts(_ task: TodoTask) -> (day: String?, time: String?)? { TodoText.dueParts(task, now: now, clock: clock) }
@@ -190,22 +204,26 @@ final class TodoModel {
         case .starting, .sorting:
             break
         case .idle:
+            // The list in view at the tap is where the note goes, even if the paywall comes first.
+            let area = self.area
             whenAllowed(app) { [weak self] in
                 guard let self else { return }
-                Task { await self.startListening() }
+                Task { await self.startListening(into: area) }
             }
         }
     }
 
-    /// A quick capture (Siri, the control, the Lock Screen, the quick action) asked to start listening.
+    /// A quick capture (Siri, the control, the Lock Screen, the quick action) asked to start listening. Taken opens on
+    /// the list last in view and records into it.
     func startFromRequest(_ app: AppModel) {
         dismissKeepOffer()
         attach(app)
         guard phase == .idle else { return }
+        let area = self.area
         whenAllowed(app) { [weak self] in
             guard let self else { return }
             // Siri may still be handing the microphone back: a busy microphone gets two more tries.
-            Task { await self.startListening(busyRetries: 2) }
+            Task { await self.startListening(into: area, busyRetries: 2) }
         }
     }
 
@@ -225,8 +243,9 @@ final class TodoModel {
         }
     }
 
-    private func startListening(busyRetries: Int = 0) async {
+    private func startListening(into area: TodoArea, busyRetries: Int = 0) async {
         guard phase == .idle else { return }
+        captureArea = area
         if isDemo {
             // CI has no microphone: the demo shows the listening state a tap or a quick capture opens on.
             showDemoRecording()
@@ -261,7 +280,7 @@ final class TodoModel {
             phase = .idle
             if busyRetries > 0 {
                 try? await Task.sleep(for: .milliseconds(700))
-                await startListening(busyRetries: busyRetries - 1)
+                await startListening(into: area, busyRetries: busyRetries - 1)
             } else {
                 show(TodoCopy.microphoneBusy)
             }
@@ -353,31 +372,35 @@ final class TodoModel {
             return
         }
         transcript = words
-        await save(note: words)
+        await save(note: words, area: captureArea)
     }
 
-    /// Typed instead of said (no microphone, or no on-device speech): the same sorting, the same Pro rule.
+    /// Typed instead of said (no microphone, or no on-device speech): the same sorting, the same Pro rule, into the
+    /// list in view.
     func submitTyped(_ text: String, app: AppModel) {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, phase == .idle else { return }
         dismissKeepOffer()
         attach(app)
+        let area = self.area
         whenAllowed(app) { [weak self] in
             guard let self, self.phase == .idle else { return }
             self.phase = .sorting
+            self.captureArea = area
             self.transcript = words
             Task {
                 let background = BackgroundTime.begin("Saving typed to-dos")
                 defer { background.end() }
-                await self.save(note: words)
+                await self.save(note: words, area: area)
             }
         }
     }
 
-    private func save(note words: String) async {
+    private func save(note words: String, area: TodoArea) async {
         let context = TodoContext(now: clockNow(), timeZone: .current, dayStartHour: dayStartHour)
-        // Saved whole first, out of sight, so nothing said is lost if iOS ends Taken before the model answers.
-        let whole = write { $0.add(TodoValidation.wholeNote(words), at: context.now) }?.first
+        // Saved whole first, out of sight, so nothing said is lost if iOS ends Taken before the model answers. The
+        // model's tasks replace it on the same list.
+        let whole = write { $0.add(TodoValidation.wholeNote(words), area: area, at: context.now) }?.first
         sortingNote = whole?.id
         let extractor = self.extractor ?? TodoExtractors.best()
         self.extractor = nil
@@ -388,7 +411,7 @@ final class TodoModel {
             if let whole {
                 return write { $0.replaceNote(whole.id, with: drafts, at: context.now) } ?? [whole]
             }
-            return write { $0.add(drafts, at: context.now) } ?? []
+            return write { $0.add(drafts, area: area, at: context.now) } ?? []
         }
         transcript = ""
         phase = .idle
@@ -452,8 +475,32 @@ final class TodoModel {
         }
     }
 
-    func edit(_ id: UUID, title: String, due: TodoDue?) {
-        write { $0.update(id, title: title, due: due) }
+    /// The edit sheet: the words, when it is due, and which list it is on.
+    func edit(_ id: UUID, title: String, due: TodoDue?, area: TodoArea? = nil) {
+        withAnimation(.snappy(duration: 0.25)) {
+            _ = write { (saved: inout TodoState) -> Void in
+                saved.update(id, title: title, due: due)
+                if let area { saved.move(id, to: area) }
+            }
+        }
+    }
+
+    /// A leading swipe or the VoiceOver action: the task leaves this list for the other one, whose count goes up.
+    func move(_ task: TodoTask, to area: TodoArea) {
+        guard task.area != area else { return }
+        let moved = withAnimation(.snappy(duration: 0.25), { write { $0.move(task.id, to: area) } }) ?? false
+        guard moved else { return }
+        TodoHaptics.soft(hapticsOn)
+        announce("\(task.title), moved to \(area.title).")
+    }
+
+    /// The Personal and Work switch. The choice is `lastArea` in todos.json, so Taken reopens on it, quick captures
+    /// record into it and the Lock Screen widget shows it. Fixed while a note is being heard or sorted: the note goes
+    /// to the list the live card names.
+    func select(_ area: TodoArea) {
+        guard area != self.area, phase == .idle else { return }
+        Haptics.selection(hapticsOn)
+        withAnimation(.snappy(duration: 0.25)) { _ = write { $0.lastArea = area } }
     }
 
     func delete(_ task: TodoTask) {
@@ -532,6 +579,7 @@ final class TodoModel {
     @discardableResult
     private func write<T>(_ body: (inout TodoState) throws -> T) -> T? {
         do {
+            let before = state.tasks
             let result = try store.update(body)
             state = result.state
             now = clockNow()
@@ -539,7 +587,11 @@ final class TodoModel {
             dismissKeepOffer()
             if !isDemo {
                 let tasks = result.state.tasks
-                Task { await TodoNotificationScheduler.shared.reschedule(tasks) }
+                // Switching between Personal and Work changes no task, so no notification needs rebuilding.
+                if tasks != before {
+                    Task { await TodoNotificationScheduler.shared.reschedule(tasks) }
+                }
+                // The Lock Screen widget shows the list in view, so it reloads when either changes.
                 WidgetCenter.shared.reloadTimelines(ofKind: TodoCaptureRoute.widgetKind)
             }
             return result.value
@@ -620,10 +672,25 @@ enum TodoCopy {
     /// "3 to-dos from your note": the line beside Keep as one.
     static func fromYourNote(_ count: Int) -> String { "\(count) to-dos from your note" }
 
+    /// Personal and Work. The Work list's empty line; Personal keeps `empty`.
+    static let emptyWork = "Tap the mic and say what needs doing for work"
+    /// The edit sheet's section.
+    static let list = "List"
+
+    static func emptyLine(for area: TodoArea) -> String { area == .work ? emptyWork : empty }
+
+    /// "Listening · Work": where the note goes, before a word is said.
+    static func listeningLine(into area: TodoArea) -> String { "\(TodoCopy.listening) \u{00B7} \(area.title)" }
+
+    /// "Move to Work": the VoiceOver action, named for where the task goes.
+    static func moveAction(to area: TodoArea) -> String { "Move to \(area.title)" }
+
     static let all: [String] = [empty, listening, sorting, tapToFinish, needsAppleIntelligence, couldNotSort,
                                 appleIntelligenceOff, modelNotReady,
                                 microphoneOff, speechOff, unavailable, microphoneBusy, nothingHeard, couldNotSave,
-                                openSettings, typeInstead, doneToday, keepAsOne, keptAsOne, fromYourNote(3)]
+                                openSettings, typeInstead, doneToday, keepAsOne, keptAsOne, fromYourNote(3),
+                                emptyWork, list]
+        + TodoArea.allCases.flatMap { [$0.title, TodoCopy.listeningLine(into: $0), TodoCopy.moveAction(to: $0)] }
 }
 
 @MainActor

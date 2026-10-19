@@ -36,6 +36,7 @@ Tom used 1.0 on his iPhone. Verbatim highlights:
 - Quick capture from anywhere: an App Intent "New voice to-do" that opens straight into recording, offered as a Control Center control, a Lock Screen widget, an Action Button option and a Home Screen quick action (long-press the icon). Siri phrase "Add to-dos in Taken".
 - Privacy: transcription and task extraction happen on the iPhone; the privacy label stays "Data Not Collected". Add NSMicrophoneUsageDescription and NSSpeechRecognitionUsageDescription with plain wording.
 - Pro: voice to-dos need Pro (paywall bullet "VOICE TO-DOS"); the first voice note works without Pro so people feel it.
+- Two lists, Personal and Work (Tom 2026-10-19: "personal things and then business related to-dos ... toggle it"), one in view at a time under the To-do title, and a note lands in the list in view. Named Work rather than Business because Personal and Work are Apple's own default Focus names (https://support.apple.com/guide/watch/apd6640937c4/watchos) and Sunsama's contexts use #work and #personal (https://help.sunsama.com/docs/usage-guides/channels-and-contexts).
 
 ### Wake-up time (replaces "Day starts at"; Tom 2026-10-13: "this is confusing, fix this, people are allowed to change the day they wake up, don't say don't")
 - The setting is "Wake-up time" (default 07:00, any time of day, mono time picker). One plain helper line: "Doses count for the day you wake up into."
