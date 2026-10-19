@@ -229,6 +229,19 @@ final class TodoGroundingTests: XCTestCase {
         XCTAssertFalse(TranscriptionVocabulary.strings(stack: [], chips: Catalog.presets.map(\.name), catalog: []).isEmpty)
     }
 
+    // The bundled catalog fills the rest after the chips: about 80 names in all, the most widely taken first.
+    func testTheVocabularyTakesTheChipsThenTheBundledCatalog() {
+        let names = TranscriptionVocabulary.catalogNames
+        XCTAssertEqual(names.count, Catalog.entries.filter { !$0.isChip }.count)
+        XCTAssertFalse(names.contains { name in Catalog.presets.contains { $0.name == name } }, "chips are not repeated")
+        let weights = names.compactMap { Catalog.entry(named: $0)?.weight }
+        XCTAssertEqual(weights, weights.sorted(by: >), "most widely taken first")
+        let strings = TranscriptionVocabulary.strings(stack: [], chips: Catalog.presets.map(\.name), catalog: names)
+        XCTAssertEqual(strings.count, TranscriptionVocabulary.catalogLimit)
+        XCTAssertEqual(Array(strings.prefix(Catalog.presets.count)), Catalog.presets.map(\.name), "chips first")
+        XCTAssertTrue(strings.contains(names[0]))
+    }
+
     func testTheVocabularyReadsOnlyActiveItems() throws {
         let store = TakenStore(fileURL: temporaryStoreURL(), postsChangeNotifications: false)
         let created = at(2026, 10, 1, 9)

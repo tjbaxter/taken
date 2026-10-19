@@ -34,10 +34,18 @@ enum TranscriptionVocabulary {
         return result
     }
 
-    /// This person's phrases now: the items they take (not archived, in stack order) and the chip names. Called off the
-    /// main actor once the microphone is already on, so listening never waits on it.
+    /// The bundled names that are not chips, most widely taken first (the catalog's own weight), in listed order
+    /// within a weight. Names only: a brand alias is a hint in the Add sheet, not something to listen for.
+    static let catalogNames: [String] = Catalog.entries.enumerated()
+        .filter { !$0.element.isChip }
+        .sorted { ($0.element.weight, $1.offset) > ($1.element.weight, $0.offset) }
+        .map(\.element.name)
+
+    /// This person's phrases now: the items they take (not archived, in stack order), the chip names, then the most
+    /// widely taken catalog names. Called off the main actor once the microphone is already on, so listening never
+    /// waits on it.
     static func current(store: TakenStore = .shared) -> [String] {
         let items = store.load().items.filter { !$0.archived }.sorted { $0.sortIndex < $1.sortIndex }
-        return strings(stack: items.map(\.name), chips: Catalog.presets.map(\.name), catalog: [])
+        return strings(stack: items.map(\.name), chips: Catalog.presets.map(\.name), catalog: catalogNames)
     }
 }
