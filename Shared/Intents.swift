@@ -38,15 +38,23 @@ struct TakeAllIntent: AppIntent {
     }
 }
 
+/// Needs no Taken Pro: reading the log never does. The answer is also the action's value, so a shortcut can hand it to
+/// another app or a model ("Ask Claude", "Use Model"), the way Things and Streaks expose their data on the iPhone.
 struct CheckStackIntent: AppIntent {
     static var title: LocalizedStringResource { "Did I take it?" }
     static var description: IntentDescription { IntentDescription("Answers from your log: what is taken today, and when.") }
 
     init() {}
 
-    func perform() async throws -> some IntentResult & ProvidesDialog {
-        let state = TakenStore.shared.load()
-        return .result(dialog: "\(SiriAnswers.status(state: state, now: Date()))")
+    func perform() async throws -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        Self.answer(state: TakenStore.shared.load(), now: Date())
+    }
+
+    /// What Siri says is exactly what a shortcut gets, so an agent reads the sentence a person hears.
+    static func answer(state: StackState, now: Date, timeZone: TimeZone = .current)
+        -> some IntentResult & ReturnsValue<String> & ProvidesDialog {
+        let text = SiriAnswers.status(state: state, now: now, timeZone: timeZone)
+        return .result(value: text, dialog: "\(text)")
     }
 }
 
