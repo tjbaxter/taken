@@ -38,10 +38,12 @@ LOG IT FROM ANYWHERE
 • Lock Screen widgets show 2/3 before you unlock.
 • A Take all control for Control Center.
 • Siri: ask "Did I take my pills in Taken" and hear the answer with times. Say "Log my stack in Taken" to take everything.
+• Shortcuts: hand your day to another app in a shortcut you build. Taken itself sends nothing.
 
 VOICE TO-DOS
 • Tap the mic and say it the way it comes out: "Today by 4 I need to call the dentist, pick up the dry cleaning and email Sam."
-• Taken turns the ramble into a tidy list, with the times you said.
+• Taken turns the ramble into a tidy list, with the times you said. One thing you say stays one to-do, and Keep as one puts a note back together with a tap.
+• Personal and Work lists keep the two apart. A note goes into the list you are looking at.
 • Tap the circle when one is done. Yesterday's open to-dos stay until they are.
 • Start a note from Siri ("Add to-dos in Taken"), the Action button, Control Center, the Lock Screen or the app icon.
 • Speech and sorting happen on your iPhone. The audio is never stored or sent. Sorting into separate to-dos uses Apple Intelligence where your iPhone has it.
@@ -57,12 +59,13 @@ FOUR LOOKS
 
 YOUR RECORD
 • History: five weeks of days at a glance, with your streak and 30-day completion.
-• Daily, every other day, 2x or 3x daily, or the days you pick, set for each item as you add it.
+• Daily, every other day, weekly, 2x or 3x daily, or the days you pick, set for each item as you add it.
+• Daily pills or a weekly shot: pick the day and Taken reminds you on it.
 • Export every dose to CSV whenever you want it.
 
 NOTHING ELSE
 • No ads. No account. No onboarding funnel. Add a name and a photo to your profile if you like; they stay on your iPhone.
-• No typing needed: add your stack from quick-pick chips in a few taps.
+• No typing needed: add your stack from quick-pick chips in a few taps. Or type the first letters and pick from suggestions, spelled right for you.
 • No tracking, no analytics, no third-party code. Taken has no servers and sends your log nowhere; purchases go through Apple. Everything stays on your iPhone.
 
 TAKEN PRO
@@ -102,7 +105,13 @@ WHATS_NEW = (
     "gets its own schedule as you add it, so every-other-day pills sit in a quiet Not today group until they are due. "
     "Your profile holds a name, a photo and every setting, and a wake-up time now decides which day a late dose counts "
     "for.\n\n"
-    "Voice to-dos: tap the mic, say what you need to do, and Taken sorts it into a list on your iPhone.\n\n"
+    "Voice to-dos: tap the mic, say what you need to do, and Taken sorts it into a list on your iPhone. One thing you "
+    "say stays one to-do, and Keep as one puts a note back together with a tap. Personal and Work lists keep the two "
+    "apart, and a note goes into the list you are looking at.\n\n"
+    "Adding is quicker: type the first letters of a name and pick it from the suggestions, spelled right for you. A "
+    "Weekly schedule puts a once-a-week dose on its day, and there are three more quick-pick chips.\n\n"
+    "Shortcuts: Did I take it? now hands its answer on, and Get to-dos and Add to-do let a shortcut you build read "
+    "and add to your list. Taken itself sends nothing.\n\n"
     "Taken Pro is here. Log your first dose, then pick yearly (7 days on us for new subscribers), monthly or lifetime. "
     "Everyone who downloaded Taken 1.0 keeps Pro for life, at no cost. Still no ads, no account and no tracking, "
     "and your log stays on your iPhone.\n\n"
@@ -112,19 +121,21 @@ WHATS_NEW = (
 REVIEW_NOTES = """\
 No login or account is needed. Taken stores everything on the device and makes no network requests of its own. Version 1.1 adds Taken Pro (StoreKit 2): a yearly subscription with a one-week introductory offer, a monthly subscription and a lifetime purchase. Taken opens on the Today tab; the avatar at the top right of each tab opens Profile, where every setting is.
 
+Semaglutide and tirzepatide are FDA- and MHRA-approved prescription medicines. Taken only records that a dose was taken; it gives no dosing, titration or medical guidance.
+
 How to see Taken Pro and voice to-dos in the sandbox:
 1. On first launch tap Add to stack, tap three chips (for example Vitamin D3, Fish Oil and Finasteride) and tap Add 3.
 2. Tap the empty ring beside Vitamin D3. It fills with the current time, and about 1.5 seconds later the Taken Pro sheet slides up: yearly selected with 7 days on us, then monthly and lifetime, prices from the App Store, the renewal terms under the button, and Restore, Redeem code, Terms of Use and Privacy links.
 3. Close it with the X to see locked mode. Today still shows the stack and History the log, with a bar under the progress line reading Start 7 days on us. A ring, Take all, the bar or the + beside Stack opens the sheet again; the day sheet and CSV export keep working.
 4. Voice to-dos, still without Pro: open the To-do tab and tap the mic. iOS asks for the microphone and speech recognition. Say "Tomorrow at 9 call the dentist and buy milk" and pause; Taken stops after about 1.5 seconds and lists the to-dos (with Apple Intelligence on, two of them, both due tomorrow at 09:00; without it, one to-do with the words). Speech and sorting run on the device. The first voice note needs no Pro, so the next tap on the mic opens the Taken Pro sheet.
-5. Tap Start 7 days on us and confirm with the sandbox account. The sheet shows Taken Pro is on, closes, and the mic starts listening. In the sandbox the introductory week lasts about 3 minutes and a year about an hour; Pro stays on through each renewal.
-6. Restore: open Profile and scroll to Taken Pro, then Restore purchases (or Restore on the sheet). Redeem code and Manage subscription are in the same section, under the current plan (for example Trial \u00b7 ends 20 Oct).
+5. Tap Start 7 days on us and confirm with the sandbox account. The sheet shows Taken Pro is on, closes, and the mic starts listening. In the sandbox the introductory week lasts about 3 minutes.
+6. Restore: open Profile and scroll to Taken Pro, then Restore purchases (or Restore on the sheet). Redeem code and Manage subscription are in the same section.
 
 Founding members: everyone whose first download was Taken 1.0 (build 7 or earlier) keeps Pro for life at no cost. The app reads this from AppTransaction.originalAppVersion, in the production environment only. In the sandbox and TestFlight originalAppVersion is always 1.0, so review devices see the paywall as a new customer does.
 
 With Pro on, logging works everywhere. Steps 7 to 11 log what is pending; if nothing is, touch and hold an item and choose Undo last dose.
 7. Home Screen: touch and hold the Home Screen, tap Edit, Add Widget, choose Taken, and add the small and medium widgets. TAKE ALL on the small one, or a pending row on the medium one, logs without opening the app.
-8. Lock Screen: touch and hold the Lock Screen, tap Customize, Lock Screen, and add a Taken widget. It shows the count, for example 2/3. The Voice to-do widget's mic opens the To-do tab listening.
+8. Lock Screen: touch and hold the Lock Screen, tap Customize, Lock Screen, and add a Taken widget. The Voice to-do widget's mic opens the To-do tab listening.
 9. Control Center (iOS 18 and later): open Control Center, tap +, Add a Control, choose Taken, then Take all (logs everything pending) or New voice to-do (opens the To-do tab listening).
 10. Siri: say "Did I take my pills in Taken" to hear what is taken and pending, "Log my stack in Taken" to log everything pending, or "Add to-dos in Taken" to open the To-do tab listening. Without Pro, Siri says logging needs Taken Pro and logs nothing.
 11. Reminder: open Profile, turn on Nudge under Reminder (notification permission is asked then), and set the time 2 minutes ahead. With something pending the notification arrives; touch and hold it and tap TAKE ALL. Without Pro no nudge is scheduled: Reminder says The nudge needs Taken Pro, and turning Nudge on opens the Taken Pro sheet.
