@@ -42,8 +42,9 @@ diagnose() {
   fi
   sample "$pid" 1 -mayDie -file "$diag/$name.sample.txt" >/dev/null 2>&1 || true
   if [ -f "$diag/$name.sample.txt" ]; then
-    awk '/^Call graph:/{on=1; next} on && /^    [0-9]+ Thread_/{n++} on && n>=2{exit} on{print}' "$diag/$name.sample.txt" \
-      | head -n 45 > "$diag/$name.main-thread.txt"
+    # awk stops at 45 lines itself: piping it into head under pipefail failed the job whenever head closed first.
+    awk '/^Call graph:/{on=1; next} on && /^    [0-9]+ Thread_/{n++} on && n>=2{exit} on{print; if (++m >= 45) exit}' \
+      "$diag/$name.sample.txt" > "$diag/$name.main-thread.txt" || true
     if ! grep -q "mach_msg" "$diag/$name.main-thread.txt"; then
       echo "::warning::$name: main thread is busy, not idle in its run loop"
       cat "$diag/$name.main-thread.txt"
@@ -51,9 +52,15 @@ diagnose() {
   fi
 }
 
+# What the demo app last wrote about the screen in front (DemoProbe), in this simulator's container.
+probe_file() {
+  echo "$(xcrun simctl get_app_container "$udid" "$bundle_id" data)/tmp/taken-ui-state.txt"
+}
+
 shoot() {
   local name="$1" screen="$2" look="${3:-signal}"
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+  rm -f "$(probe_file)"
   sleep 1
   xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" >/dev/null
   sleep 6
@@ -129,6 +136,30 @@ shoot 33-todo-empty todo-empty
 shoot 36-item item
 shoot 37-widgets-todo widgets-todo
 shoot 38-widgets-todo-blush widgets-todo blush
+
+# A -screen state must land where it says, not only look right: the probe written by the launch just captured.
+lands() {
+  local name="$1" expect="$2" state line
+  state="$(cat "$(probe_file)" 2>/dev/null || true)"
+  echo "$name in front: $(echo "$state" | tr '\n' ' ')"
+  for line in $expect; do
+    if ! grep -qx "$line" <<<"$state"; then
+      echo "::error::$name should leave $line in front, found: $(echo "$state" | tr '\n' ' ')"
+      exit 1
+    fi
+  done
+}
+
+# The 1.1 feedback build (SPEC 3.3, 3.10): the To-do tab with the Work list in view (Personal's count on the switch),
+# and the Add sheet in type mode with "tum" typed (Turmeric suggested, no drug name on screen), in every look.
+shoot 41-todo-work todo-work
+lands 41-todo-work "tab=todo sheet=none todoList=work"
+shoot 43-add-search add-search
+lands 43-add-search "sheet=add"
+for look in blush phosphor ice; do
+  shoot "42-todo-work-$look" todo-work "$look"
+  shoot "44-add-search-$look" add-search "$look"
+done
 # Links reach the right screen with the quick action's scene delegate in place: Taken opens its own link after launch
 # (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). The demo app writes
 # what is in front to tmp/taken-ui-state.txt (DemoProbe), and the check fails unless the link landed there:
@@ -173,6 +204,8 @@ if [ -n "$small" ] && [ "$small" != "$udid" ]; then
   shoot 12-paywall-6.3in paywall
   # Today on the smaller iPhone: the Not today group stays in view above Take all.
   shoot 40-today-6.3in today
+  # Type mode on the smaller iPhone: the pinned field and the suggestion rows stay above the keyboard.
+  shoot 45-add-search-6.3in add-search
 fi
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
