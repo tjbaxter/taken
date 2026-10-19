@@ -1,20 +1,21 @@
 import SwiftUI
 
-/// Tap a task: change its words or when it is due, or delete it.
+/// Tap a task: change its words, when it is due or which list it is on, or delete it.
 struct TodoEditSheet: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     let task: TodoTask
     let clock: DayClock
-    let onSave: (String, TodoDue?) -> Void
+    let onSave: (String, TodoDue?, TodoArea) -> Void
     let onDelete: () -> Void
 
     @State private var title: String
     @State private var hasDue: Bool
     @State private var hasTime: Bool
     @State private var due: Date
+    @State private var area: TodoArea
 
-    init(task: TodoTask, clock: DayClock, onSave: @escaping (String, TodoDue?) -> Void,
+    init(task: TodoTask, clock: DayClock, onSave: @escaping (String, TodoDue?, TodoArea) -> Void,
          onDelete: @escaping () -> Void) {
         self.task = task
         self.clock = clock
@@ -24,6 +25,7 @@ struct TodoEditSheet: View {
         _hasDue = State(initialValue: task.due != nil)
         _hasTime = State(initialValue: task.hasTime)
         _due = State(initialValue: TodoEditSheet.pickerDate(task.due, clock: clock))
+        _area = State(initialValue: task.area)
     }
 
     /// What the picker starts on: the time said, the day said at 09:00 where the iPhone is now, or tomorrow at 09:00.
@@ -71,6 +73,21 @@ struct TodoEditSheet: View {
                 .tint(theme.signal)
                 .listRowBackground(theme.bgRaised)
                 Section {
+                    // Personal or Work: the same two names, in the same order, as the switch on the To-do tab.
+                    Picker(TodoCopy.list, selection: $area) {
+                        ForEach(TodoArea.allCases) { option in
+                            Text(option.title).tag(option)
+                        }
+                    }
+                    .pickerStyle(.segmented)
+                } header: {
+                    Text(TodoCopy.list)
+                        .font(.sans(13, .sansMedium, relativeTo: .footnote))
+                        .foregroundStyle(theme.fgSubtle)
+                        .textCase(nil)
+                }
+                .listRowBackground(theme.bgRaised)
+                Section {
                     Button(role: .destructive) {
                         onDelete()
                         dismiss()
@@ -93,7 +110,7 @@ struct TodoEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(title, Self.savedDue(hasDue: hasDue, hasTime: hasTime, picked: due, clock: clock))
+                        onSave(title, Self.savedDue(hasDue: hasDue, hasTime: hasTime, picked: due, clock: clock), area)
                         dismiss()
                     }
                     .font(.sans(16, .sansSemibold, relativeTo: .body))

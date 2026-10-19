@@ -1,8 +1,9 @@
 import SwiftUI
 
 /// The To-do tab (REDESIGN.md, voice to-dos): a big mic, the words as they are said, and the tasks the on-device model
-/// makes of them. Tap a circle to finish a task, swipe to delete, tap the words to edit. Every colour comes from the
-/// look (`Theme`), so it reads the same in Signal, Blush, Phosphor and Ice.
+/// makes of them. Tap a circle to finish a task, swipe left to delete, swipe right to move it to the other list, tap
+/// the words to edit. Personal and Work show one at a time, never mixed, and a note lands in the list in view. Every
+/// colour comes from the look (`Theme`), so it reads the same in Signal, Blush, Phosphor and Ice.
 ///
 /// It is the To-do tab of RootView's tab bar, which follows every voice to-do request (`.opensTodoTab`): Siri, the
 /// control, the Lock Screen, links, notifications and the quick action land here. Its sheets (edit, type) are the
@@ -33,10 +34,16 @@ struct TodoRootView: View {
             .onChange(of: route.pendingRecording) { _, pending in
                 if pending != nil { consumeRequest() }
             }
+            .onDisappear {
+                // Leaving the tab takes Keep as one away: it only makes sense with the note's tasks in view.
+                todo.dismissKeepOffer()
+            }
             .onChange(of: scenePhase) { _, phase in
                 switch phase {
                 case .active: todo.refresh()
-                case .background: todo.stopIfListening()
+                case .background:
+                    todo.dismissKeepOffer()
+                    todo.stopIfListening()
                 default: break
                 }
             }
@@ -72,9 +79,16 @@ struct TodoRootView: View {
     private var list: some View {
         List {
             header
-                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 14, trailing: 20))
+                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 20))
                 .listRowSeparator(.hidden)
                 .listRowBackground(Color.clear)
+            // The list in view. Fixed while a note is heard or sorted: it goes where the live card says.
+            TodoListSwitch(selected: todo.area, openCounts: openCounts, enabled: todo.phase == .idle) { area in
+                todo.select(area)
+            }
+            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
             ForEach(todo.openTasks) { task in
                 row(task)
             }
@@ -100,7 +114,12 @@ struct TodoRootView: View {
         TabHeader(title: "To-do", subtitle: todo.isEmpty ? nil : summary)
     }
 
-    /// "3 open, 2 done today"
+    /// Each list's open tasks, for the count on the switch.
+    private var openCounts: [TodoArea: Int] {
+        Dictionary(uniqueKeysWithValues: TodoArea.allCases.map { ($0, todo.openTasks(in: $0).count) })
+    }
+
+    /// "3 open, 2 done today", for the list in view.
     private var summary: String {
         let open = todo.openTasks.count
         let done = todo.doneToday.count
@@ -124,10 +143,14 @@ struct TodoRootView: View {
                 app.sheet = .todoEdit(task.id)
             } label: {
                 HStack(alignment: .firstTextBaseline, spacing: 10) {
+                    // Two lines at most, so the list stays a list and never a page of paragraphs. The whole title is
+                    // in the edit sheet and in what VoiceOver reads.
                     Text(task.title)
                         .font(.sans(17, .sans, relativeTo: .body))
                         .foregroundStyle(done ? theme.fgSubtle : theme.fg)
                         .strikethrough(done || filling, color: theme.fgSubtle)
+                        .lineLimit(2)
+                        .truncationMode(.tail)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .multilineTextAlignment(.leading)
                     if let parts = trailingParts(task) {
@@ -159,6 +182,15 @@ struct TodoRootView: View {
                 Label("Delete", systemImage: "trash")
             }
         }
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            // Named for where it goes. No full swipe, so a long swipe never moves a task by accident.
+            Button {
+                todo.move(task, to: task.area.other)
+            } label: {
+                Label(task.area.other.title, systemImage: task.area.other.symbol)
+            }
+            .tint(theme.fgSubtle)
+        }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(todo.spoken(task))
         .accessibilityAddTraits(.isButton)
@@ -166,6 +198,14 @@ struct TodoRootView: View {
         .accessibilityAction { todo.toggle(task) }
         .accessibilityAction(named: "Edit") { app.sheet = .todoEdit(task.id) }
         .accessibilityAction(named: "Delete") { todo.delete(task) }
+        .accessibilityAction(named: TodoCopy.moveAction(to: task.area.other)) { todo.move(task, to: task.area.other) }
+        .accessibilityActions {
+            // Keep as one is on the line under the list for a few seconds; VoiceOver and Switch Control users get it
+            // on each of the note's tasks for as long as it is offered.
+            if todo.keepOffer?.ids.contains(task.id) == true {
+                Button(TodoCopy.keepAsOne) { todo.keepAsOne() }
+            }
+        }
     }
 
     /// "Tomorrow 09:00": the day in Geist, the time in Geist Mono. A done task shows when it was done.
@@ -178,7 +218,7 @@ struct TodoRootView: View {
     }
 
     private var emptyState: some View {
-        Text(TodoCopy.empty)
+        Text(TodoCopy.emptyLine(for: todo.area))
             .font(.sans(17, .sans, relativeTo: .body))
             .foregroundStyle(theme.fgMuted)
             .multilineTextAlignment(.center)
@@ -195,10 +235,13 @@ struct TodoRootView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if todo.phase == .listening || todo.phase == .sorting {
-                TodoLiveCard(phase: todo.phase, transcript: todo.transcript, levels: todo.levels)
+                TodoLiveCard(phase: todo.phase, transcript: todo.transcript, levels: todo.levels, area: todo.captureArea)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let blocker = todo.blocker {
                 blockerCard(blocker)
+                    .transition(.opacity)
+            } else if let offer = todo.keepOffer {
+                keepLine(offer)
                     .transition(.opacity)
             } else if let notice = todo.notice {
                 Text(notice)
@@ -225,7 +268,32 @@ struct TodoRootView: View {
         .background(theme.bg)
         .animation(.snappy(duration: 0.28), value: todo.phase)
         .animation(.snappy(duration: 0.22), value: todo.notice)
+        .animation(.snappy(duration: 0.22), value: todo.keepOffer)
         .animation(.snappy(duration: 0.22), value: todo.deleted?.id)
+    }
+
+    /// "3 to-dos from your note   Keep as one": one quiet tap puts a split note back together.
+    private func keepLine(_ offer: TodoModel.KeepOffer) -> some View {
+        HStack(spacing: 4) {
+            Text(TodoCopy.fromYourNote(offer.ids.count))
+                .font(.sans(14, .sans, relativeTo: .footnote))
+                .foregroundStyle(theme.fgMuted)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Button {
+                todo.keepAsOne()
+            } label: {
+                Text(TodoCopy.keepAsOne)
+                    .font(.sans(14, .sansSemibold, relativeTo: .footnote))
+                    .foregroundStyle(theme.signalInk)
+                    .lineLimit(1)
+                    .padding(.horizontal, 8)
+                    .frame(minHeight: 44)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        .frame(maxWidth: .infinity)
     }
 
     private func undoBar(_ task: TodoTask) -> some View {
@@ -367,17 +435,20 @@ private struct TodoMicPressStyle: ButtonStyle {
     }
 }
 
-/// What is being heard: a live line, a small waveform, and the words so far (the newest stay in view).
+/// What is being heard: a live line naming the list it goes to ("Listening · Work"), a small waveform, and the words so
+/// far (the newest stay in view).
 struct TodoLiveCard: View {
     @Environment(\.theme) private var theme
     let phase: TodoModel.Phase
     let transcript: String
     let levels: [Double]
+    let area: TodoArea
 
-    init(phase: TodoModel.Phase, transcript: String, levels: [Double]) {
+    init(phase: TodoModel.Phase, transcript: String, levels: [Double], area: TodoArea) {
         self.phase = phase
         self.transcript = transcript
         self.levels = levels
+        self.area = area
     }
 
     var body: some View {
@@ -387,9 +458,10 @@ struct TodoLiveCard: View {
                     .fill(theme.signal)
                     .frame(width: 7, height: 7)
                     .opacity(phase == .listening ? 1 : 0.4)
-                Text(phase == .sorting ? TodoCopy.sorting : TodoCopy.listening)
+                Text(phase == .sorting ? TodoCopy.sorting : TodoCopy.listeningLine(into: area))
                     .font(.sans(13, .sansMedium, relativeTo: .footnote))
                     .foregroundStyle(theme.fgMuted)
+                    .lineLimit(1)
                 Spacer(minLength: 12)
                 if phase == .listening {
                     TodoWaveform(levels: levels)
@@ -408,7 +480,75 @@ struct TodoLiveCard: View {
         .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
         .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(phase == .sorting ? TodoCopy.sorting : (transcript.isEmpty ? TodoCopy.listening : transcript))
+        .accessibilityLabel(phase == .sorting
+                            ? TodoCopy.sorting
+                            : (transcript.isEmpty ? "\(TodoCopy.listening), \(area.title)" : transcript))
+    }
+}
+
+/// Personal | Work (REDESIGN.md): one list in view at a time, never mixed. A capsule track on the look's raised
+/// surface; the selected pill in the signal's wash and edge slides between the two. The list not in view shows how many
+/// are open on it, in Geist Mono, so nothing waiting there is forgotten. 44 pt tall, each half a 44 pt target.
+struct TodoListSwitch: View {
+    @Environment(\.theme) private var theme
+    @Namespace private var pill
+    let selected: TodoArea
+    let openCounts: [TodoArea: Int]
+    let enabled: Bool
+    let onSelect: (TodoArea) -> Void
+
+    init(selected: TodoArea, openCounts: [TodoArea: Int], enabled: Bool, onSelect: @escaping (TodoArea) -> Void) {
+        self.selected = selected
+        self.openCounts = openCounts
+        self.enabled = enabled
+        self.onSelect = onSelect
+    }
+
+    var body: some View {
+        HStack(spacing: 0) {
+            ForEach(TodoArea.allCases) { area in
+                segment(area)
+            }
+        }
+        .background(theme.bgRaised, in: Capsule())
+        .overlay(Capsule().strokeBorder(theme.line, lineWidth: 1))
+        .accessibilityElement(children: .contain)
+    }
+
+    private func segment(_ area: TodoArea) -> some View {
+        let isSelected = area == selected
+        let count = isSelected ? 0 : openCounts[area] ?? 0
+        return Button {
+            onSelect(area)
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text(area.title)
+                    .font(.sans(15, .sansMedium, relativeTo: .subheadline))
+                    .foregroundStyle(isSelected ? theme.fg : theme.fgMuted)
+                if count > 0 {
+                    Text("\(count)")
+                        .font(.mono(13, .monoMedium, relativeTo: .footnote))
+                        .foregroundStyle(theme.fgSubtle)
+                }
+            }
+            .lineLimit(1)
+            .frame(maxWidth: .infinity, minHeight: 38)
+            .background {
+                if isSelected {
+                    Capsule()
+                        .fill(theme.signalWash)
+                        .overlay(Capsule().strokeBorder(theme.signalEdge, lineWidth: 1))
+                        .matchedGeometryEffect(id: "pill", in: pill)
+                }
+            }
+            // The inset is part of the target, so each half takes taps across the whole 44 pt track.
+            .padding(3)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .disabled(!enabled)
+        .accessibilityLabel(count > 0 ? "\(area.title), \(count) open" : area.title)
+        .accessibilityAddTraits(isSelected ? AccessibilityTraits.isSelected : AccessibilityTraits())
     }
 }
 

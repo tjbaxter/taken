@@ -10,17 +10,27 @@ struct TodoEntry: TimelineEntry {
     /// Open tasks, due first (the To-do tab's order), at most three.
     let open: [String]
     let openCount: Int
+    /// The list it shows: the one last in view in the app.
+    let area: TodoArea
 
-    init(date: Date, open: [String], openCount: Int) {
+    init(date: Date, open: [String], openCount: Int, area: TodoArea = .personal) {
         self.date = date
         self.open = open
         self.openCount = openCount
+        self.area = area
     }
 
-    /// What the widget shows for a set of tasks at a moment.
+    /// What the widget shows for a set of tasks at a moment: the list last in view in the app (`lastArea`), so the
+    /// Lock Screen never mixes Personal and Work. The app reloads the widget whenever that list changes.
     init(date: Date, state: TodoState, clock: DayClock) {
-        let open = state.openTasks(clock: clock)
-        self.init(date: date, open: open.prefix(3).map(\.title), openCount: open.count)
+        let open = state.openTasks(in: state.lastArea, clock: clock)
+        self.init(date: date, open: open.prefix(3).map(\.title), openCount: open.count, area: state.lastArea)
+    }
+
+    /// The rectangular header with the open count: "To-do · 2" for Personal, as before lists, and "Work · 2".
+    var header: String {
+        let name = area == .work ? TodoArea.work.title : "To-do"
+        return openCount == 0 ? name : "\(name) \u{00B7} \(openCount)"
     }
 }
 
@@ -53,7 +63,7 @@ struct TodoRectangularView: View {
                 Image(systemName: "mic.fill")
                     .font(.system(size: 11, weight: .bold))
                     .widgetAccentable()
-                Text(entry.openCount == 0 ? "To-do" : "To-do \u{00B7} \(entry.openCount)")
+                Text(entry.header)
                     .font(.sans(13, .sansSemibold))
                     .widgetAccentable()
             }
