@@ -85,24 +85,75 @@ final class TodoExtractionTests: XCTestCase {
         XCTAssertEqual(drafts.count, 5)
         XCTAssertLessThanOrEqual(drafts[4].title.count, TodoText.maxTitleLength)
 
-        let many = (1...30).map { RawTodo(title: "Task \($0)") }
+        // 80 now (was 20): a 5-minute note holds about 20 actions, sorted in parts.
+        XCTAssertEqual(TodoValidation.maxTasks, 80)
+        let many = (1...90).map { RawTodo(title: "Task \($0)") }
         XCTAssertEqual(TodoValidation.validate(many, transcript: "x", context: context).count, TodoValidation.maxTasks)
     }
 
-    func testAnEmptyAnswerKeepsTheWholeNote() async {
+    // Was testAnEmptyAnswerKeepsTheWholeNote: nothing found is now saved as said, one line per sentence, without the
+    // leading filler, instead of one task holding the whole note.
+    func testAnEmptyAnswerKeepsTheNoteAsSaid() async {
         let drafts = TodoValidation.validate([], transcript: "  um so I need to sort out the garage  ", context: context)
-        XCTAssertEqual(drafts.map(\.title), ["Um so I need to sort out the garage"])
+        XCTAssertEqual(drafts.map(\.title), ["Sort out the garage"])
         XCTAssertNil(drafts.first?.due)
         XCTAssertTrue(TodoValidation.validate([], transcript: "   ", context: context).isEmpty, "no words, no task")
+        XCTAssertEqual(TodoValidation.validate([], transcript: "um, okay", context: context).map(\.title), ["Um, okay"],
+                       "only filler: kept whole, never dropped")
 
-        let fallback = await FallbackExtractor().extract(transcript: "call mum and buy milk", context: context)
-        XCTAssertEqual(fallback.drafts.map(\.title), ["Call mum and buy milk"], "no model: the note is one task")
+        let words = "call mum and buy milk"
+        let parts = await NoteSorter(sorter: FallbackSorter(), context: context).finish(note: words)
+        let fallback = TodoValidation.assemble(note: words, parts: parts, context: context)
+        XCTAssertEqual(fallback.drafts.map(\.title), ["Call mum and buy milk"], "no model: a one-sentence note is one task")
         XCTAssertEqual(fallback.sorting, .needsAppleIntelligence)
+        XCTAssertEqual(TodoCopy.sortingNote(fallback.sorting), "Saved as you said it. Automatic sorting needs Apple Intelligence.")
 
         let long = String(repeating: "and then the next thing ", count: 40)
         let whole = TodoValidation.wholeNote(long)
         XCTAssertEqual(whole.count, 1)
         XCTAssertLessThanOrEqual(whole[0].title.count, TodoValidation.maxNoteLength)
+    }
+
+    func testLinesKeepEveryWordOfALongNoteInShortLines() {
+        var text = ""
+        for index in 1...900 { text += "word\(index)" + (index % 15 == 0 ? ". " : (index % 40 == 0 ? ", " : " ")) }
+        let lines = TodoValidation.lines(text)
+        let kept = Set(lines.flatMap { SpokenNote.tokens(of: $0.title) })
+        XCTAssertTrue((1...900).allSatisfy { kept.contains("word\($0)") }, "every word of a 900-word note")
+        XCTAssertTrue(lines.allSatisfy { $0.title.count <= TodoText.maxTitleLength })
+        XCTAssertTrue(lines.allSatisfy { $0.due == nil }, "no due nobody checked")
+
+        let run = (1...60).map { "longword\($0)" }.joined(separator: " ")
+        let carried = TodoValidation.lines(run)
+        XCTAssertGreaterThan(carried.count, 1, "a line over 120 characters carries on")
+        XCTAssertTrue(carried.allSatisfy { $0.title.count <= TodoText.maxTitleLength })
+        let words = Set(carried.flatMap { SpokenNote.tokens(of: $0.title) })
+        XCTAssertTrue((1...60).allSatisfy { words.contains("longword\($0)") }, "never cut off")
+
+        XCTAssertEqual(TodoValidation.lines("Call mum. Buy milk. Um. Okay.").map(\.title), ["Call mum", "Buy milk"],
+                       "filler on its own is skipped")
+        XCTAssertEqual(TodoValidation.lines("so I need to call the dentist and then email Sam about the deck and also buy milk, eggs and bread")
+                        .map(\.title), ["Call the dentist", "Email Sam about the deck", "Buy milk, eggs and bread"],
+                       "a long sentence in pieces at its separators, a short list kept whole")
+        XCTAssertEqual(TodoValidation.lines("Tomorrow. Call the bank.").map(\.title), ["Tomorrow. Call the bank"],
+                       "a day header stays with what it is for")
+        let wifi = "Note to self, the wifi password is on the fridge"
+        XCTAssertEqual(TodoValidation.lines(wifi), TodoValidation.wholeNote(wifi), "a one-sentence note is one line")
+    }
+
+    func testTheNewCopyKeepsTheRules() {
+        for text in [TodoCopy.allUnsorted, TodoCopy.partUnsorted, TodoCopy.needsAppleIntelligence, TodoCopy.into(.work),
+                     TodoCopy.goesTo(.personal), TodoCopy.sendTo(.work), TodoCopy.sayIt] {
+            XCTAssertTrue(TodoCopy.all.contains(text), "\(text) is checked by the copy test")
+        }
+        XCTAssertEqual(TodoCopy.sortingNote(.couldNotSort), "Saved as you said it, one line per sentence. Tap one to edit.")
+        XCTAssertEqual(TodoCopy.sortingNote(.partlySorted), "Part of your note was saved as you said it.")
+        XCTAssertNil(TodoCopy.sortingNote(.model))
+        XCTAssertTrue([TodoCopy.needsAppleIntelligence, TodoCopy.appleIntelligenceOff, TodoCopy.modelNotReady]
+            .allSatisfy { $0.hasPrefix("Saved as you said it.") })
+        XCTAssertEqual(TodoCopy.into(.personal), "Into Personal")
+        XCTAssertEqual(TodoCopy.goesTo(.personal), "Goes to Personal")
+        XCTAssertEqual(TodoCopy.sendTo(.work), "Double tap to send it to Work.")
     }
 
     func testAClockTimeAlreadyGoneMovesToItsNextOccurrence() {
@@ -126,33 +177,48 @@ final class TodoExtractionTests: XCTestCase {
         XCTAssertTrue(TodoPrompt.instructions.contains("already passed today means that time tomorrow"))
     }
 
-    func testTheExtractorsAnswerIsWhatIsSaved() async {
-        struct Stub: TaskExtractor {
-            let drafts: [TodoDraft]
+    func testTheSortersAnswerIsWhatIsSaved() async {
+        struct Stub: ChunkSorting {
+            var unavailable: TodoSorting? { nil }
             func prepare() async {}
-            func extract(transcript: String, context: TodoContext) async -> TodoExtraction {
-                TodoExtraction(drafts: drafts, sorting: .model)
+            func answer(chunk: TodoChunk, prompt: String) async throws -> [RawTodo] {
+                [RawTodo(spoken: "call the dentist", title: "Call the dentist"), RawTodo(spoken: "buy milk", title: "Buy milk")]
             }
         }
-        let sorted = await TodoModel.extract("call the dentist and buy milk",
-                                             with: Stub(drafts: [TodoDraft(title: "Call the dentist"), TodoDraft(title: "Buy milk")]),
-                                             context: context)
+        let note = "call the dentist and buy milk"
+        let parts = await NoteSorter(sorter: Stub(), context: context).finish(note: note)
+        let sorted = TodoValidation.assemble(note: note, parts: parts, context: context)
         XCTAssertEqual(sorted.drafts.map(\.title), ["Call the dentist", "Buy milk"])
         XCTAssertEqual(sorted.sorting, .model)
 
-        // A model that never answers (and never notices it was cancelled) still lets the note be saved, whole.
-        struct Hanging: TaskExtractor {
+        // A model that never answers (and never notices it was cancelled) still lets the note be saved, as said.
+        struct Hanging: ChunkSorting {
+            var unavailable: TodoSorting? { nil }
             func prepare() async {}
-            func extract(transcript: String, context: TodoContext) async -> TodoExtraction {
+            func answer(chunk: TodoChunk, prompt: String) async throws -> [RawTodo] {
                 for _ in 0..<5 { try? await Task.sleep(for: .seconds(1)) }
-                return TodoExtraction(drafts: [], sorting: .model)
+                return []
             }
         }
         let started = Date()
-        let late = await TodoModel.extract("call the dentist", with: Hanging(), context: context, limit: .milliseconds(200))
+        let late = await NoteSorter(sorter: Hanging(), context: context, budget: NoteSorter.Budget.standard.scaled(0.02))
+            .finish(note: "call the dentist")
         XCTAssertLessThan(Date().timeIntervalSince(started), 2, "the deadline holds")
-        XCTAssertEqual(late.drafts.map(\.title), ["Call the dentist"])
-        XCTAssertEqual(late.sorting, .couldNotSort)
+        let saved = TodoValidation.assemble(note: "call the dentist", parts: late, context: context)
+        XCTAssertEqual(saved.drafts.map(\.title), ["Call the dentist"])
+        XCTAssertEqual(saved.sorting, .couldNotSort)
+    }
+
+    func testAPartOfALongNoteSaysWhichPartItIsAndWhatWasCarried() {
+        let chunk = TodoChunk(index: 1, text: "call the bank and pick up the prescription", wordRange: 80..<88,
+                              carried: "today by 4", cut: .end)
+        let prompt = TodoPrompt.prompt(for: chunk, of: 2, context: context)
+        XCTAssertTrue(prompt.contains("Said just before, for the same list: \"today by 4\"."), prompt)
+        XCTAssertTrue(prompt.hasSuffix("Voice note, part 2: \"call the bank and pick up the prescription\""), prompt)
+        XCTAssertFalse(TodoPrompt.prompt(for: TodoChunk(index: 0, text: "x", wordRange: 0..<1, carried: nil, cut: .end), of: 1,
+                                         context: context).contains("part"), "a note of one part has no part number")
+        XCTAssertTrue(TodoPrompt.instructions.contains("starting with the verb, keeping the verb and what it is done to"))
+        XCTAssertTrue(TodoPrompt.instructions.contains("Note: \"I should text the new leads on WhatsApp\""))
     }
 
     func testThePromptCarriesNowTheZoneAndTheDayStart() {
@@ -217,7 +283,8 @@ final class TodoExtractionTests: XCTestCase {
         let items = try XCTUnwrap(info["UIApplicationShortcutItems"] as? [[String: Any]])
         XCTAssertEqual(items.first?["UIApplicationShortcutItemType"] as? String, TodoCaptureRoute.quickActionType)
 
-        for text in [microphone, speech, TodoPrompt.instructions] + TodoCopy.all + ProCopy.features + TodoEvalCopy.all {
+        for text in [microphone, speech, TodoPrompt.instructions] + TodoCopy.all + ProCopy.features + TodoEvalCopy.all
+            + VoiceNoteLogCopy.all {
             XCTAssertNil(text.range(of: "free", options: .caseInsensitive), text)
             XCTAssertFalse(text.contains("\u{2014}") || text.contains("\u{2013}"), "no em or en dash: \(text)")
             XCTAssertFalse(text.contains("!"), text)
