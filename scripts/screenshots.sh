@@ -162,12 +162,14 @@ for look in blush phosphor ice; do
   shoot "44-add-search-$look" add-search "$look"
 done
 # Feedback build 2 (Tom 2026-10-20): three open on Personal and nothing on Work, the state where "3 open" bounced. Both
-# headings show, Work reads "Nothing open", and the line under the title stays. Then a note at its last minute and the
-# typing sheet with its list chip: no lands check, so these pass before the listening build adds those states.
+# headings show, Work reads "Nothing open", and the line under the title stays. Then a note at its last minute ("0:40
+# left") and the typing sheet, each with its list chip on the list on top.
 shoot 46-todo-work-empty todo-work-empty
 lands 46-todo-work-empty "tab=todo sheet=none todoOrder=personal,work"
 shoot 47-todo-cap todo-cap
+lands 47-todo-cap "tab=todo sheet=none todo=listening todoInto=personal"
 shoot 48-todo-type todo-type
+lands 48-todo-type "tab=todo sheet=todo-type todoInto=personal"
 # Links reach the right screen with the quick action's scene delegate in place: Taken opens its own link after launch
 # (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). The demo app writes
 # what is in front to tmp/taken-ui-state.txt (DemoProbe), and the check fails unless the link landed there:

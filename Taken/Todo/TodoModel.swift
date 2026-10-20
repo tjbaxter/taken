@@ -164,14 +164,15 @@ final class TodoModel {
         let recording = screen == "todo-recording" || screen == "todo-cap"
         let seeded = screen == "todo-empty"
             ? TodoState()
-            : TodoDemo.state(now: demoNow, recording: recording, inView: screen == "todo-work" ? .work : .personal)
+            : TodoDemo.state(now: demoNow, recording: recording, screen: screen)
         try? store.replace(with: seeded)
         let model = TodoModel(store: store, isDemo: true, launchScreen: screen, clockNow: { demoNow })
         if recording { model.showDemoRecording() }
         return model
     }
 
-    /// `-screen todo`, `todo-work`, `todo-recording`, `todo-cap`, `todo-type` and `todo-empty` open on the To-do tab.
+    /// `-screen todo`, `todo-work`, `todo-work-empty`, `todo-recording`, `todo-cap`, `todo-type` and `todo-empty` open
+    /// on the To-do tab.
     static func opensOnTodo(_ launchScreen: String?) -> Bool {
         launchScreen?.hasPrefix("todo") == true
     }
@@ -179,11 +180,6 @@ final class TodoModel {
     // MARK: Reading
 
     var clock: DayClock { DayClock(dayStartHour: dayStartHour) }
-    /// The list in view while the switch exists (`lastArea`). Nothing reads it for where a note goes.
-    var area: TodoArea { state.lastArea }
-    var openTasks: [TodoTask] { openTasks(in: area) }
-    var doneToday: [TodoTask] { state.doneTasks(on: clock.day(for: now), in: area, clock: clock) }
-    var isEmpty: Bool { openTasks.isEmpty && doneToday.isEmpty }
     var isListening: Bool { phase == .listening }
 
     /// Tasks kept out of the list for now: the lines of each note still being sorted, saved as said until its tasks
@@ -196,7 +192,7 @@ final class TodoModel {
 
     /// Where the next note goes, and the current one while it is heard: the top list, unless its chip changed it for
     /// this note.
-    var destination: TodoArea { captureOverride ?? state.areaOrder.first ?? .personal }
+    var destination: TodoArea { captureOverride ?? state.topArea }
 
     /// One list's open tasks, without the notes still being sorted.
     func openTasks(in area: TodoArea) -> [TodoTask] {
@@ -671,14 +667,6 @@ final class TodoModel {
         announce("\(task.title), moved to \(area.title).")
     }
 
-    /// The Personal and Work switch, while it exists: `lastArea` in todos.json. It no longer decides where a note goes
-    /// (the top list does). Fixed while a note is heard or sorted.
-    func select(_ area: TodoArea) {
-        guard area != self.area, phase == .idle else { return }
-        Haptics.selection(hapticsOn)
-        withAnimation(.snappy(duration: 0.25)) { _ = write { $0.lastArea = area } }
-    }
-
     /// A tapped due-time notification: the list scrolls to its task and washes it for a moment (notifications cover
     /// both lists). Left alone while a note is heard or sorted; it never changes where notes go.
     func reveal(_ id: UUID) {
@@ -898,7 +886,6 @@ enum TodoCopy {
     static let couldNotSave = "Could not save. Try again."
     static let openSettings = "Open Settings"
     static let typeInstead = "Type it instead"
-    static let doneToday = "Done today"
     /// Keep as one: the button beside the line, and what VoiceOver says once it is done.
     static let keepAsOne = "Keep as one"
     static let keptAsOne = "Kept as one to-do."
@@ -906,15 +893,8 @@ enum TodoCopy {
     /// "3 to-dos from your note": the line beside Keep as one.
     static func fromYourNote(_ count: Int) -> String { "\(count) to-dos from your note" }
 
-    /// Personal and Work. The Work list's empty line; Personal keeps `empty`.
-    static let emptyWork = "Tap the mic and say what needs doing for work"
     /// The edit sheet's section.
     static let list = "List"
-
-    static func emptyLine(for area: TodoArea) -> String { area == .work ? emptyWork : empty }
-
-    /// "Listening · Work": where the note goes, before a word is said.
-    static func listeningLine(into area: TodoArea) -> String { "\(TodoCopy.listening) \u{00B7} \(area.title)" }
 
     /// "Move to Work": the VoiceOver action, named for where the task goes.
     static func moveAction(to area: TodoArea) -> String { "Move to \(area.title)" }
@@ -966,11 +946,11 @@ enum TodoCopy {
     static let all: [String] = [empty, listening, sorting, tapToFinish, sayIt, needsAppleIntelligence,
                                 appleIntelligenceOff, modelNotReady, allUnsorted, partUnsorted, stoppedAtCap,
                                 microphoneOff, speechOff, unavailable, microphoneBusy, nothingHeard, couldNotSave,
-                                openSettings, typeInstead, doneToday, keepAsOne, keptAsOne, fromYourNote(3),
-                                emptyWork, list, elapsed(102), timeLeft(60), timeLeft(1), spokenElapsed(130),
-                                spokenTimeLeft(45), part(2, of: 5)]
-        + TodoArea.allCases.flatMap { [$0.title, TodoCopy.listeningLine(into: $0), TodoCopy.moveAction(to: $0),
-                                      TodoCopy.into($0), TodoCopy.goesTo($0), TodoCopy.sendTo($0)] }
+                                openSettings, typeInstead, keepAsOne, keptAsOne, fromYourNote(3), list,
+                                elapsed(102), timeLeft(60), timeLeft(1), spokenElapsed(130), spokenTimeLeft(45),
+                                part(2, of: 5)]
+        + TodoArea.allCases.flatMap { [$0.title, TodoCopy.moveAction(to: $0), TodoCopy.into($0), TodoCopy.goesTo($0),
+                                      TodoCopy.sendTo($0)] }
 }
 
 @MainActor

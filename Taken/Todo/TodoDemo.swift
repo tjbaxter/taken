@@ -9,15 +9,8 @@ import Foundation
 enum TodoDemo {
     static let transcript = "Tomorrow by nine I need to call the dentist, pick up the dry cleaning and email Sam the deck. Oh and book flights for March"
 
-    /// The `-screen` launch argument, which picks the seed when no screen is given.
-    static var launchScreen: String? {
-        let arguments = ProcessInfo.processInfo.arguments
-        guard let index = arguments.firstIndex(of: "-screen"), index + 1 < arguments.count else { return nil }
-        return arguments[index + 1]
-    }
-
-    static func state(now: Date, recording: Bool, inView: TodoArea = .personal, timeZone: TimeZone = .current,
-                      screen: String? = TodoDemo.launchScreen) -> TodoState {
+    /// The seed for a `-screen` state (`TodoModel.fromLaunchArguments` passes its own).
+    static func state(now: Date, recording: Bool, timeZone: TimeZone = .current, screen: String?) -> TodoState {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         func at(dayOffset: Int, _ hour: Int, _ minute: Int = 0) -> Date {
@@ -70,7 +63,7 @@ enum TodoDemo {
             ]
         }
         // `todo-work` puts Work on top, so its notes go there; `lastArea` follows for builds that still read it.
-        let workOnTop = inView == .work || screen == "todo-work"
+        let workOnTop = screen == "todo-work"
         return TodoState(tasks: tasks, firstNoteAt: at(dayOffset: -6, 9), lastArea: workOnTop ? .work : .personal,
                          areaOrder: workOnTop ? [.work, .personal] : TodoState.defaultAreaOrder)
     }

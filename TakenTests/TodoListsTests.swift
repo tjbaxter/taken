@@ -159,8 +159,8 @@ final class TodoListsTests: XCTestCase {
 
     // MARK: Copy and the demo
 
-    /// The listening card's and the empty line's copy is the listening build's to change, so it is no longer pinned here
-    /// (the assertions on `TodoCopy.listeningLine` and `TodoCopy.emptyLine` went with the switch).
+    /// The list's own copy keeps the rules. The switch's copy (`TodoCopy.listeningLine`, `emptyLine`, `emptyWork` and
+    /// the "Done today" label) went with the switch; the Listening card's copy is pinned beside the listening tests.
     func testTheListCopyKeepsTheRules() {
         XCTAssertEqual(TodoArea.allCases.map(\.title), ["Personal", "Work"])
         XCTAssertEqual(TodoCopy.moveAction(to: .work), "Move to Work")
@@ -185,12 +185,10 @@ final class TodoListsTests: XCTestCase {
         XCTAssertEqual(TodoDemo.state(now: now, recording: true, timeZone: london, screen: "todo-recording").areaOrder,
                        [.personal, .work])
 
-        let work = TodoDemo.state(now: now, recording: false, inView: .work, timeZone: london, screen: "todo-work")
+        let work = TodoDemo.state(now: now, recording: false, timeZone: london, screen: "todo-work")
         XCTAssertEqual(work.areaOrder, [.work, .personal], "Work on top, so notes go there")
         XCTAssertEqual(work.lastArea, .work)
         XCTAssertEqual(work.tasks.count, personal.tasks.count)
-        XCTAssertEqual(TodoDemo.state(now: now, recording: false, timeZone: london, screen: "todo-work").areaOrder,
-                       [.work, .personal], "the screen alone is enough")
 
         let empty = TodoDemo.state(now: now, recording: false, timeZone: london, screen: "todo-work-empty")
         XCTAssertEqual(empty.areaOrder, [.personal, .work])
@@ -203,7 +201,7 @@ final class TodoListsTests: XCTestCase {
         XCTAssertEqual(rows.last?.isEmpty, true, "the Work heading reads Nothing open")
         XCTAssertEqual(TodoSections.summary(rows), "3 open", "and the line under the title stays")
 
-        for screen in ["todo", "todo-work", "todo-work-empty", "todo-recording", "todo-empty"] {
+        for screen in ["todo", "todo-work", "todo-work-empty", "todo-recording", "todo-cap", "todo-type", "todo-empty"] {
             XCTAssertTrue(TodoModel.opensOnTodo(screen), screen)
         }
     }
