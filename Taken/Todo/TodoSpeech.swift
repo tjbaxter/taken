@@ -1,4 +1,5 @@
 import AVFoundation
+import CoreMedia
 import Foundation
 import Speech
 
@@ -17,7 +18,9 @@ enum SpeechCaptureError: Error, Equatable, Sendable {
     case unavailable
 }
 
-/// What a running capture reports, in order, on the main actor.
+/// What a running capture reports, in order, on the main actor. The stream keeps only the newest events, so nothing
+/// that must not be lost travels here: the finished words a long note is cut from stay in the capture's lock-guarded
+/// transcript (`SpeechCapture.finishedText()`).
 enum SpeechCaptureEvent: Sendable {
     /// Everything heard so far.
     case text(String)
@@ -25,6 +28,42 @@ enum SpeechCaptureEvent: Sendable {
     case level(Float)
     /// A call, Siri or a route change stopped the microphone.
     case interrupted
+}
+
+/// Which transcriber heard a note.
+enum SpeechEngine: String, Codable, Sendable {
+    /// iOS 26: SpeechAnalyzer with SpeechTranscriber. Its finished phrases come while the person talks, so a long
+    /// note is sorted part by part as it is said.
+    case analyzer = "SpeechAnalyzer"
+    /// iOS 17 to 25, or iOS 26 before its model is on the phone.
+    case recognizer = "SFSpeechRecognizer"
+}
+
+/// A finished phrase and the audio it came from, in seconds from the start (SpeechTranscriber's result range).
+struct TimedPhrase: Codable, Hashable, Sendable {
+    var text: String
+    var start: Double
+    var end: Double
+}
+
+/// SFSpeechRecognizer starting over mid-note: what the text was, and the shorter result that did not continue it.
+struct TranscriptReset: Codable, Hashable, Sendable {
+    /// Seconds from the start.
+    var at: Double
+    var before: String
+    var after: String
+}
+
+/// What the internal voice note log records about the transcriber. Never audio.
+struct SpeechDiagnostics: Sendable {
+    var engine: SpeechEngine
+    /// Why not SpeechAnalyzer, when it was not.
+    var why: String?
+    var phrases: [TimedPhrase] = []
+    var resets: [TranscriptReset] = []
+    /// SFSpeechRecognizer tasks that ended by themselves mid-note and were started again.
+    var restarts = 0
+    var vocabulary = 0
 }
 
 // MARK: - Permissions
@@ -79,6 +118,7 @@ final class SpeechCapture: @unchecked Sendable {
     private let relay = BufferRelay()
     private let lock = NSLock()
     private var backend: (any SpeechBackend)?
+    private var finalDiagnostics: SpeechDiagnostics?
 
     init() {
         let (stream, continuation) = AsyncStream.makeStream(of: SpeechCaptureEvent.self,
@@ -111,6 +151,20 @@ final class SpeechCapture: @unchecked Sendable {
         }
     }
 
+    /// The transcriber in use, once started.
+    var engine: SpeechEngine? { lock.withLock { backend?.diagnostics.engine } }
+
+    /// The words finished so far (SpeechAnalyzer's finalized phrases; nothing on SFSpeechRecognizer, whose notes are
+    /// cut at the stop). Read from the lock-guarded transcript, so no event the stream dropped can cost a word.
+    func finishedText() -> String {
+        lock.withLock { backend }?.finishedText ?? ""
+    }
+
+    /// The transcriber's record of this note, for the internal voice note log: kept after `finish`.
+    func diagnostics() -> SpeechDiagnostics? {
+        lock.withLock { backend?.diagnostics ?? finalDiagnostics }
+    }
+
     /// Stops the microphone and returns the whole transcript once the transcriber has finished it.
     func finish() async -> String {
         audio.stop()
@@ -120,6 +174,7 @@ final class SpeechCapture: @unchecked Sendable {
             return self.backend
         }
         let text = await backend?.finish() ?? ""
+        if let diagnostics = backend?.diagnostics { lock.withLock { finalDiagnostics = diagnostics } }
         continuation.finish()
         return text
     }
@@ -138,17 +193,31 @@ final class SpeechCapture: @unchecked Sendable {
 
     private static func makeBackend(locale: Locale, inputFormat: AVAudioFormat, vocabulary: [String],
                                     onText: @escaping @Sendable (String) -> Void) async throws -> any SpeechBackend {
+        var why = "iOS 17 to 25"
         if #available(iOS 26.0, *) {
-            if let analyzer = try? await AnalyzerBackend.make(locale: locale, inputFormat: inputFormat,
-                                                              vocabulary: vocabulary, onText: onText) {
-                return analyzer
+            do {
+                return try await AnalyzerBackend.make(locale: locale, inputFormat: inputFormat, vocabulary: vocabulary,
+                                                      onText: onText)
+            } catch let reason as AnalyzerUnavailable {
+                why = reason.rawValue
+            } catch {
+                why = AnalyzerUnavailable.startFailed.rawValue
             }
         }
-        if let recognizer = RecognizerBackend(locale: locale, vocabulary: vocabulary, onText: onText) {
+        if let recognizer = RecognizerBackend(locale: locale, vocabulary: vocabulary, why: why, onText: onText) {
             return recognizer
         }
         throw SpeechCaptureError.unavailable
     }
+}
+
+/// Why a note on iOS 26 used SFSpeechRecognizer instead of SpeechAnalyzer, in words for the log.
+enum AnalyzerUnavailable: String, Error, Sendable {
+    case notAvailable = "SpeechTranscriber is not available on this iPhone"
+    case language = "SpeechTranscriber does not support this language"
+    case modelMissing = "the iOS 26 speech model is not on this iPhone yet"
+    case noFormat = "no audio format for SpeechAnalyzer"
+    case startFailed = "SpeechAnalyzer would not start"
 }
 
 // MARK: - Microphone
@@ -318,23 +387,42 @@ protocol SpeechBackend: AnyObject, Sendable {
     /// No more audio: finish the transcript and return all of it.
     func finish() async -> String
     func cancel()
+    /// The words finished so far, which a long note's parts are cut from while it is said.
+    var finishedText: String { get }
+    var diagnostics: SpeechDiagnostics { get }
 }
 
-/// The words so far: finished phrases plus the phrase still being heard.
+/// The words so far: finished phrases plus the phrase still being heard. Finished phrases are only ever added to, so
+/// the parts of a long note cut from them never change under it.
 final class TranscriptBuffer: @unchecked Sendable {
+    /// The log keeps at most this many timed phrases.
+    static let maxPhrases = 300
+
     private let lock = NSLock()
     private var finished = ""
     private var volatile = ""
+    private var phrases: [TimedPhrase] = []
 
     var text: String {
         lock.withLock { TranscriptBuffer.join(finished, volatile) }
     }
 
-    /// A finished phrase replaces whatever was still being heard.
-    func commit(_ phrase: String) -> String {
+    var finishedText: String {
+        lock.withLock { finished }
+    }
+
+    var timedPhrases: [TimedPhrase] {
+        lock.withLock { phrases }
+    }
+
+    /// A finished phrase replaces whatever was still being heard. Returns the whole text so far.
+    func commit(_ phrase: String, start: Double? = nil, end: Double? = nil) -> String {
         lock.withLock {
             finished = TranscriptBuffer.join(finished, phrase)
             volatile = ""
+            if let start, let end, phrases.count < TranscriptBuffer.maxPhrases {
+                phrases.append(TimedPhrase(text: phrase, start: start, end: end))
+            }
             return finished
         }
     }
@@ -343,15 +431,6 @@ final class TranscriptBuffer: @unchecked Sendable {
         lock.withLock {
             volatile = phrase
             return TranscriptBuffer.join(finished, volatile)
-        }
-    }
-
-    /// The whole transcript at once (SFSpeechRecognizer reports it whole).
-    func replace(_ whole: String) -> String {
-        lock.withLock {
-            finished = whole
-            volatile = ""
-            return finished
         }
     }
 
@@ -371,44 +450,55 @@ final class AnalyzerBackend: SpeechBackend, @unchecked Sendable {
     private let input: AsyncStream<AnalyzerInput>.Continuation
     private let converter: FormatConverter
     private let transcript = TranscriptBuffer()
+    private let vocabularyCount: Int
     private let lock = NSLock()
     private var results: Task<Void, Never>?
 
-    private init(analyzer: SpeechAnalyzer, input: AsyncStream<AnalyzerInput>.Continuation, converter: FormatConverter) {
+    private init(analyzer: SpeechAnalyzer, input: AsyncStream<AnalyzerInput>.Continuation, converter: FormatConverter,
+                 vocabularyCount: Int) {
         self.analyzer = analyzer
         self.input = input
         self.converter = converter
+        self.vocabularyCount = vocabularyCount
     }
 
-    /// Nil-free or throws: the language must be supported and its model already on the phone. A missing model starts
-    /// downloading for next time and this note uses SFSpeechRecognizer.
+    /// Nil-free or throws why not: the language must be supported and its model already on the phone. A missing
+    /// model starts downloading for next time and this note uses SFSpeechRecognizer.
     static func make(locale: Locale, inputFormat: AVAudioFormat, vocabulary: [String] = [],
                      onText: @escaping @Sendable (String) -> Void) async throws -> AnalyzerBackend {
-        guard SpeechTranscriber.isAvailable,
-              let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
-            throw SpeechCaptureError.unavailable
+        guard SpeechTranscriber.isAvailable else { throw AnalyzerUnavailable.notAvailable }
+        guard let supported = await SpeechTranscriber.supportedLocale(equivalentTo: locale) else {
+            throw AnalyzerUnavailable.language
         }
         let transcriber = SpeechTranscriber(locale: supported, transcriptionOptions: [],
                                             reportingOptions: [.volatileResults, .fastResults], attributeOptions: [])
         if let request = try await AssetInventory.assetInstallationRequest(supporting: [transcriber]) {
             let pending = UncheckedSendable(request)
             Task.detached(priority: .utility) { try? await pending.value.downloadAndInstall() }
-            throw SpeechCaptureError.unavailable
+            throw AnalyzerUnavailable.modelMissing
         }
         guard let analyzerFormat = await SpeechAnalyzer.bestAvailableAudioFormat(compatibleWith: [transcriber]),
               let converter = FormatConverter(from: inputFormat, to: analyzerFormat) else {
-            throw SpeechCaptureError.unavailable
+            throw AnalyzerUnavailable.noFormat
         }
         let analyzer = SpeechAnalyzer(modules: [transcriber])
         await expect(vocabulary, on: analyzer)
         let (stream, continuation) = AsyncStream.makeStream(of: AnalyzerInput.self)
-        let backend = AnalyzerBackend(analyzer: analyzer, input: continuation, converter: converter)
+        let backend = AnalyzerBackend(analyzer: analyzer, input: continuation, converter: converter,
+                                      vocabularyCount: vocabulary.count)
         let transcript = backend.transcript
         backend.results = Task.detached(priority: .userInitiated) {
             do {
                 for try await result in transcriber.results {
                     let phrase = String(result.text.characters)
-                    onText(result.isFinal ? transcript.commit(phrase) : transcript.setVolatile(phrase))
+                    guard result.isFinal else {
+                        onText(transcript.setVolatile(phrase))
+                        continue
+                    }
+                    // A finalized result covers its own stretch of audio (WWDC25 277); its range is kept for the log.
+                    let start = CMTimeGetSeconds(result.range.start)
+                    let end = CMTimeGetSeconds(CMTimeRangeGetEnd(result.range))
+                    onText(transcript.commit(phrase, start: start.isFinite ? start : nil, end: end.isFinite ? end : nil))
                 }
             } catch {
                 // The analyzer finished with an error: what was heard stays.
@@ -419,9 +509,15 @@ final class AnalyzerBackend: SpeechBackend, @unchecked Sendable {
         } catch {
             continuation.finish()
             backend.results?.cancel()
-            throw SpeechCaptureError.unavailable
+            throw AnalyzerUnavailable.startFailed
         }
         return backend
+    }
+
+    var finishedText: String { transcript.finishedText }
+
+    var diagnostics: SpeechDiagnostics {
+        SpeechDiagnostics(engine: .analyzer, why: nil, phrases: transcript.timedPhrases, vocabulary: vocabularyCount)
     }
 
     /// The names to expect, as the analyzer's contextual strings (AnalysisContext, iOS 26). Apple's forum answer says
@@ -505,61 +601,238 @@ final class FormatConverter: @unchecked Sendable {
     }
 }
 
-/// iOS 17 to 25 (and iOS 26 before its model is on the phone): SFSpeechRecognizer, on the device only.
+/// iOS 17 to 25 (and iOS 26 before its model is on the phone): SFSpeechRecognizer, on the device only. Two things keep
+/// every word of a long note: the text survives the recogniser starting over after a pause (`RecognizerTranscript`),
+/// and a recognition task that ends by itself mid-note (a final result or an error) is followed by a new one with the
+/// same settings, which the next buffers go to.
 final class RecognizerBackend: SpeechBackend, @unchecked Sendable {
+    /// A safety net: a task that keeps ending at once (an error on every start) is not restarted for ever.
+    static let maxRestarts = 200
+
     private let recognizer: SFSpeechRecognizer
-    private let request: SFSpeechAudioBufferRecognitionRequest
-    private let transcript = TranscriptBuffer()
+    private let vocabulary: [String]
+    private let why: String
+    private let onText: @Sendable (String) -> Void
+    private let started = Date()
     private let lock = NSLock()
+    private var request: SFSpeechAudioBufferRecognitionRequest
     private var task: SFSpeechRecognitionTask?
+    private var taskStarted = Date()
+    /// Which request the results are for: a late result from an ended task never lands in the new one's text.
+    private var generation = 0
+    private var transcript = RecognizerTranscript()
+    private var resets: [TranscriptReset] = []
+    private var restarts = 0
+    private var finishing = false
     private var done = false
 
     /// Nil when this iPhone cannot recognise the language on the device: audio is never sent to a server.
-    init?(locale: Locale, vocabulary: [String] = [], onText: @escaping @Sendable (String) -> Void) {
+    init?(locale: Locale, vocabulary: [String] = [], why: String = "iOS 17 to 25",
+          onText: @escaping @Sendable (String) -> Void) {
         guard let recognizer = SFSpeechRecognizer(locale: locale) ?? SFSpeechRecognizer(),
               recognizer.isAvailable, recognizer.supportsOnDeviceRecognition else { return nil }
+        self.recognizer = recognizer
+        self.vocabulary = vocabulary
+        self.why = why
+        self.onText = onText
+        self.request = Self.makeRequest(vocabulary: vocabulary)
+        startTask()
+    }
+
+    /// On the device only, partial results, punctuation, dictation, and the names this person is likely to say (at
+    /// most 100 short phrases, as Apple asks).
+    private static func makeRequest(vocabulary: [String]) -> SFSpeechAudioBufferRecognitionRequest {
         let request = SFSpeechAudioBufferRecognitionRequest()
         request.requiresOnDeviceRecognition = true
         request.shouldReportPartialResults = true
         request.addsPunctuation = true
         request.taskHint = .dictation
-        // The names this person is likely to say (at most 100 short phrases, as Apple asks).
         request.contextualStrings = vocabulary
-        self.recognizer = recognizer
-        self.request = request
-        let transcript = self.transcript
-        let task = recognizer.recognitionTask(with: request) { [weak self] result, error in
-            if let result {
-                onText(transcript.replace(result.bestTranscription.formattedString))
-            }
-            if error != nil || result?.isFinal == true {
-                self?.markDone()
-            }
+        return request
+    }
+
+    private func startTask() {
+        let (request, generation) = lock.withLock { () -> (SFSpeechAudioBufferRecognitionRequest, Int) in
+            taskStarted = Date()
+            return (self.request, self.generation)
         }
-        lock.withLock { self.task = task }
+        let task = recognizer.recognitionTask(with: request) { [weak self] result, error in
+            self?.handle(result, ended: error != nil || result?.isFinal == true, generation: generation)
+        }
+        lock.withLock { if self.generation == generation { self.task = task } }
+    }
+
+    private func handle(_ result: SFSpeechRecognitionResult?, ended: Bool, generation: Int) {
+        let (text, restartAfter) = lock.withLock { () -> (String?, Double?) in
+            guard generation == self.generation else { return (nil, nil) }
+            var text: String?
+            if let result {
+                let before = transcript.text
+                let heard = result.bestTranscription.formattedString
+                if transcript.apply(heard), resets.count < RecognizerTranscript.maxResets {
+                    resets.append(TranscriptReset(at: Date().timeIntervalSince(started), before: before, after: heard))
+                }
+                text = transcript.text
+            }
+            guard ended else { return (text, nil) }
+            transcript.commit()
+            text = transcript.text
+            guard !finishing, restarts < Self.maxRestarts else {
+                done = true
+                return (text, nil)
+            }
+            restarts += 1
+            self.generation += 1
+            request = Self.makeRequest(vocabulary: vocabulary)
+            // A task that ended at once (an error on start) waits a moment, so it never spins.
+            return (text, Date().timeIntervalSince(taskStarted) < 0.5 ? 0.3 : 0)
+        }
+        if let text { onText(text) }
+        guard let restartAfter else { return }
+        if restartAfter > 0 {
+            DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + restartAfter) { [weak self] in
+                self?.startTask()
+            }
+        } else {
+            startTask()
+        }
     }
 
     func append(_ buffer: AVAudioPCMBuffer) {
-        request.append(buffer)
+        lock.withLock { request }.append(buffer)
     }
 
     func finish() async -> String {
+        let request = lock.withLock { () -> SFSpeechAudioBufferRecognitionRequest in
+            finishing = true
+            return self.request
+        }
         request.endAudio()
         // The final result follows the end of the audio within a moment; never wait more than 2 s for it.
         for _ in 0..<20 {
             if lock.withLock({ done }) { break }
             try? await Task.sleep(for: .milliseconds(100))
         }
-        lock.withLock { task?.cancel() }
-        return transcript.text
+        return lock.withLock { () -> String in
+            task?.cancel()
+            transcript.commit()
+            return transcript.text
+        }
     }
 
     func cancel() {
+        let request = lock.withLock { () -> SFSpeechAudioBufferRecognitionRequest in
+            finishing = true
+            return self.request
+        }
         request.endAudio()
         lock.withLock { task?.cancel() }
     }
 
-    private func markDone() {
-        lock.withLock { done = true }
+    var finishedText: String { "" }
+
+    var diagnostics: SpeechDiagnostics {
+        lock.withLock {
+            SpeechDiagnostics(engine: .recognizer, why: why, resets: resets, restarts: restarts,
+                              vocabulary: vocabulary.count)
+        }
+    }
+}
+
+/// One note's words on SFSpeechRecognizer, kept when the recogniser starts over. On iOS 17 to 25 the on-device
+/// recogniser can begin again after a pause of a second or two and report only the words since (Apple staff reproduced
+/// it on iOS 17, forum 765609); the text so far stays, and the new words follow it. A start-over is told from the
+/// text, not from partial results' timestamps, which Apple says are not accurate (forum 785389): a result no longer
+/// than the longest text since the last start-over that does not continue it (its opening words are not that text's
+/// opening words, compared in order), from a text of two words or more. Pure, so CI tests it.
+/// https://developer.apple.com/forums/thread/765609
+/// https://developer.apple.com/forums/thread/785389
+struct RecognizerTranscript: Hashable, Sendable {
+    /// The log keeps at most this many start-overs.
+    static let maxResets = 50
+    /// How many opening words are compared.
+    static let compared = 8
+
+    /// What earlier tasks and start-overs left.
+    private(set) var committed = ""
+    /// The longest text since the last start-over, and the latest result.
+    private(set) var peak = ""
+    private(set) var current = ""
+
+    /// Everything heard, in order.
+    var text: String { TranscriptBuffer.join(committed, tail) }
+
+    /// Takes the latest result. True when it started over.
+    @discardableResult
+    mutating func apply(_ result: String) -> Bool {
+        let next = Self.words(result)
+        guard !next.isEmpty else { return false }
+        let longest = Self.words(peak)
+        // A start-over begins again with the new words, so it is never longer than the text before it. A longer result
+        // that does not carry on the opening words is a revision of the whole result (iOS 18.1 and later report one
+        // growing result: "Book a table" and then "Look at the table for six"), and replaces it.
+        if longest.count >= 2, next.count <= longest.count, !Self.continues(longest, next) {
+            committed = TranscriptBuffer.join(committed, peak)
+            peak = result
+            current = result
+            return true
+        }
+        current = result
+        if next.count >= longest.count { peak = result }
+        return false
+    }
+
+    /// The task ended (a final result, an error, the stop): its words are kept, and the next task starts clean.
+    mutating func commit() {
+        committed = TranscriptBuffer.join(committed, tail)
+        peak = ""
+        current = ""
+    }
+
+    /// The words since the last start-over: the latest result, unless it is shorter than the longest and only
+    /// matches its opening words loosely, which may be a start-over not seen yet ("I need milk" after "I need to call
+    /// the dentist"): then both, so no word is lost.
+    private var tail: String {
+        let latest = Self.words(current)
+        let longest = Self.words(peak)
+        guard latest.count < longest.count else { return current }
+        // The same opening words, revised at the end ("call the dentist to" and then "call the dentist").
+        if Array(longest.prefix(latest.count)) == latest { return peak }
+        if latest.count >= 4, Self.matched(latest, Array(longest.prefix(latest.count + 1))) >= latest.count - 1 {
+            return current
+        }
+        return TranscriptBuffer.join(peak, current)
+    }
+
+    /// The new result carries on the text: at least half of the shorter one's opening words come, in order, in the
+    /// longer one's opening words (two to spare for a word put in).
+    static func continues(_ previous: [String], _ next: [String]) -> Bool {
+        let (short, long) = next.count <= previous.count ? (next, previous) : (previous, next)
+        let opening = Array(short.prefix(compared))
+        let against = Array(long.prefix(opening.count + 2))
+        return matched(opening, against) * 2 >= opening.count
+    }
+
+    /// The most words of `a` found in `b` in the same order (longest common subsequence).
+    static func matched(_ a: [String], _ b: [String]) -> Int {
+        guard !a.isEmpty, !b.isEmpty else { return 0 }
+        var row = Array(repeating: 0, count: b.count + 1)
+        for x in a {
+            var diagonal = 0
+            for (j, y) in b.enumerated() {
+                let above = row[j + 1]
+                row[j + 1] = x == y ? diagonal + 1 : max(row[j], above)
+                diagonal = above
+            }
+        }
+        return row[b.count]
+    }
+
+    /// Lowercase words without punctuation.
+    static func words(_ text: String) -> [String] {
+        text.lowercased().split(whereSeparator: { $0.isWhitespace }).compactMap { word in
+            let kept = word.filter { $0.isLetter || $0.isNumber }
+            return kept.isEmpty ? nil : kept
+        }
     }
 }

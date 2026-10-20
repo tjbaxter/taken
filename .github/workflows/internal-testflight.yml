@@ -1,0 +1,108 @@
+name: Internal TestFlight
+
+# The owner's internal TestFlight build (eas.json profile "internal", .eas/build/build-ios-internal.yml) without an EAS
+# cloud build: `eas build --local` runs the internal profile's custom steps unchanged on this macOS runner (the profile
+# guard, project.internal.yml, TakenInternalPro, the testFlightInternalTestingOnly export, check-xcode.sh and
+# check-app-store-build.sh --internal), so no build is sent to EAS's servers and none counts against the plan's quota
+# (https://docs.expo.dev/build-reference/local-builds/, https://docs.expo.dev/billing/faq/). `eas submit` then uploads
+# the .ipa to App Store Connect with the key EAS already holds; App Store Connect marks it Internal, so it can only go
+# to internal tester groups. Signing uses EAS's managed credentials (--freeze-credentials never changes them) and the
+# build number EAS's remote autoIncrement keeps, so no release.yml secret is needed.
+#
+# Run by hand only, and only once the EXPO_TOKEN repository secret exists (an Expo robot user's token,
+# https://docs.expo.dev/accounts/programmatic-access/). eas-cli is pinned to 24.11.0, published 2026-10-05: a release at
+# least two weeks old, never the newest. Node and fastlane are pinned to what the EAS image eas.json names,
+# macos-tahoe-26.5-xcode-26.6, carries (Node 22.23.1 and fastlane 2.236.1, https://docs.expo.dev/build-reference/infrastructure/),
+# not whatever the runner image ships that week, since this job holds EXPO_TOKEN and signs with EAS's credentials. This
+# repository is public, so its Actions logs are too: default log levels only (never --verbose-logs), and the token is
+# set on the two eas steps alone and never printed.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: internal-testflight
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  internal:
+    name: Build on this runner and submit to TestFlight internal testing
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      # Nothing ships that ci.yml has not passed: the build, the unit tests, and the screenshots with their link checks
+      # (taken://todo must bring the To-do tab to the front). The newest green run on main counts when it is this commit
+      # or an ancestor, and nothing ci.yml checks (it ignores docs/, brand/ and Markdown) has changed since.
+      - name: CI passed for this code
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          shas="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 50 \
+                    --json headSha --jq '.[].headSha')"
+          for sha in $shas; do
+            git cat-file -e "$sha^{commit}" 2>/dev/null || continue
+            git merge-base --is-ancestor "$sha" "$head" || continue
+            if git diff --quiet "$sha" "$head" -- . ':(exclude)docs/**' ':(exclude)brand/**' ':(exclude)*.md'; then
+              echo "ci.yml passed on $sha, and nothing it checks has changed since"
+              exit 0
+            fi
+          done
+          echo "::error::No green ci.yml run on main covers $head (build, unit tests, screenshots and link checks). Let CI pass first."
+          exit 1
+
+      - name: Select Xcode (.xcode-version)
+        run: scripts/select-xcode.sh
+
+      # Node 22.23.1 (2026-06-22) and fastlane 2.236.1 (2026-06-11), as on the EAS image: eas-cli 24.11.0 asks for Node
+      # ^20.18.3 or >=22, and the internal profile's eas/run_fastlane runs the fastlane on PATH.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.23.1
+
+      - name: fastlane 2.236.1, as on the EAS image
+        env:
+          FASTLANE_SKIP_UPDATE_CHECK: "1"
+        run: |
+          set -euo pipefail
+          want=2.236.1
+          # Only this version, so the binstub cannot pick a newer one the runner image carries.
+          gem uninstall fastlane --all --executables --ignore-dependencies >/dev/null 2>&1 || true
+          gem install fastlane -v "$want" --no-document
+          have="$( (fastlane --version 2>/dev/null || true) | sed -n 's/^fastlane \([0-9][0-9.]*\).*$/\1/p' | tail -1)"
+          echo "fastlane on PATH: ${have:-none} at $(command -v fastlane || echo none); want $want"
+          if [ "$have" != "$want" ]; then
+            echo "::error::fastlane ${have:-none} is on PATH, not $want: refusing to build"
+            exit 1
+          fi
+
+      - name: Build the internal profile on this runner (no EAS cloud build)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "::error::Missing repository secret EXPO_TOKEN"
+            exit 1
+          fi
+          test "$(node --version)" = "v22.23.1"
+          npx --yes eas-cli@24.11.0 build -p ios -e internal --local --non-interactive --freeze-credentials \
+            --output "$RUNNER_TEMP/Taken-internal.ipa"
+          test -f "$RUNNER_TEMP/Taken-internal.ipa"
+
+      - name: Submit to TestFlight internal testing
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+        run: |
+          set -euo pipefail
+          npx --yes eas-cli@24.11.0 submit -p ios -e internal --path "$RUNNER_TEMP/Taken-internal.ipa" \
+            --non-interactive --wait

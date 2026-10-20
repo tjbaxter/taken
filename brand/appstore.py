@@ -43,7 +43,7 @@ LOG IT FROM ANYWHERE
 VOICE TO-DOS
 • Tap the mic and say it the way it comes out: "Today by 4 I need to call the dentist, pick up the dry cleaning and email Sam."
 • Taken turns the ramble into a tidy list, with the times you said, and Keep as one puts a note back together with a tap.
-• Personal and Work lists keep the two apart. A note goes into the list you are looking at.
+• Personal and Work are headed sections of one list. A note goes to the list on top, and a chip on the Listening card sends it to the other.
 • Tap the circle when one is done. Yesterday's open to-dos stay until they are.
 • Start a note from Siri ("Add to-dos in Taken"), the Action button, Control Center, the Lock Screen or the app icon.
 • Speech and sorting happen on your iPhone. The audio is never stored or sent. Sorting into separate to-dos uses Apple Intelligence where your iPhone has it.
@@ -106,8 +106,8 @@ WHATS_NEW = (
     "Your profile holds a name, a photo and every setting, and a wake-up time now decides which day a late dose counts "
     "for.\n\n"
     "Voice to-dos: tap the mic, say what you need to do, and Taken sorts it into a list on your iPhone. Keep as one "
-    "puts a note back together with a tap. Personal and Work lists keep the two apart, and a note goes into the list "
-    "you are looking at.\n\n"
+    "puts a note back together with a tap. Personal and Work are headed sections of one list; a note goes to the list "
+    "on top, and a chip on the Listening card sends it to the other.\n\n"
     "Adding is quicker: type the first letters of a name and pick it from the suggestions, spelled right for you. A "
     "Weekly schedule puts a once-a-week dose on its day, and there are three more quick-pick chips.\n\n"
     "Shortcuts: Did I take it? now hands its answer on, and Get to-dos and Add to-do let a shortcut you build read "
@@ -127,7 +127,7 @@ How to see Taken Pro and voice to-dos in the sandbox:
 1. On first launch tap Add to stack, tap three chips (for example Vitamin D3, Fish Oil and Finasteride) and tap Add 3.
 2. Tap the empty ring beside Vitamin D3. It fills with the current time, and about 1.5 seconds later the Taken Pro sheet slides up: yearly selected with 7 days on us, then monthly and lifetime, prices from the App Store, the renewal terms under the button, and Restore, Redeem code, Terms of Use and Privacy links.
 3. Close it with the X to see locked mode. Today still shows the stack and History the log, with a bar under the progress line reading Start 7 days on us. A ring, Take all, the bar or the + beside Stack opens the sheet again; the day sheet and CSV export keep working.
-4. Voice to-dos, still without Pro: open the To-do tab and tap the mic. iOS asks for the microphone and speech recognition. Say "Tomorrow at 9 call the dentist and buy milk" and pause; Taken stops after about 1.5 seconds and lists the to-dos (with Apple Intelligence on, two of them, both due tomorrow at 09:00; without it, one to-do with the words). Speech and sorting run on the device. The first voice note needs no Pro, so the next tap on the mic opens the Taken Pro sheet.
+4. Voice to-dos, still without Pro: open the To-do tab and tap the mic. iOS asks for the microphone and speech recognition. Say "Tomorrow at 9 call the dentist and buy milk", then tap the mic to finish; Taken lists the to-dos (with Apple Intelligence on, two of them, both due tomorrow at 09:00; without it, one to-do with the words). Speech and sorting run on the device. The first voice note needs no Pro, so the next tap on the mic opens the Taken Pro sheet.
 5. Tap Start 7 days on us and confirm with the sandbox account. The sheet shows Taken Pro is on, closes, and the mic starts listening. In the sandbox the introductory week lasts about 3 minutes.
 6. Restore: open Profile and scroll to Taken Pro, then Restore purchases (or Restore on the sheet). Redeem code and Manage subscription are in the same section.
 

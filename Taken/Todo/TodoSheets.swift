@@ -73,7 +73,7 @@ struct TodoEditSheet: View {
                 .tint(theme.signal)
                 .listRowBackground(theme.bgRaised)
                 Section {
-                    // Personal or Work: the same two names, in the same order, as the switch on the To-do tab.
+                    // Personal or Work: the same two names as the To-do tab's lists.
                     Picker(TodoCopy.list, selection: $area) {
                         ForEach(TodoArea.allCases) { option in
                             Text(option.title).tag(option)
@@ -133,13 +133,15 @@ struct TodoEditSheet: View {
     }
 }
 
-/// Typing instead of talking (no microphone, or no on-device speech): the same sorting into tasks.
+/// Typing instead of talking (no microphone, or no on-device speech): the same sorting into tasks. The chip above the
+/// words says which list they go to, the top one unless it is changed here, for this note only.
 struct TodoTypeSheet: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     let onSubmit: (String) -> Void
 
     @State private var text = ""
+    @State private var todo = TodoModel.shared
     @FocusState private var focused: Bool
 
     init(onSubmit: @escaping (String) -> Void) {
@@ -149,6 +151,16 @@ struct TodoTypeSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
+                Button {
+                    todo.setDestination(todo.destination.other)
+                } label: {
+                    TodoDestinationChip(area: todo.destination)
+                }
+                .buttonStyle(.plain)
+                .accessibilityLabel(TodoCopy.goesTo(todo.destination))
+                .accessibilityHint(TodoCopy.sendTo(todo.destination.other))
+                // The 44 pt target's slack under the capsule counts toward the 12 pt above the editor.
+                .padding(.bottom, -9)
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty {
                         Text("Call the dentist tomorrow at 9, buy milk, email Sam the deck")
@@ -189,7 +201,11 @@ struct TodoTypeSheet: View {
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .onAppear { focused = true }
+            .onAppear {
+                todo.resetDestination()
+                focused = true
+            }
+            .onDisappear { todo.resetDestination() }
         }
         .presentationDetents([.medium, .large])
         .presentationBackground(theme.bg)

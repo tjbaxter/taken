@@ -14,33 +14,52 @@ enum TodoGrounding {
     static let shortNoteWords = 8
 
     /// The model's tasks with each word of the transcript owned by one task:
-    /// - G1 each task is placed on the words it came from: its `spoken` words as a run, first after the previous task,
-    ///   then anywhere, then fuzzily (80% of them in order, one miss allowed in two to four words); failing that, or
-    ///   with no `spoken`, by its title's content words (60%). A task with `spoken` that places neither way was
-    ///   invented and is dropped. A task with only a title that cannot be placed passes through untouched.
+    /// - G1 each task is placed on the words it came from, inside its part's window when a long note was sorted in
+    ///   parts: its `spoken` words as a run, first after the previous task, then anywhere, then fuzzily (80% of them in
+    ///   order, one miss allowed in two to four words); failing that by its title's content words (60%, or 50% when the
+    ///   model left `spoken` empty), a trailing s or es ignored. A task the model wrote that places neither way was never
+    ///   said and is dropped. Only a stored answer from before `spoken` existed (no `spoken` at all) passes through.
     /// - G2 two tasks on overlapping words are one task, and so are two whose titles share a content word said only
     ///   once, unless a separator sits between them and neither title leads with the other's action.
     /// - G3 a one-word task, or a shop or website said after its action ("on Amazon"), joins the task it touches,
     ///   unless a comma or "and" sits between them or the two carry different due dates.
     /// - G4 a short note with no separator in it is one task, unless its tasks carry different due dates.
-    /// - G5 a merged title, or one that is empty, adds a word never said, drops a name it covers or drops a word from
-    ///   the middle of what it kept, is rebuilt from the speaker's own words.
+    /// - G5 a merged title, or one that is empty, adds a word never said, drops a name it covers, drops a word from the
+    ///   middle of what it kept, or leaves out the action said before it in its clause ("LinkedIn ICPs" from "send
+    ///   messages to my LinkedIn ICPs"), is rebuilt from the speaker's own words. A kept title takes the spelling said
+    ///   for a word it wrote singular or plural ("ICP" said as "ICPs").
     /// - G6 a merged task keeps the first due date said.
-    static func reconcile(_ raw: [RawTodo], transcript: String) -> [RawTodo] {
+    /// - G7 a due date stands only where a day or time was said for it: in its words, earlier in its sentence, in a
+    ///   header just before ("Tomorrow."), or in the part's carried phrase. Otherwise the task stays and the due goes.
+    /// G2 to G7 run once over the whole note, so a task split across two parts ("Order Reach toothbrushes. | On Amazon")
+    /// is joined again.
+    static func reconcile(_ raw: [RawTodo], transcript: String, windows: [Range<Int>?]? = nil,
+                          carried: [String?]? = nil) -> [RawTodo] {
+        reconcileIndexed(raw, transcript: transcript, windows: windows, carried: carried).map(\.task)
+    }
+
+    /// `reconcile`, with the index in `raw` each task comes from (a merged task's first member in the answer), so the
+    /// tasks of a note sorted in parts can be put back part by part.
+    static func reconcileIndexed(_ raw: [RawTodo], transcript: String, windows: [Range<Int>?]? = nil,
+                                 carried: [String?]? = nil) -> [(source: Int, task: RawTodo)] {
         let note = SpokenNote(transcript)
-        guard !note.words.isEmpty, !raw.isEmpty else { return raw }
+        guard !note.words.isEmpty, !raw.isEmpty else { return raw.enumerated().map { (source: $0.offset, task: $0.element) } }
 
         // G1: place. A `spoken` copied a little off ("I have got to" for "I've gotta", "e-mail" for "email") still
         // places by its title, so a task that was said is never dropped while the rest of its note is kept (the
-        // whole-note fallback only runs when nothing is left).
+        // fallback lines only come when nothing is left).
         var spans: [WordSpan?] = Array(repeating: nil, count: raw.count)
         var dropped = Set<Int>()
         var previousEnd = -1
         for (index, task) in raw.enumerated() {
+            let window = windows.flatMap { $0.indices.contains(index) ? $0[index] : nil }
             let spoken = note.aligned(SpokenNote.tokens(of: task.spoken ?? ""))
-            var span = spoken.isEmpty ? nil : note.place(spoken: spoken, after: previousEnd)
-            if span == nil { span = note.place(title: task.title, after: previousEnd) }
-            if span == nil && !spoken.isEmpty { dropped.insert(index) }
+            var span = spoken.isEmpty ? nil : note.place(spoken: spoken, after: previousEnd, within: window)
+            // The live model always writes `spoken`; an empty one ("LinkedIn ICP" with nothing copied) places by half
+            // its title's content words.
+            let share = task.spoken != nil && spoken.isEmpty ? 0.5 : 0.6
+            if span == nil { span = note.place(title: task.title, after: previousEnd, within: window, share: share) }
+            if span == nil && task.spoken != nil { dropped.insert(index) }
             if let span {
                 let trimmed = note.withoutEdgeSeparators(span)
                 spans[index] = trimmed
@@ -48,7 +67,9 @@ enum TodoGrounding {
             }
         }
         let placed = raw.indices.filter { spans[$0] != nil }
-        guard !placed.isEmpty else { return raw.indices.filter { !dropped.contains($0) }.map { raw[$0] } }
+        guard !placed.isEmpty else {
+            return raw.indices.filter { !dropped.contains($0) }.map { (source: $0, task: raw[$0]) }
+        }
 
         var owners = TaskOwners(count: raw.count)
 
@@ -124,28 +145,43 @@ enum TodoGrounding {
             for index in placed.dropFirst() { owners.join(placed[0], index) }
         }
 
-        // G5 and G6: one task per group, where its first member was in the model's answer.
+        // G5, G6 and G7: one task per group, where its first member was in the model's answer.
         let groups = owners.groups(placed: placed, spans: spans)
-        var result: [RawTodo] = []
+        var result: [(source: Int, task: RawTodo)] = []
         var emitted = Set<Int>()
         for index in raw.indices where !dropped.contains(index) {
             guard spans[index] != nil else {
-                result.append(raw[index])
+                result.append((source: index, task: raw[index]))
                 continue
             }
             guard let group = groups.first(where: { $0.members.contains(index) }), emitted.insert(group.root).inserted
             else { continue }
             let nextStart = groups.map(\.span.start).filter { $0 > group.span.end }.min()
-            result.append(task(for: group, raw: raw, spans: spans, note: note, nextStart: nextStart))
+            let previousEnd = groups.map(\.span.end).filter { $0 < group.span.start }.max() ?? -1
+            var grounded = task(for: group, raw: raw, spans: spans, note: note, nextStart: nextStart,
+                                previousEnd: previousEnd)
+            // G7, last: a time nobody said ("LinkedIn ICP" due 17:18, the prompt's own "Now") would fire a wrong
+            // notification. The task stays; only its due goes.
+            if !(grounded.dueISO8601 ?? "").trimmingCharacters(in: .whitespaces).isEmpty {
+                let phrases = group.members.compactMap { member -> String? in
+                    guard let carried, carried.indices.contains(member) else { return nil }
+                    return carried[member]
+                }
+                if !note.saysDayOrTime(around: group.span, nextStart: nextStart, carried: phrases) {
+                    grounded.dueISO8601 = nil
+                    grounded.hasTime = false
+                }
+            }
+            result.append((source: index, task: grounded))
         }
         return result
     }
 
     /// One group's task. A lone task keeps the model's title unless it adds a word never said, drops a name its words
-    /// cover, or drops a word from the middle of what it kept; a merged one is always rebuilt from the transcript, and
-    /// keeps the due date of its earliest words.
+    /// cover, drops a word from the middle of what it kept, or leaves out the action said before it; a merged one is
+    /// always rebuilt from the transcript, and keeps the due date of its earliest words.
     private static func task(for group: GroundedTask, raw: [RawTodo], spans: [WordSpan?], note: SpokenNote,
-                             nextStart: Int?) -> RawTodo {
+                             nextStart: Int?, previousEnd: Int) -> RawTodo {
         let byPlace = group.members.sorted { a, b in
             let (sa, sb) = (spans[a]?.start ?? 0, spans[b]?.start ?? 0)
             return sa != sb ? sa < sb : a < b
@@ -160,11 +196,17 @@ enum TodoGrounding {
             hasTime = source.map { raw[$0].hasTime } ?? false
         }
         var title = merged ? raw[byPlace[0]].title : first.title
-        if merged || SpokenNote.tokens(of: title).isEmpty || note.addsUnsaidWord(title)
+        // A title that starts past the action said in its clause is rebuilt from where the action starts.
+        let actionStart = merged ? nil : note.actionStart(for: group.span, title: title, after: previousEnd)
+        var source = group.span
+        if let actionStart { source.start = min(source.start, actionStart) }
+        if merged || actionStart != nil || SpokenNote.tokens(of: title).isEmpty || note.addsUnsaidWord(title)
             || note.dropsName(in: group.span, title: title) || note.dropsInnerWord(in: group.span, title: title),
-           let rebuilt = note.title(for: group.span, nextStart: nextStart, hasDue: due != nil,
+           let rebuilt = note.title(for: source, nextStart: nextStart, hasDue: due != nil,
                                     members: byPlace.compactMap { spans[$0] }) {
             title = rebuilt
+        } else if !merged {
+            title = note.respelled(title)
         }
         return RawTodo(spoken: note.text(group.span), title: title, dueISO8601: due, hasTime: hasTime)
     }
@@ -282,6 +324,9 @@ struct SpokenNote {
         var commaAfter: Bool
         /// The first word, or the first after a full stop: its capital says nothing about a name.
         var startsSentence: Bool
+        /// As written, punctuation and all, with any punctuation said on its own after it (" - "): what a part of a
+        /// long note, or a line saved as said, reads.
+        var raw: String = ""
 
         var key: String { tokens.joined() }
         /// Only day, time and number words: "Friday", "4", "pm", "tonight".
@@ -299,6 +344,7 @@ struct SpokenNote {
         var words: [Word] = []
         var pending = SpeechBreak.none
         var sentenceEnded = true
+        var leading = ""
         for chunk in text.split(whereSeparator: { $0.isWhitespace }) {
             let characters = Array(chunk)
             guard let first = characters.firstIndex(where: SpokenNote.isWordCharacter),
@@ -311,6 +357,11 @@ struct SpokenNote {
                     pending = max(pending, SpokenNote.breakOf(mark))
                 }
                 if SpokenNote.endsSentence(mark) { sentenceEnded = true }
+                if words.isEmpty {
+                    leading += mark + " "
+                } else {
+                    words[words.count - 1].raw += " " + mark
+                }
                 continue
             }
             let lead = String(characters[..<first])
@@ -321,7 +372,8 @@ struct SpokenNote {
             words.append(Word(surface: core, tokens: tokens,
                               breakBefore: words.isEmpty ? .none : max(pending, SpokenNote.breakOf(lead)),
                               commaAfter: trail.contains(",") || trail.contains(";"),
-                              startsSentence: sentenceEnded || SpokenNote.endsSentence(lead)))
+                              startsSentence: sentenceEnded || SpokenNote.endsSentence(lead),
+                              raw: (words.isEmpty ? leading : "") + String(chunk)))
             pending = SpokenNote.breakOf(trail)
             sentenceEnded = SpokenNote.endsSentence(trail)
         }
@@ -374,40 +426,51 @@ struct SpokenNote {
         return out
     }
 
-    /// Where `spoken` was said: as a run after `previousEnd`, then anywhere, then fuzzily (at least 80% of its tokens in
-    /// order, skipping at most two of the note's tokens between them). Nil when it was not said.
-    func place(spoken: [String], after previousEnd: Int) -> WordSpan? {
-        let start = tokenWord.firstIndex { $0 > previousEnd } ?? tokens.count
-        if let index = run(spoken, from: start) ?? run(spoken, from: 0) {
-            return WordSpan(start: tokenWord[index], end: tokenWord[index + spoken.count - 1])
-        }
-        return fuzzy(spoken, after: previousEnd)
+    /// The token indices of the words in `window` (every token without one): a part of a long note is searched only
+    /// in its own words.
+    func tokenBounds(_ window: Range<Int>?) -> Range<Int> {
+        guard let window else { return tokens.indices }
+        let lower = tokenWord.firstIndex { $0 >= window.lowerBound } ?? tokens.count
+        let upper = tokenWord.firstIndex { $0 >= window.upperBound } ?? tokens.count
+        return lower..<max(lower, upper)
     }
 
-    private func run(_ wanted: [String], from start: Int) -> Int? {
+    /// Where `spoken` was said: as a run after `previousEnd`, then anywhere, then fuzzily (at least 80% of its tokens in
+    /// order, skipping at most two of the note's tokens between them), inside `window` when there is one. Nil when it
+    /// was not said.
+    func place(spoken: [String], after previousEnd: Int, within window: Range<Int>? = nil) -> WordSpan? {
+        let bounds = tokenBounds(window)
+        let start = max(bounds.lowerBound, tokenWord.firstIndex { $0 > previousEnd } ?? tokens.count)
+        if let index = run(spoken, from: start, in: bounds) ?? run(spoken, from: bounds.lowerBound, in: bounds) {
+            return WordSpan(start: tokenWord[index], end: tokenWord[index + spoken.count - 1])
+        }
+        return fuzzy(spoken, after: previousEnd, in: bounds)
+    }
+
+    private func run(_ wanted: [String], from start: Int, in bounds: Range<Int>) -> Int? {
         let n = wanted.count
-        guard n > 0, n <= tokens.count, start <= tokens.count - n else { return nil }
-        for index in start...(tokens.count - n) where tokens[index] == wanted[0] {
+        guard n > 0, n <= bounds.count, start <= bounds.upperBound - n else { return nil }
+        for index in start...(bounds.upperBound - n) where tokens[index] == wanted[0] {
             if (1..<n).allSatisfy({ tokens[index + $0] == wanted[$0] }) { return index }
         }
         return nil
     }
 
-    private func fuzzy(_ wanted: [String], after previousEnd: Int) -> WordSpan? {
+    private func fuzzy(_ wanted: [String], after previousEnd: Int, in bounds: Range<Int>) -> WordSpan? {
         let n = wanted.count
         // 80% of the tokens (rounded up), which for two to four tokens would mean all of them: there one may be missed
         // ("call mom" for "call mum"), as long as a content word is among those found.
         let needed = n < 2 ? n : n - max(1, n / 5)
         let maxSkip = 2
         var best: Candidate?
-        for start in tokens.indices {
+        for start in bounds {
             for first in wanted.indices where wanted[first] == tokens[start] {
                 var matched = 1
                 var foundContent = SpokenNote.isContent(wanted[first])
                 var cursor = start + 1
                 var last = start
                 for next in wanted.indices where next > first {
-                    let limit = min(tokens.count, cursor + maxSkip + 1)
+                    let limit = min(bounds.upperBound, cursor + maxSkip + 1)
                     guard cursor < limit, let hit = (cursor..<limit).first(where: { tokens[$0] == wanted[next] }) else {
                         continue
                     }
@@ -425,19 +488,21 @@ struct SpokenNote {
         return best?.span
     }
 
-    /// Where a title with no `spoken` came from: the tightest stretch holding at least 60% of its content words (in
-    /// any order, the model may reorder them), at most three words per content word plus two.
-    func place(title: String, after previousEnd: Int) -> WordSpan? {
+    /// Where a title with no `spoken` came from: the tightest stretch holding at least `share` of its content words (in
+    /// any order, the model may reorder them; singular or plural alike), at most three words per content word plus two.
+    func place(title: String, after previousEnd: Int, within window: Range<Int>? = nil, share: Double = 0.6) -> WordSpan? {
         var wanted: [String] = []
         for token in SpokenNote.tokens(of: title) where SpokenNote.isContent(token) && !wanted.contains(token) {
             wanted.append(token)
         }
         guard !wanted.isEmpty else { return nil }
-        let needed = Int((Double(wanted.count) * 0.6).rounded(.up))
+        let needed = max(1, Int((Double(wanted.count) * share).rounded(.up)))
         let widest = 3 * wanted.count + 2
         var hits: [(word: Int, key: Int)] = []
-        for (index, token) in tokens.enumerated() {
-            if let key = wanted.firstIndex(of: token) { hits.append((tokenWord[index], key)) }
+        for index in tokenBounds(window) {
+            if let key = wanted.firstIndex(where: { SpokenNote.sameWord($0, tokens[index]) }) {
+                hits.append((tokenWord[index], key))
+            }
         }
         var best: Candidate?
         for a in hits.indices {
@@ -554,19 +619,25 @@ struct SpokenNote {
 
     // MARK: G5 titles
 
-    /// A content word in the title that was never said, past its first word (the model may add a leading verb).
+    /// A content word in the title that was never said, past its first word (the model may add a leading verb). A
+    /// word said with or without a trailing s or es was said.
     func addsUnsaidWord(_ title: String) -> Bool {
         for (index, token) in SpokenNote.tokens(of: title).enumerated()
-        where index > 0 && SpokenNote.isContent(token) && counts[token] == nil {
+        where index > 0 && SpokenNote.isContent(token) && !wasSaid(token) {
             return true
         }
         return false
     }
 
+    /// The token, or the same word with or without a trailing s or es, is in the note.
+    func wasSaid(_ token: String) -> Bool {
+        counts[token] != nil || SpokenNote.variants(of: token).contains { counts[$0] != nil }
+    }
+
     /// A capitalised word inside the span (a name, mid-sentence) that the title leaves out: "Order toothbrushes on
     /// Amazon" from "order Reach toothbrushes on Amazon". Days and months are left out of titles on purpose.
     func dropsName(in span: WordSpan, title: String) -> Bool {
-        let kept = Set(SpokenNote.tokens(of: title))
+        let kept = TitleWords(title)
         for index in span.start...span.end {
             let word = words[index]
             guard let first = word.surface.first, first.isUppercase, !word.startsSentence, !word.isDayOrTime,
@@ -578,9 +649,9 @@ struct SpokenNote {
 
     /// A content word the title leaves out from between two words it kept: "Order toothbrushes on amazon" from "order
     /// reach toothbrushes on amazon", where no capital marks the brand. Words before the first kept word or after the
-    /// last (chat, the day) may go.
+    /// last (chat, the day) may go; the action before them may not (`actionStart`).
     func dropsInnerWord(in span: WordSpan, title: String) -> Bool {
-        let kept = Set(SpokenNote.tokens(of: title))
+        let kept = TitleWords(title)
         let keptWords = (span.start...span.end).filter { index in
             words[index].tokens.contains { SpokenNote.isContent($0) && kept.contains($0) }
         }
@@ -590,6 +661,102 @@ struct SpokenNote {
             if word.tokens.contains(where: { SpokenNote.isContent($0) && !kept.contains($0) }) { return true }
         }
         return false
+    }
+
+    /// G5 keeps the action. A title that starts on a word said (not the model's own verb) but past the action of its
+    /// clause, "LinkedIn ICPs" from "I should send messages to my LinkedIn ICPs": walking left from its first kept word
+    /// over articles, possessives and prepositions only, within the clause, the next word is a content word the title
+    /// leaves out. Returns where the action starts: the clause start without its leading filler, at most
+    /// `maxActionReach` words before the first kept word, never inside an earlier task's words (`previousEnd`). Nil
+    /// for a title that keeps its action, or leads with a verb of its own ("Call the vet" for "Ring the vet"). Chat said
+    /// before ("the main thing is send the deck", "finally book the dentist") is never reached: a copula ends the clause,
+    /// and a word right before the first kept one, with nothing between, is not taken for the action.
+    func actionStart(for span: WordSpan, title: String, after previousEnd: Int) -> Int? {
+        let titleTokens = SpokenNote.tokens(of: title)
+        guard let lead = titleTokens.first, wasSaid(lead) else { return nil }
+        let kept = TitleWords(title)
+        guard let first = (span.start...span.end).first(where: { index in
+            words[index].tokens.contains { SpokenNote.isContent($0) && kept.contains($0) }
+        }) else { return nil }
+        // Left over the words that tie an object to its verb ("to my", "for the"), then one content word left out.
+        var index = first
+        var crossed = 0
+        var leftOut = false
+        while index > 0, index - 1 > previousEnd, words[index].breakBefore == .none {
+            let left = index - 1
+            let key = words[left].key
+            if isSeparatorWord(left) || SpokenNote.clauseWords.contains(key) { break }
+            if SpokenNote.objectWords.contains(key) {
+                crossed += 1
+                index = left
+                continue
+            }
+            leftOut = crossed > 0 && !words[left].isDayOrTime
+                && words[left].tokens.contains { SpokenNote.isContent($0) && !kept.contains($0) }
+            break
+        }
+        guard leftOut else { return nil }
+        var clauseStart = first
+        while clauseStart > 0, clauseStart - 1 > previousEnd, words[clauseStart].breakBefore == .none,
+              !isSeparatorWord(clauseStart - 1), !SpokenNote.clauseWords.contains(words[clauseStart - 1].key) {
+            clauseStart -= 1
+        }
+        let start = withoutFiller(Array(clauseStart..<first)).first ?? first
+        return max(start, first - SpokenNote.maxActionReach)
+    }
+
+    /// A kept title in the spelling said: a word the model wrote singular or plural, said the other way, takes the
+    /// speaker's form ("LinkedIn ICP" for "LinkedIn ICPs").
+    func respelled(_ title: String) -> String {
+        title.split(separator: " ", omittingEmptySubsequences: false).map { piece -> String in
+            let characters = Array(piece)
+            guard let first = characters.firstIndex(where: SpokenNote.isWordCharacter),
+                  let last = characters.lastIndex(where: SpokenNote.isWordCharacter) else { return String(piece) }
+            let core = String(characters[first...last])
+            let tokens = SpokenNote.coreTokens(core)
+            guard tokens.count == 1, counts[tokens[0]] == nil,
+                  let said = words.first(where: { word in
+                      word.tokens.count == 1 && SpokenNote.variants(of: tokens[0]).contains(word.tokens[0])
+                  }) else { return String(piece) }
+            return String(characters[..<first]) + said.surface + String(characters[(last + 1)...])
+        }
+        .joined(separator: " ")
+    }
+
+    // MARK: G7 days and times
+
+    /// The first word of the sentence holding `index`.
+    func sentenceStart(of index: Int) -> Int {
+        var start = min(index, words.count - 1)
+        while start > 0 && !words[start].startsSentence { start -= 1 }
+        return start
+    }
+
+    /// A day or time was said for the words of `span` (G7): in them, earlier in their sentence, in the words after them
+    /// up to the next break, separator or task ("Gym at 6"), in a header sentence just before ("Tomorrow. Call the
+    /// bank"), or in a carried phrase.
+    func saysDayOrTime(around span: WordSpan, nextStart: Int?, carried: [String] = []) -> Bool {
+        guard !words.isEmpty else { return false }
+        let start = sentenceStart(of: span.start)
+        var end = min(span.end, words.count - 1)
+        let limit = min(nextStart ?? words.count, words.count)
+        while end + 1 < limit, words[end + 1].breakBefore == .none, !isSeparatorWord(end + 1) { end += 1 }
+        var said = (start...end).flatMap { words[$0].tokens }
+        if start > 0 {
+            let header = sentenceStart(of: start - 1)
+            if isDayTimeHeader(header..<start) { said = (header..<start).flatMap { words[$0].tokens } + said }
+        }
+        if SpokenDayTime.said(in: said) { return true }
+        return carried.contains { SpokenDayTime.said(in: SpokenNote.tokens(of: $0)) }
+    }
+
+    /// A sentence that only says when: four words or fewer, every one a day or time word, a connector or filler, and a
+    /// day or time among them ("Tomorrow.", "For Friday,", "Next week."). A long note is never cut right after one, and
+    /// the tasks after it keep its date.
+    func isDayTimeHeader(_ range: Range<Int>) -> Bool {
+        guard !range.isEmpty, range.count <= 4, range.lowerBound >= 0, range.upperBound <= words.count else { return false }
+        let said = range.flatMap { words[$0].tokens }
+        return said.allSatisfy(SpokenDayTime.isHeaderWord) && SpokenDayTime.said(in: said)
     }
 
     /// The speaker's own words over the span, carried on to the next separator or the next task, without leading filler,
@@ -639,7 +806,8 @@ struct SpokenNote {
         (span.start...span.end).map { words[$0].surface }.joined(separator: " ")
     }
 
-    private func withoutFiller(_ picked: [Int]) -> [Int] {
+    /// The words without the filler they start with ("um so I need to").
+    func withoutFiller(_ picked: [Int]) -> [Int] {
         var picked = picked
         var trimmed = true
         while trimmed {
@@ -723,8 +891,51 @@ struct SpokenNote {
         dayAndTimeWords.contains(token) || token.allSatisfy { $0.isNumber }
     }
 
+    /// The same word with a trailing s or es, or without one: "icp" and "icps", "toothbrush" and "toothbrushes". Only
+    /// for words of three letters or more, so "a" is never "as".
+    static func variants(of token: String) -> [String] {
+        var forms: [String] = []
+        if token.count >= 3 { forms += [token + "s", token + "es"] }
+        if token.hasSuffix("es"), token.count - 2 >= 3 { forms.append(String(token.dropLast(2))) }
+        if token.hasSuffix("s"), token.count - 1 >= 3 { forms.append(String(token.dropLast())) }
+        return forms
+    }
+
+    /// One word, singular or plural alike.
+    static func sameWord(_ a: String, _ b: String) -> Bool {
+        a == b || variants(of: a).contains(b)
+    }
+
+    /// A title's tokens, looked up singular or plural alike.
+    struct TitleWords {
+        let tokens: Set<String>
+
+        init(_ title: String) {
+            tokens = Set(SpokenNote.tokens(of: title))
+        }
+
+        func contains(_ token: String) -> Bool {
+            tokens.contains(token) || SpokenNote.variants(of: token).contains(where: tokens.contains)
+        }
+    }
+
+    /// Words that tie an object to its verb, crossed when looking for the action a title left out (G5).
+    static let objectWords: Set<String> = [
+        "a", "an", "the", "to", "my", "your", "our", "his", "her", "their", "this", "that", "these", "those", "some",
+        "for", "with", "of", "on", "at", "in", "from", "about", "into", "onto",
+    ]
+
+    /// A copula ends the clause an action is looked for in: "the main thing is | send the deck".
+    static let clauseWords: Set<String> = ["is", "was", "are", "were", "im", "its", "thats", "theres", "whats"]
+
+    /// How far back a title rebuilt for its action reaches, in words before its first kept word.
+    static let maxActionReach = 6
+
     static let leadingFiller: [[String]] = [
         ["i", "need", "to"], ["i", "have", "to"], ["remember", "to"], ["dont", "forget", "to"],
+        ["i", "have", "got", "to"], ["ive", "got", "to"], ["i", "want", "to"], ["i", "ought", "to"], ["id", "like", "to"],
+        ["im", "going", "to"], ["im", "gonna"], ["i", "should"], ["i", "must"], ["i", "wanna"], ["i", "gotta"],
+        ["we", "need", "to"], ["we", "should"], ["need", "to"], ["got", "to"],
         ["um"], ["uh"], ["so"], ["also"], ["and"], ["then"], ["plus"],
     ]
 
@@ -774,6 +985,71 @@ struct SpokenNote {
         "fifty", "sixty", "hundred", "first", "second", "third", "fourth", "fifth", "sixth", "seventh", "eighth",
         "ninth", "tenth", "eleventh", "twelfth", "st", "nd", "rd", "th",
     ]
+}
+
+// MARK: - Days and times said (G7)
+
+/// The words that let a due date stand, narrower than `SpokenNote.dayAndTimeWords` (which also keeps "now", "later",
+/// "next", "first" and "may" out of titles and merges): "I should now send messages..." must not keep the prompt's own
+/// "Now" time. Weekday short forms count only before a time or after a day word ("on Fri"), numbers only beside a time
+/// word ("at 6", "4 pm", "quarter to 4", "in 10 minutes"), so "Buy 6 eggs" never keeps a 06:00.
+enum SpokenDayTime {
+    static let dayWords: Set<String> = [
+        "today", "todays", "tonight", "tonights", "tomorrow", "tomorrows", "yesterday", "morning", "mornings",
+        "afternoon", "evening", "noon", "midday", "midnight", "weekend", "eod",
+        "monday", "tuesday", "wednesday", "thursday", "friday", "saturday", "sunday", "mondays", "tuesdays",
+        "wednesdays", "thursdays", "fridays", "saturdays", "sundays",
+        "january", "february", "april", "june", "july", "august", "september", "october", "november", "december",
+    ]
+    static let shortDays: Set<String> = ["mon", "tue", "tues", "wed", "weds", "thu", "thur", "thurs", "fri", "sat", "sun"]
+    static let numberWords: Set<String> = [
+        "one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve", "fifteen",
+        "twenty", "thirty", "forty", "fifty",
+    ]
+    /// A number right after one of these is a time: "at 6", "by 4", "until 3", "half past 3".
+    static let beforeTime: Set<String> = ["at", "by", "around", "before", "until", "till", "from", "past"]
+    /// And right before one of these: "4 pm", "8 o'clock".
+    static let afterTime: Set<String> = ["am", "pm", "oclock"]
+    /// A weekday short form after one of these is a day: "on Fri", "by Thu".
+    static let dayLead: Set<String> = ["on", "by", "until", "till", "this", "next", "before", "from", "every"]
+    static let durations: Set<String> = ["minute", "minutes", "min", "mins", "hour", "hours", "hr", "hrs"]
+    /// What else a header sentence ("For Friday,", "Tomorrow at 9.") may hold.
+    static let headerExtras: Set<String> = [
+        "at", "by", "on", "before", "this", "next", "in", "the", "until", "till", "around", "from", "for", "of", "end",
+        "day", "week", "am", "pm", "oclock", "half", "quarter", "past", "to", "um", "uh", "so", "okay", "ok", "oh",
+        "right", "and", "then", "well", "every",
+    ]
+
+    static func isNumber(_ token: String) -> Bool {
+        (!token.isEmpty && token.allSatisfy { $0.isNumber }) || numberWords.contains(token)
+    }
+
+    static func isHeaderWord(_ token: String) -> Bool {
+        dayWords.contains(token) || shortDays.contains(token) || isNumber(token) || headerExtras.contains(token)
+    }
+
+    /// Whether the tokens, in the order said, name a day or a time.
+    static func said(in tokens: [String]) -> Bool {
+        for (index, token) in tokens.enumerated() {
+            let previous = index > 0 ? tokens[index - 1] : nil
+            let next = index + 1 < tokens.count ? tokens[index + 1] : nil
+            if dayWords.contains(token) { return true }
+            if shortDays.contains(token) {
+                if let next, isNumber(next) || afterTime.contains(next) { return true }
+                if let previous, dayLead.contains(previous) { return true }
+            }
+            // "next week", "this week", "end of day".
+            if token == "week", let previous, previous == "next" || previous == "this" { return true }
+            if token == "day", previous == "of", index >= 2, tokens[index - 2] == "end" { return true }
+            if isNumber(token) {
+                if let previous, beforeTime.contains(previous) { return true }
+                if previous == "to", index >= 2, tokens[index - 2] == "quarter" { return true }
+                if let next, afterTime.contains(next) { return true }
+                if previous == "in", let next, durations.contains(next) { return true }
+            }
+        }
+        return false
+    }
 }
 
 // MARK: - Keep as one

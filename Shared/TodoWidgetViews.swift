@@ -7,30 +7,27 @@ import WidgetKit
 
 struct TodoEntry: TimelineEntry {
     let date: Date
-    /// Open tasks, due first (the To-do tab's order), at most three.
+    /// Open tasks on both lists in the To-do tab's order (the list on top first, each list due first), at most three.
     let open: [String]
+    /// Open tasks on both lists.
     let openCount: Int
-    /// The list it shows: the one last in view in the app.
-    let area: TodoArea
 
-    init(date: Date, open: [String], openCount: Int, area: TodoArea = .personal) {
+    init(date: Date, open: [String], openCount: Int) {
         self.date = date
         self.open = open
         self.openCount = openCount
-        self.area = area
     }
 
-    /// What the widget shows for a set of tasks at a moment: the list last in view in the app (`lastArea`), so the
-    /// Lock Screen never mixes Personal and Work. The app reloads the widget whenever that list changes.
+    /// What the widget shows for a set of tasks at a moment: both lists in the order the To-do tab shows them, with one
+    /// count, so the Lock Screen and the app agree. The app reloads the widget on every write, a new order too.
     init(date: Date, state: TodoState, clock: DayClock) {
-        let open = state.openTasks(in: state.lastArea, clock: clock)
-        self.init(date: date, open: open.prefix(3).map(\.title), openCount: open.count, area: state.lastArea)
+        let open = state.openTasksInListOrder(clock: clock)
+        self.init(date: date, open: open.prefix(3).map(\.title), openCount: open.count)
     }
 
-    /// The rectangular header with the open count: "To-do · 2" for Personal, as before lists, and "Work · 2".
+    /// The rectangular header with the open count across both lists: "To-do · 4", or "To-do" with nothing open.
     var header: String {
-        let name = area == .work ? TodoArea.work.title : "To-do"
-        return openCount == 0 ? name : "\(name) \u{00B7} \(openCount)"
+        openCount == 0 ? "To-do" : "To-do \u{00B7} \(openCount)"
     }
 }
 
@@ -49,7 +46,7 @@ struct TodoCircularView: View {
     }
 }
 
-/// What is still open, newest due first.
+/// What is still open on both lists, in the To-do tab's order.
 struct TodoRectangularView: View {
     let entry: TodoEntry
 

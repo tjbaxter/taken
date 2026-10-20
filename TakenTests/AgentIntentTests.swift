@@ -68,8 +68,8 @@ final class AgentIntentTests: XCTestCase {
         func titles(_ show: TodoShowOption, _ area: TodoArea?) -> [String] {
             TodoAgent.tasks(in: state, show: show, area: area, now: now, clock: clock).map(\.title)
         }
-        XCTAssertEqual(titles(.open, nil), ["Call the dentist", "Send the deck", "Buy milk"],
-                       "both lists when none is given, due first, as the app orders them")
+        XCTAssertEqual(titles(.open, nil), ["Call the dentist", "Buy milk", "Send the deck"],
+                       "both lists when none is given, as the To-do tab shows them: the list on top first, due first")
         XCTAssertEqual(titles(.open, .personal), ["Call the dentist", "Buy milk"])
         XCTAssertEqual(titles(.open, .work), ["Send the deck"])
 
@@ -78,10 +78,22 @@ final class AgentIntentTests: XCTestCase {
         XCTAssertEqual(titles(.doneToday, .personal), ["Book the car in"])
         XCTAssertEqual(titles(.doneToday, .work), ["Reply to Dan"])
 
-        XCTAssertEqual(titles(.all, nil), ["Call the dentist", "Send the deck", "Buy milk", "Reply to Dan",
+        XCTAssertEqual(titles(.all, nil), ["Call the dentist", "Buy milk", "Send the deck", "Reply to Dan",
                                            "Book the car in", "Pay the window cleaner"], "open first, then done, newest first")
         XCTAssertEqual(titles(.all, .work), ["Send the deck", "Reply to Dan"])
         XCTAssertEqual(titles(.all, .personal), ["Call the dentist", "Buy milk", "Book the car in", "Pay the window cleaner"])
+
+        var workFirst = state
+        workFirst.setAreaOrder([.work, .personal])
+        XCTAssertEqual(TodoAgent.tasks(in: workFirst, show: .open, area: nil, now: now, clock: clock).map(\.title),
+                       ["Send the deck", "Call the dentist", "Buy milk"], "Work dragged on top comes first")
+        XCTAssertEqual(TodoAgent.tasks(in: workFirst, show: .all, area: nil, now: now, clock: clock).map(\.title),
+                       ["Send the deck", "Call the dentist", "Buy milk", "Reply to Dan", "Book the car in",
+                        "Pay the window cleaner"])
+        XCTAssertEqual(TodoAgent.tasks(in: workFirst, show: .doneToday, area: nil, now: now, clock: clock).map(\.title),
+                       titles(.doneToday, nil), "done ones stay newest first, whatever the order")
+        XCTAssertEqual(TodoAgent.tasks(in: workFirst, show: .open, area: .personal, now: now, clock: clock).map(\.title),
+                       titles(.open, .personal), "one list is that list, whatever the order")
 
         let answer = GetTodosIntent.answer(todos: state, show: .open, area: .work, now: now, clock: clock)
         XCTAssertEqual(answer.value?.map(\.title), ["Send the deck"], "the value is the to-dos themselves")
@@ -155,16 +167,18 @@ final class AgentIntentTests: XCTestCase {
 
     // MARK: Add to-do
 
-    func testAddTodoWritesIntoTheListInViewWithItsDue() async throws {
+    /// Was testAddTodoWritesIntoTheListInViewWithItsDue: with no list given it now goes where voice notes go, the list
+    /// on top of the To-do tab, never the old list in view.
+    func testAddTodoWithNoListGoesToTheListOnTopWithItsDue() async throws {
         let store = temporaryTodoStore()
-        try store.replace(with: TodoState(firstNoteAt: at(2026, 10, 12, 9), lastArea: .work))
+        try store.replace(with: TodoState(firstNoteAt: at(2026, 10, 12, 9), lastArea: .personal, areaOrder: [.work, .personal]))
         let ledger = temporaryLedger(pro)
         let due = at(2026, 10, 20, 9)
 
         let added = try await TodoAgent.add(title: "  send priya the deck. ", due: due, area: nil, store: store,
                                             ledgerStore: ledger, now: now)
         XCTAssertEqual(added.task.title, "Send priya the deck", "cleaned like every title")
-        XCTAssertEqual(added.task.area, .work, "no list given: the one last in view")
+        XCTAssertEqual(added.task.area, .work, "no list given: the one on top, not the old list in view")
         XCTAssertEqual(added.task.due, TodoDue.time(due), "a due date is saved as a moment")
         XCTAssertEqual(added.task.createdAt, now)
         XCTAssertEqual(store.load().tasks, [added.task], "written to the file")
@@ -175,7 +189,8 @@ final class AgentIntentTests: XCTestCase {
         XCTAssertEqual(personal.task.area, .personal, "a list given wins")
         XCTAssertNil(personal.task.due)
         XCTAssertEqual(store.load().tasks.count, 2)
-        XCTAssertEqual(store.load().lastArea, .work, "adding never changes the list in view")
+        XCTAssertEqual(store.load().areaOrder, [.work, .personal], "adding never changes where notes go")
+        XCTAssertEqual(store.load().lastArea, .personal)
 
         let long = String(repeating: "word ", count: 60)
         let short = try await TodoAgent.add(title: long, due: nil, area: nil, store: store, ledgerStore: ledger, now: now)

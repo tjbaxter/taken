@@ -1,8 +1,8 @@
 import XCTest
 @testable import Taken
 
-/// Personal and Work to-do lists (REDESIGN.md, SPEC 3.10): kept apart, one in view at a time, the file stays readable
-/// by every build, a note lands in the list in view, and the Lock Screen widget shows that list.
+/// Personal and Work to-do lists (REDESIGN.md, SPEC 3.10): each task on one list, both shown as sections of one list,
+/// the file stays readable by every build, and the Lock Screen widget shows both lists in the app's order.
 final class TodoListsTests: XCTestCase {
 
     // MARK: The file
@@ -16,7 +16,8 @@ final class TodoListsTests: XCTestCase {
             """
         let state = try TodoStore.decode(Data(json.utf8))
         XCTAssertEqual(state.tasks.map(\.area), [.personal, .personal], "every task saved before lists is Personal")
-        XCTAssertEqual(state.lastArea, .personal, "and Personal is in view")
+        XCTAssertEqual(state.lastArea, .personal, "and the old list in view reads Personal")
+        XCTAssertEqual(state.areaOrder, [.personal, .work], "Personal on top")
         XCTAssertEqual(state.firstNoteAt, Date(timeIntervalSince1970: 1790000000))
         XCTAssertEqual(state.schemaVersion, 1)
 
@@ -40,7 +41,7 @@ final class TodoListsTests: XCTestCase {
         try store.replace(with: state)
         XCTAssertEqual(store.load(), state)
         XCTAssertEqual(store.load().tasks.map(\.area), [.personal, .work])
-        XCTAssertEqual(store.load().lastArea, .work, "Taken reopens on the list last in view")
+        XCTAssertEqual(store.load().lastArea, .work, "kept as it was, for builds that still read it")
 
         let text = String(decoding: try TodoStore.encode(state), as: UTF8.self)
         XCTAssertTrue(text.contains(#""area":"personal""#), "the list is always written, Personal too: \(text)")
@@ -111,18 +112,21 @@ final class TodoListsTests: XCTestCase {
         XCTAssertEqual(state.openTasks(in: .work, clock: londonClock()).map(\.title), ["Email Sam and call the bank"])
     }
 
-    func testEraseAllBringsPersonalBackIntoView() {
-        var state = TodoState(lastArea: .work)
+    func testEraseAllPutsPersonalBackOnTop() {
+        var state = TodoState(lastArea: .work, areaOrder: [.work, .personal])
         state.add([TodoDraft(title: "Send the deck")], area: .work, at: at(2026, 10, 19, 9))
         state.eraseAll()
         XCTAssertTrue(state.tasks.isEmpty)
         XCTAssertEqual(state.lastArea, .personal)
+        XCTAssertEqual(state.topArea, .personal)
         XCTAssertEqual(state.firstNoteAt, at(2026, 10, 19, 9), "erasing never opens the first note again")
     }
 
     // MARK: The Lock Screen widget
 
-    func testTheWidgetShowsTheListLastInView() {
+    /// Replaces testTheWidgetShowsTheListLastInView: the app shows both lists in one order now, so the Lock Screen does
+    /// too, with one count.
+    func testTheWidgetShowsBothListsInTheAppsOrder() {
         let clock = londonClock()
         let now = at(2026, 10, 19, 14)
         var state = TodoState()
@@ -130,46 +134,75 @@ final class TodoListsTests: XCTestCase {
         state.add([TodoDraft(title: "Send the deck", due: .time(at(2026, 10, 19, 16))), TodoDraft(title: "Book the room")],
                   area: .work, at: at(2026, 10, 19, 9))
 
-        let personal = TodoEntry(date: now, state: state, clock: clock)
-        XCTAssertEqual(personal.area, .personal)
-        XCTAssertEqual(personal.open, ["Buy milk"], "never a Work task on the Personal list")
-        XCTAssertEqual(personal.openCount, 1)
-        XCTAssertEqual(personal.header, "To-do \u{00B7} 1", "Personal reads as it did before lists")
+        let personalFirst = TodoEntry(date: now, state: state, clock: clock)
+        XCTAssertEqual(personalFirst.open, ["Buy milk", "Send the deck", "Book the room"], "the list on top first")
+        XCTAssertEqual(personalFirst.openCount, 3, "one count across both lists")
+        XCTAssertEqual(personalFirst.header, "To-do \u{00B7} 3")
+
+        state.setAreaOrder([.work, .personal])
+        let workFirst = TodoEntry(date: now, state: state, clock: clock)
+        XCTAssertEqual(workFirst.open, ["Send the deck", "Book the room", "Buy milk"], "as the To-do tab orders them")
+        XCTAssertEqual(workFirst.openCount, 3)
+        XCTAssertEqual(workFirst.header, "To-do \u{00B7} 3", "never a list's name: both are on it")
 
         state.lastArea = .work
-        let work = TodoEntry(date: now, state: state, clock: clock)
-        XCTAssertEqual(work.area, .work)
-        XCTAssertEqual(work.open, ["Send the deck", "Book the room"])
-        XCTAssertEqual(work.openCount, 2)
-        XCTAssertEqual(work.header, "Work \u{00B7} 2")
+        XCTAssertEqual(TodoEntry(date: now, state: state, clock: clock).open, workFirst.open, "the old list in view changes nothing")
 
-        XCTAssertEqual(TodoEntry(date: now, open: [], openCount: 0, area: .work).header, "Work")
+        let many = (1...5).map { TodoDraft(title: "Task \($0)") }
+        state.add(many, at: at(2026, 10, 19, 10))
+        XCTAssertEqual(TodoEntry(date: now, state: state, clock: clock).open.count, 3, "at most three titles")
+        XCTAssertEqual(TodoEntry(date: now, state: state, clock: clock).openCount, 8)
+
+        XCTAssertEqual(TodoEntry(date: now, state: TodoState(), clock: clock).header, "To-do")
         XCTAssertEqual(TodoEntry(date: now, open: [], openCount: 0).header, "To-do")
     }
 
     // MARK: Copy and the demo
 
+    /// The list's own copy keeps the rules. The switch's copy (`TodoCopy.listeningLine`, `emptyLine`, `emptyWork` and
+    /// the "Done today" label) went with the switch; the Listening card's copy is pinned beside the listening tests.
     func testTheListCopyKeepsTheRules() {
         XCTAssertEqual(TodoArea.allCases.map(\.title), ["Personal", "Work"])
-        XCTAssertEqual(TodoCopy.listeningLine(into: .work), "Listening \u{00B7} Work", "the destination shows before a word")
-        XCTAssertEqual(TodoCopy.listeningLine(into: .personal), "Listening \u{00B7} Personal")
         XCTAssertEqual(TodoCopy.moveAction(to: .work), "Move to Work")
-        XCTAssertEqual(TodoCopy.emptyLine(for: .personal), TodoCopy.empty, "Personal keeps today's line")
-        XCTAssertEqual(TodoCopy.emptyLine(for: .work), "Tap the mic and say what needs doing for work")
-        for text in [TodoCopy.emptyWork, TodoCopy.list, TodoCopy.keepAsOne, TodoCopy.keptAsOne, TodoCopy.fromYourNote(3)] {
+        for text in [TodoCopy.list, TodoCopy.keepAsOne, TodoCopy.keptAsOne, TodoCopy.fromYourNote(3)] {
             XCTAssertTrue(TodoCopy.all.contains(text), "\(text) is checked by the copy test")
         }
         XCTAssertEqual(TodoArea.personal.other, .work)
         XCTAssertEqual(TodoArea.work.other, .personal)
     }
 
+    /// Each seed opens the To-do tab in the order its screenshot needs, and `todo-work-empty` is Tom's case: three open
+    /// on Personal, nothing on Work.
     @MainActor
     func testTheDemoHasWorkTasksAndOpensOnTheListAsked() {
         let now = at(2026, 10, 19, 21, 41)
-        let personal = TodoDemo.state(now: now, recording: false, timeZone: london)
+        let clock = londonClock(4)
+        let personal = TodoDemo.state(now: now, recording: false, timeZone: london, screen: "todo")
+        XCTAssertEqual(personal.areaOrder, [.personal, .work])
+        XCTAssertEqual(personal.topArea, .personal)
         XCTAssertEqual(personal.lastArea, .personal)
         XCTAssertEqual(personal.tasks.filter { $0.area == .work }.count, 3)
-        XCTAssertEqual(TodoDemo.state(now: now, recording: false, inView: .work, timeZone: london).lastArea, .work)
-        XCTAssertTrue(TodoModel.opensOnTodo("todo-work"))
+        XCTAssertEqual(TodoDemo.state(now: now, recording: true, timeZone: london, screen: "todo-recording").areaOrder,
+                       [.personal, .work])
+
+        let work = TodoDemo.state(now: now, recording: false, timeZone: london, screen: "todo-work")
+        XCTAssertEqual(work.areaOrder, [.work, .personal], "Work on top, so notes go there")
+        XCTAssertEqual(work.lastArea, .work)
+        XCTAssertEqual(work.tasks.count, personal.tasks.count)
+
+        let empty = TodoDemo.state(now: now, recording: false, timeZone: london, screen: "todo-work-empty")
+        XCTAssertEqual(empty.areaOrder, [.personal, .work])
+        XCTAssertTrue(empty.tasks.allSatisfy { $0.area == .personal }, "nothing on Work")
+        XCTAssertEqual(empty.openTasks(in: .personal, clock: clock).count, 3, "three open on Personal")
+        XCTAssertTrue(empty.tasks.allSatisfy { !$0.isDone })
+        let rows = TodoSections.rows(state: empty, day: clock.day(for: now), clock: clock)
+        XCTAssertEqual(rows.filter(\.isHeader).map(\.area), [.personal, .work], "both headings show")
+        XCTAssertEqual(rows.last?.id, .header(.work))
+        XCTAssertEqual(rows.last?.isEmpty, true, "the Work heading reads Nothing open")
+        XCTAssertEqual(TodoSections.summary(rows), "3 open", "and the line under the title stays")
+
+        for screen in ["todo", "todo-work", "todo-work-empty", "todo-recording", "todo-cap", "todo-type", "todo-empty"] {
+            XCTAssertTrue(TodoModel.opensOnTodo(screen), screen)
+        }
     }
 }
