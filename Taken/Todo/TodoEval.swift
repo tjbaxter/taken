@@ -5,10 +5,12 @@ import UIKit
 // The on-device sorting eval, for the owner's internal TestFlight builds only. CI cannot run Apple's model, so twelve
 // fixed notes run through the real extractor on the iPhone, one after another, and a sheet shows what the model wrote,
 // what was saved and whether it matches what should be. Opened with the link taken://todo-eval (from Safari, after
-// each internal build: a TestFlight app takes no launch arguments). Only a build carrying the TakenInternalPro marker
-// (the EAS "internal" profile) answers the link; an App Store build ignores it. Results stay on the phone, and Copy
-// results puts them on the clipboard.
+// each internal build: a TestFlight app takes no launch arguments). Compiled only into Debug (for the tests) and the
+// EAS "internal" profile's builds (project.internal.yml adds TAKEN_INTERNAL), so an App Store build does not contain it
+// (App Review Guideline 2.5.19). Inside those, only a build carrying the TakenInternalPro marker answers the link.
+// Results stay on the phone, and Copy results puts them on the clipboard.
 
+#if DEBUG || TAKEN_INTERNAL
 enum TodoEval {
     static let host = "todo-eval"
     static let link = URL(string: "taken://todo-eval")!
@@ -416,3 +418,4 @@ enum TodoEvalCopy {
         sorting(.couldNotSort),
     ] + TodoEval.cases.map(\.expected)
 }
+#endif
