@@ -49,8 +49,9 @@ enum FrequencyChoice: String, CaseIterable, Identifiable, Sendable {
 
 /// What the Add sheet hands to the stack: every picked chip and every other name, each with its own frequency.
 enum AddPlan {
-    /// How often a pick starts: Weekly for a weekly catalog entry (Semaglutide, Tirzepatide, or a brand of either),
-    /// else Daily. Either can be changed in its row, so oral semaglutide is one tap from Daily.
+    /// How often a pick starts: Weekly for a weekly catalog entry (Semaglutide, Tirzepatide, or a brand of their
+    /// injections), else Daily, so Oral Semaglutide (Rybelsus, the Wegovy pill) starts on Daily. Either can be changed in
+    /// its row, so Semaglutide picked from its chip for a tablet is one tap from Daily.
     static func defaultChoice(for name: String) -> FrequencyChoice {
         Catalog.entry(matching: name)?.weekly == true ? .weekly : .daily
     }

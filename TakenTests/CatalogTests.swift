@@ -52,6 +52,24 @@ final class CatalogTests: XCTestCase {
 
     func testOnlyTheInjectableGLP1sStartWeekly() {
         XCTAssertEqual(Catalog.entries.filter(\.weekly).map(\.name), ["Semaglutide", "Tirzepatide"])
+        // Rybelsus and the Wegovy pill are once-daily tablets: typed or picked, they start on Daily.
+        XCTAssertEqual(Catalog.entry(matching: "Rybelsus")?.name, "Oral Semaglutide")
+        XCTAssertEqual(Catalog.entry(matching: "wegovy pill")?.name, "Oral Semaglutide")
+        XCTAssertEqual(Catalog.code(for: "Rybelsus"), "OSM")
+        for name in ["Rybelsus", "rybelsus ", "Oral Semaglutide", "Wegovy Pill"] {
+            XCTAssertEqual(AddPlan.defaultChoice(for: name), .daily, name)
+        }
+        for name in ["Semaglutide", "Ozempic", "Wegovy", "Tirzepatide", "Mounjaro", "Zepbound"] {
+            XCTAssertEqual(AddPlan.defaultChoice(for: name), .weekly, name)
+        }
+        let picked = Suggest.rank("rybelsus").first
+        XCTAssertEqual(picked?.entry.name, "Oral Semaglutide")
+        XCTAssertEqual(picked?.alias, "Rybelsus")
+        let drafts = AddPlan.drafts(selected: [], extras: [picked?.entry.name ?? ""], choices: [:], days: [:], weekday: 5)
+        XCTAssertEqual(drafts.map(\.frequency), [.daily(times: 1)], "the Rybelsus suggestion adds a daily item")
+        let wegovy = Suggest.rank("wegovy").map(\.entry.name)
+        XCTAssertTrue(wegovy.contains("Semaglutide") && wegovy.contains("Oral Semaglutide"),
+                      "Wegovy shows the injection and the pill, so the person picks which: \(wegovy)")
     }
 
     func testAliasesFindTheirEntryAndBrandsAreNeverChipLabels() {

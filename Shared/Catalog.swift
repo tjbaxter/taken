@@ -41,7 +41,8 @@ struct CatalogEntry: Identifiable, Hashable, Sendable {
 }
 
 enum Catalog {
-    /// The chips, in the grid's order. Generic names only; Semaglutide and Tirzepatide start on Weekly.
+    /// The chips, in the grid's order. Generic names only; Semaglutide and Tirzepatide start on Weekly (the daily tablet
+    /// is Oral Semaglutide, in the medicines).
     private static let chips: [CatalogEntry] = [
         CatalogEntry("Vitamin D3", code: "VD3", aliases: ["Vitamin D", "Cholecalciferol"], chip: true, weight: 9),
         CatalogEntry("Fish Oil", code: "FSH", chip: true, weight: 9),
@@ -65,8 +66,7 @@ enum Catalog {
                                "Yasmin", "Yaz", "Microgynon"],
                      chip: true, weight: 7),
         CatalogEntry("Metformin", code: "MET", aliases: ["Glucophage"], chip: true, weight: 6),
-        CatalogEntry("Semaglutide", code: "SEM", aliases: ["Ozempic", "Wegovy", "Rybelsus"], chip: true, weekly: true,
-                     weight: 7),
+        CatalogEntry("Semaglutide", code: "SEM", aliases: ["Ozempic", "Wegovy"], chip: true, weekly: true, weight: 7),
         CatalogEntry("Tirzepatide", code: "TRZ", aliases: ["Mounjaro", "Zepbound"], chip: true, weekly: true, weight: 6),
         CatalogEntry("Electrolytes", code: "ELC", chip: true, weight: 6),
         CatalogEntry("Vitamin K2", code: "VK2", aliases: ["MK-7", "Menaquinone"], chip: true, weight: 6),
@@ -285,6 +285,9 @@ enum Catalog {
         CatalogEntry("Rivaroxaban", aliases: ["Xarelto"]),
         CatalogEntry("Warfarin", aliases: ["Coumadin"]),
         // Diabetes.
+        // Semaglutide's tablet is taken once a day (the Rybelsus label; the Wegovy pill since December 2025), so it is
+        // its own entry and starts on Daily, where the chip's injections start on Weekly.
+        CatalogEntry("Oral Semaglutide", code: "OSM", aliases: ["Rybelsus", "Wegovy Pill"], weight: 3),
         CatalogEntry("Sitagliptin", aliases: ["Januvia"]),
         CatalogEntry("Empagliflozin", aliases: ["Jardiance"]),
         CatalogEntry("Dapagliflozin", aliases: ["Farxiga", "Forxiga"]),
