@@ -151,7 +151,8 @@ lands() {
 }
 
 # The 1.1 feedback build (SPEC 3.3, 3.10): the To-do tab with the Work list in view (Personal's count on the switch),
-# and the Add sheet in type mode with "tum" typed (Turmeric suggested, no drug name on screen), in every look.
+# and the Add sheet in type mode with "tum" typed (Turmeric suggested), in every look. The chip grid shows under the
+# field, Semaglutide and Tirzepatide among the chips: keep these out of UK store screenshots (REDESIGN.md, Open).
 shoot 41-todo-work todo-work
 lands 41-todo-work "tab=todo sheet=none todoList=work"
 shoot 43-add-search add-search

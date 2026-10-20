@@ -89,6 +89,7 @@ export const FRAMES = [
     ...POSE.laidBack,
     phoneTop: 690,
     screenW: 1090,
+    // The 1.1 add capture shows the GLP-1 chips: do not rebuild this frame from it until Tom decides (REDESIGN.md, Open).
     screen: cap("add"),
   },
   {
