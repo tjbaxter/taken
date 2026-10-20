@@ -82,7 +82,7 @@ final class FoundationModelsExtractor: TaskExtractor, @unchecked Sendable {
         let response = try await session.respond(
             to: TodoPrompt.prompt(transcript: words, context: context),
             generating: GeneratedTodoList.self,
-            options: GenerationOptions(sampling: .greedy)
+            options: GenerationOptions(samplingMode: .greedy)
         )
         return response.content.tasks.map {
             RawTodo(spoken: $0.spoken, title: $0.title, dueISO8601: $0.dueISO8601, hasTime: $0.hasTime)
