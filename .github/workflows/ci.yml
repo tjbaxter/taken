@@ -24,7 +24,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Select Xcode 26
+      - name: Select Xcode (.xcode-version)
         run: scripts/select-xcode.sh
 
       - name: Generate project
@@ -70,7 +70,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Select Xcode 26
+      - name: Select Xcode (.xcode-version)
         run: scripts/select-xcode.sh
 
       - name: Generate project
@@ -99,6 +99,9 @@ jobs:
           test -d "$appex"
           # App Review Guideline 2.5.19: the App Store shape has no owner-only Pro unlock, eval sheet or marker.
           scripts/check-app-store-build.sh "$app"
+          # Built by the Xcode in .xcode-version, the one EAS ships with (EAS runs the same check on its .ipa).
+          scripts/check-xcode.sh "$app"
+          scripts/check-xcode.sh "$appex"
           for bundle in "$app" "$appex"; do
             /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle/Info.plist"
             /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$bundle/Info.plist"
@@ -170,7 +173,7 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Select Xcode 26
+      - name: Select Xcode (.xcode-version)
         run: scripts/select-xcode.sh
 
       - name: Generate project

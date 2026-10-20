@@ -1,12 +1,15 @@
 #!/usr/bin/env bash
-# Select the newest installed Xcode 26.x (never a beta) and print its version.
+# Select the Xcode in .xcode-version, the one EAS ships Taken with (eas.json's pinned image), and check it. A runner
+# without that exact Xcode fails rather than testing with a different one.
 set -euo pipefail
 
-xcode="$(ls -d /Applications/Xcode_26*.app 2>/dev/null | grep -vi beta | sort -V | tail -n 1 || true)"
-if [ -z "$xcode" ]; then
-  echo "::error::No Xcode 26 found on this runner"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+want="$(tr -d '[:space:]' < "$root/.xcode-version")"
+xcode="/Applications/Xcode_${want}.app"
+if [ ! -d "$xcode" ]; then
+  echo "::error::Xcode $want (.xcode-version) is not installed on this runner"
   ls -d /Applications/Xcode*.app || true
   exit 1
 fi
 sudo xcode-select -s "$xcode/Contents/Developer"
-xcodebuild -version
+"$root/scripts/check-xcode.sh"
