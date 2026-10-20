@@ -742,9 +742,9 @@ final class RecognizerBackend: SpeechBackend, @unchecked Sendable {
 /// One note's words on SFSpeechRecognizer, kept when the recogniser starts over. On iOS 17 to 25 the on-device
 /// recogniser can begin again after a pause of a second or two and report only the words since (Apple staff reproduced
 /// it on iOS 17, forum 765609); the text so far stays, and the new words follow it. A start-over is told from the
-/// text, not from partial results' timestamps, which Apple says are not accurate (forum 785389): a result that does not
-/// continue the longest text since the last start-over (its opening words are not that text's opening words, compared
-/// in order), from a text of two words or more. Pure, so CI tests it.
+/// text, not from partial results' timestamps, which Apple says are not accurate (forum 785389): a result no longer
+/// than the longest text since the last start-over that does not continue it (its opening words are not that text's
+/// opening words, compared in order), from a text of two words or more. Pure, so CI tests it.
 /// https://developer.apple.com/forums/thread/765609
 /// https://developer.apple.com/forums/thread/785389
 struct RecognizerTranscript: Hashable, Sendable {
@@ -768,7 +768,10 @@ struct RecognizerTranscript: Hashable, Sendable {
         let next = Self.words(result)
         guard !next.isEmpty else { return false }
         let longest = Self.words(peak)
-        if longest.count >= 2, !Self.continues(longest, next) {
+        // A start-over begins again with the new words, so it is never longer than the text before it. A longer result
+        // that does not carry on the opening words is a revision of the whole result (iOS 18.1 and later report one
+        // growing result: "Book a table" and then "Look at the table for six"), and replaces it.
+        if longest.count >= 2, next.count <= longest.count, !Self.continues(longest, next) {
             committed = TranscriptBuffer.join(committed, peak)
             peak = result
             current = result

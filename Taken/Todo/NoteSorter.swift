@@ -144,6 +144,10 @@ actor NoteSorter {
     private var deadline: ContinuousClock.Instant?
     private var closed = false
     private var total: Int?
+    /// The part being asked now, and what gives up on it before its own time is up.
+    private var asking: (part: TodoChunk, cutoff: Cutoff)?
+    /// Callers waiting for every part handed over to be sorted (`finish`, `settle`); `drain` resumes them.
+    private var waiting: [CheckedContinuation<Void, Never>] = []
 
     init(sorter: any ChunkSorting, context: TodoContext, budget: Budget = .standard,
          onProgress: (@Sendable (_ part: Int, _ of: Int) -> Void)? = nil) {
@@ -168,7 +172,8 @@ actor NoteSorter {
     }
 
     /// The whole note, at the stop: the rest is cut into its last parts and every part not sorted yet gets its time
-    /// after the stop (`Budget`). Returns every part in the order said, each with its answer, or timed out.
+    /// after the stop (`Budget`), the one still being sorted from while listening too. Returns every part in the order
+    /// said, each with its answer, or timed out.
     func finish(note text: String) async -> [SortedChunk] {
         let whole = SpokenNote(text)
         var begun = parts.count - queue.count
@@ -185,16 +190,28 @@ actor NoteSorter {
         parts = all
         total = all.count
         let remaining = queue.count + (running ? 1 : 0)
-        let end = ContinuousClock.now + budget.total(remaining: remaining)
+        let stop = ContinuousClock.now
+        let end = stop + budget.total(remaining: remaining)
         deadline = end
         if running, let current = all.first(where: { part in !results.contains { $0.chunk.index == part.index } }) {
             onProgress?(current.index + 1, all.count)
         }
-        startIfIdle()
-        while (running || !queue.isEmpty) && ContinuousClock.now < end {
-            try? await Task.sleep(for: .milliseconds(25))
+        // The part being asked was given 30 s while listening; from the stop it gets a part's time after the stop, or
+        // the rest of the note's when nothing waits behind it.
+        if let asking {
+            let cutoff = asking.cutoff
+            let limit = queue.isEmpty ? end - stop : min(budget.afterStop(words: asking.part.wordCount), end - stop)
+            Task {
+                try? await Task.sleep(for: limit)
+                cutoff.fire()
+            }
         }
+        startIfIdle()
+        // A continuation `drain` resumes, never a loop of sleeps: the stop can come from a task that was cancelled,
+        // where every `Task.sleep` throws at once and the loop would spin for the whole budget.
+        await firstResult(of: { await self.sorted() }, orAfter: end - ContinuousClock.now, fallback: ())
         closed = true
+        asking?.cutoff.fire()
         var answered = results
         for part in all where !answered.contains(where: { $0.chunk.index == part.index }) {
             answered.append(SortedChunk(chunk: part, outcome: .timedOut, sentAt: elapsed(), seconds: 0,
@@ -206,9 +223,13 @@ actor NoteSorter {
     /// Waits until every part handed over so far is sorted (the eval, which runs a long ramble back to back as while
     /// talking).
     func settle() async {
-        while running || !queue.isEmpty {
-            try? await Task.sleep(for: .milliseconds(25))
-        }
+        await sorted()
+    }
+
+    /// Returns once every part handed over so far is sorted, or at once when none is waiting.
+    private func sorted() async {
+        guard !closed, running || !queue.isEmpty else { return }
+        await withCheckedContinuation { waiting.append($0) }
     }
 
     // MARK: Sorting
@@ -230,6 +251,9 @@ actor NoteSorter {
             results += sorted
         }
         running = false
+        let done = waiting
+        waiting = []
+        for waiter in done { waiter.resume() }
     }
 
     private func sort(_ part: TodoChunk, halved: Bool = false) async -> [SortedChunk] {
@@ -239,6 +263,9 @@ actor NoteSorter {
             return [SortedChunk(chunk: part, outcome: .unavailable(reason), sentAt: sentAt, seconds: 0, prompt: prompt)]
         }
         let sorter = self.sorter
+        let cutoff = Cutoff()
+        asking = (part, cutoff)
+        defer { asking = nil }
         let answer = await firstResult(of: { () -> Answer in
             do {
                 return .tasks(try await sorter.answer(chunk: part, prompt: prompt))
@@ -249,7 +276,7 @@ actor NoteSorter {
             } catch {
                 return .failed(String(describing: error))
             }
-        }, orAfter: limit(for: part), fallback: .timedOut)
+        }, orAfter: limit(for: part), fallback: .timedOut, cutoff: cutoff)
         let seconds = elapsed() - sentAt
         switch answer {
         case .tasks(let tasks):
@@ -272,11 +299,14 @@ actor NoteSorter {
         }
     }
 
-    /// While listening, 30 s; after the stop, the part's own time, never past the note's deadline.
+    /// While listening, 30 s; after the stop, the part's own time, never past the note's deadline. The note's last
+    /// part gets the rest of the note's time: the cap on a part keeps one that hangs from taking the time of the parts
+    /// behind it, and none is, so a short note of one part has the note's 20 s, not 5 to 10 s.
     private func limit(for part: TodoChunk) -> Duration {
         guard let deadline else { return budget.whileListening }
-        let left = deadline - ContinuousClock.now
-        return max(.zero, min(budget.afterStop(words: part.wordCount), left))
+        let left = max(.zero, deadline - ContinuousClock.now)
+        if queue.isEmpty, part.wordRange.upperBound >= note.words.count { return left }
+        return min(budget.afterStop(words: part.wordCount), left)
     }
 
     private func elapsed() -> Double {

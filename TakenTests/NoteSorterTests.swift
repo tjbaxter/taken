@@ -187,6 +187,81 @@ final class NoteSorterTests: XCTestCase {
         XCTAssertTrue(saved.keepable)
     }
 
+    /// The 30 s quiet stop and the 5-minute stop finish the note from the listening watch's own task, which finishing
+    /// cancels. In a cancelled task every `Task.sleep` throws at once, so the stop's wait must not be a loop of sleeps:
+    /// it would spin for the whole budget. It waits, and uses almost no CPU while it does.
+    func testTheStopFromACancelledTaskWaitsForTheModelWithoutSpinning() async {
+        let fake = Fake(calls: Calls(), delay: { _ in .milliseconds(400) })
+        let sorter = NoteSorter(sorter: fake, context: context, budget: budget)
+        let before = Self.cpuSeconds()
+        let stop = Task { () -> [SortedChunk] in
+            withUnsafeCurrentTask { $0?.cancel() }
+            return await sorter.finish(note: "call the dentist and buy milk")
+        }
+        let sorted = await stop.value
+        let used = Self.cpuSeconds() - before
+        XCTAssertTrue(sorted.allSatisfy(isSorted), "\(sorted.map(\.outcome))")
+        XCTAssertLessThan(used, 0.15, "\(used) s of CPU while waiting 0.4 s for the model")
+
+        let listened = NoteSorter(sorter: Fake(calls: Calls()), context: context, budget: budget)
+        await listened.listen(finished: note)
+        let settle = Task {
+            withUnsafeCurrentTask { $0?.cancel() }
+            await listened.settle()
+        }
+        await settle.value
+        let parts = await listened.finish(note: note)
+        XCTAssertGreaterThanOrEqual(parts.filter(isSorted).count, 5, "settle waited for the parts said so far")
+    }
+
+    /// A part still being sorted at the stop (SpeechAnalyzer sorts while the person talks) gets a part's time after
+    /// the stop like any other, not the 30 s it had while listening, so the part said last is still sent.
+    func testAPartStillBeingSortedAtTheStopGetsThePostStopTime() async {
+        let opening = (0..<2)
+            .map { "Please call person\($0) about the thing number \($0) today, and then there are a few more words to fill it." }
+            .joined(separator: " ")
+        let words = opening + " Please call the dentist."
+        let calls = Calls()
+        let fake = Fake(calls: calls, delay: { $0.index == 0 ? .seconds(10) : .milliseconds(10) })
+        let sorter = NoteSorter(sorter: fake, context: context, budget: budget)
+        await sorter.listen(finished: words)
+        let deadline = Date().addingTimeInterval(2)
+        while await calls.parts.isEmpty, Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(5))
+        }
+        let started = Date()
+        let sorted = await sorter.finish(note: words)
+        let took = Date().timeIntervalSince(started)
+        XCTAssertEqual(sorted.count, 2)
+        XCTAssertEqual(sorted.first?.outcome, .timedOut, "the hung part is saved as said")
+        XCTAssertTrue(sorted.count == 2 && isSorted(sorted[1]), "the part said last is sorted: \(sorted.map(\.outcome))")
+        // A 40-word part gets 0.5 s after the stop here (10 s at full scale), out of the note's 1 s (20 s).
+        XCTAssertLessThan(took, 0.95, "\(took) s")
+    }
+
+    /// A short note is one part, and nothing waits behind the last part, so it has the note's whole time after the
+    /// stop (20 s), not a part's own 5 to 10 s: an everyday note of a few tasks keeps its times.
+    func testTheLastPartHasTheRestOfTheNotesTime() async {
+        let words = "I should send messages to my LinkedIn ICPs"
+        let answer = [RawTodo(spoken: "send messages to my linkedin icps", title: "Send messages to my LinkedIn ICPs")]
+        // 8 s at full scale, past this 8-word part's own 5.2 s.
+        let fake = Fake(calls: Calls(), delay: { _ in .milliseconds(400) }, answers: { _ in answer })
+        let sorted = await NoteSorter(sorter: fake, context: context, budget: budget).finish(note: words)
+        XCTAssertEqual(sorted.count, 1)
+        XCTAssertTrue(sorted.allSatisfy(isSorted), "\(sorted.map(\.outcome))")
+        let saved = TodoValidation.assemble(note: words, parts: sorted, context: context)
+        XCTAssertEqual(saved.drafts.map(\.title), ["Send messages to my LinkedIn ICPs"])
+    }
+
+    /// User and system CPU time of this process, in seconds.
+    private static func cpuSeconds() -> Double {
+        var usage = rusage()
+        getrusage(RUSAGE_SELF, &usage)
+        let user = Double(usage.ru_utime.tv_sec) + Double(usage.ru_utime.tv_usec) / 1e6
+        let system = Double(usage.ru_stime.tv_sec) + Double(usage.ru_stime.tv_usec) / 1e6
+        return user + system
+    }
+
     func testATranscriptThatChangedUnderItsPartsIsSortedAgain() async {
         let calls = Calls()
         let sorter = NoteSorter(sorter: Fake(calls: calls), context: context, budget: budget)

@@ -45,6 +45,25 @@ final class RecognizerTranscriptTests: XCTestCase {
         XCTAssertFalse(transcript.apply("Paul the dentist"), "one word changed in three carries on")
     }
 
+    /// iOS 18.1 and later report one growing result, and may rewrite its opening words as more is heard. A longer
+    /// result is never a start-over (a start-over begins again with the new words), so the old opening is not kept
+    /// beside its correction.
+    func testALongerResultThatRewritesTheOpeningWordsIsARevision() {
+        XCTAssertEqual(heard(["Book", "Book a", "Book a table", "Look at the table for six"]).text,
+                       "Look at the table for six")
+        XCTAssertEqual(heard(["Send", "Send messages", "Sent message is to my LinkedIn"]).text,
+                       "Sent message is to my LinkedIn")
+        XCTAssertEqual(heard(["Remind", "Remind me", "Remember to call the dentist"]).text,
+                       "Remember to call the dentist")
+        var transcript = RecognizerTranscript()
+        transcript.apply("Remind me")
+        XCTAssertFalse(transcript.apply("Remember to call the dentist"), "longer: a revision, not a start-over")
+        XCTAssertEqual(heard(["I need to call the dentist", "I", "I need", "I need milk", "I need milk and eggs",
+                              "I need milk and eggs and bread"]).text,
+                       "I need to call the dentist I need milk and eggs and bread",
+                       "a start-over sharing the opening words is still caught while it is no longer")
+    }
+
     func testARestartAfterIsFinalAppendsTheNewTasksWords() {
         var transcript = RecognizerTranscript()
         transcript.apply("Call the dentist.")

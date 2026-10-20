@@ -101,6 +101,9 @@ struct TodoRootView: View {
                         droppable(sectionHeader(item, first: item.id == rows.first?.id), id: item.id, area: item.area)
                     }
                 }
+                if let last = rows.last?.area {
+                    bottomDrop(under: last)
+                }
             }
             .listStyle(.plain)
             .scrollContentBackground(.hidden)
@@ -140,9 +143,10 @@ struct TodoRootView: View {
                 }
             }
             if item.isEmpty {
+                // fgSubtle, not fgFaint: it is text, and text reaches AA in every look (section 4).
                 Text(TodoListCopy.nothingOpen)
                     .font(.sans(15, .sans, relativeTo: .subheadline))
-                    .foregroundStyle(theme.fgFaint)
+                    .foregroundStyle(theme.fgSubtle)
             }
         }
         .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
@@ -199,6 +203,27 @@ struct TodoRootView: View {
         } isTargeted: { inside in
             targeted[id] = inside ? area : nil
         }
+    }
+
+    /// The space under the last list: a heading dragged down past the last heading lands here and goes to the bottom,
+    /// so the drop never has to hit that one row (an empty list is its heading alone). The bottom list's heading lights
+    /// up as for any other place it can land. Not a VoiceOver element: the heading's action does the same.
+    private func bottomDrop(under last: TodoArea) -> some View {
+        Color.clear
+            .frame(maxWidth: .infinity, minHeight: 120)
+            .contentShape(Rectangle())
+            .dropDestination(for: TodoSectionDrag.self) { items, _ in
+                targeted = [:]
+                defer { dragSource.area = nil }
+                guard let dragged = items.first?.area else { return false }
+                return todo.moveSection(dragged, toTop: false)
+            } isTargeted: { inside in
+                targeted[.end] = inside ? last : nil
+            }
+            .listRowInsets(EdgeInsets())
+            .listRowSeparator(.hidden)
+            .listRowBackground(Color.clear)
+            .accessibilityHidden(true)
     }
 
     /// A dragged heading is over this list, and it is the other list's heading.

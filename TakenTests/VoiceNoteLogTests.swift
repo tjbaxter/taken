@@ -72,6 +72,21 @@ final class VoiceNoteLogTests: XCTestCase {
         XCTAssertTrue(log.load().isEmpty)
     }
 
+    func testANoteBegunBeforeClearIsNeverWrittenBack() {
+        let log = store()
+        let sorting = trace(at: Date().addingTimeInterval(-5))
+        log.save(sorting)
+        log.erase()
+        // Its save after the sort, and the token count after that, come once the log was cleared.
+        log.save(sorting)
+        log.flush()
+        XCTAssertFalse(FileManager.default.fileExists(atPath: log.fileURL.path), "Clear leaves no file, and none comes back")
+        let next = trace(at: Date().addingTimeInterval(1))
+        log.save(next)
+        log.flush()
+        XCTAssertEqual(log.load().map(\.id), [next.id], "a note begun after it is kept")
+    }
+
     @MainActor
     func testTheLinkOpensTheLogOnlyInAnInternalBuild() {
         XCTAssertTrue(VoiceNoteLogRoute.isRequest(VoiceNoteLogRoute.link, unlocked: true))

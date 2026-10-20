@@ -474,18 +474,50 @@ extension TodoText {
 
 // MARK: - Deadlines
 
-/// Runs `work` and returns its value, or `fallback` once `limit` has passed, without waiting for `work` to notice it
-/// was cancelled: a model or a transcriber that hangs never holds the To-do tab.
+/// Runs `work` and returns its value, or `fallback` once `limit` has passed (or `cutoff` fires first), without waiting
+/// for `work` to notice it was cancelled: a model or a transcriber that hangs never holds the To-do tab. Both run in
+/// tasks of their own, which never inherit the caller's cancellation, so the limit holds from a cancelled task too.
 func firstResult<T: Sendable>(of work: @escaping @Sendable () async -> T, orAfter limit: Duration,
-                              fallback: T) async -> T {
+                              fallback: T, cutoff: Cutoff? = nil) async -> T {
     await withCheckedContinuation { (continuation: CheckedContinuation<T, Never>) in
         let gate = ResumeOnce(continuation)
         let job = Task { gate.resume(with: await work()) }
+        cutoff?.arm {
+            job.cancel()
+            gate.resume(with: fallback)
+        }
         Task {
             try? await Task.sleep(for: limit)
             job.cancel()
             gate.resume(with: fallback)
         }
+    }
+}
+
+/// Ends a `firstResult` before its limit: its fallback comes back the moment `fire()` is called, or at once when it
+/// was called before the work began (a voice note's stop gives the part still being sorted its time after the stop).
+final class Cutoff: @unchecked Sendable {
+    private let lock = NSLock()
+    private var action: (@Sendable () -> Void)?
+    private var fired = false
+
+    init() {}
+
+    func arm(_ action: @escaping @Sendable () -> Void) {
+        let already = lock.withLock { () -> Bool in
+            if !fired { self.action = action }
+            return fired
+        }
+        if already { action() }
+    }
+
+    func fire() {
+        let pending = lock.withLock { () -> (@Sendable () -> Void)? in
+            fired = true
+            defer { action = nil }
+            return action
+        }
+        pending?()
     }
 }
 

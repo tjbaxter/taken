@@ -9,6 +9,8 @@ import Foundation
 enum TodoRowID: Hashable, Sendable {
     case header(TodoArea)
     case task(UUID)
+    /// The space under the last list, where a dragged heading can land too.
+    case end
 }
 
 /// One row: a list's heading, or one of its tasks.

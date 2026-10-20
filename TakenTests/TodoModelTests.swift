@@ -322,4 +322,73 @@ final class TodoModelTests: XCTestCase {
         model.eraseAll()
         XCTAssertFalse(FileManager.default.fileExists(atPath: log.fileURL.path), "Erase all data takes the log too")
     }
+
+    @MainActor
+    func testEraseAllDataWhileANoteIsSortedLeavesNoLog() async throws {
+        let model = try model(split, delay: .milliseconds(400))
+        let log = VoiceNoteLogStore(fileURL: temporaryStoreURL().deletingLastPathComponent()
+            .appendingPathComponent("voice-notes.json"))
+        model.voiceLog = log
+        model.submitTyped(note, app: demoApp())
+        let deadline = Date().addingTimeInterval(5)
+        while model.hiddenTaskIDs.isEmpty && model.phase == .sorting && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        log.flush()
+        XCTAssertEqual(log.load().count, 1, "recorded at the stop")
+        XCTAssertEqual(model.phase, .sorting)
+        model.eraseAll()
+        await settle(model)
+        log.flush()
+        XCTAssertTrue(log.load().isEmpty)
+        XCTAssertFalse(FileManager.default.fileExists(atPath: log.fileURL.path), "the note's save never writes it back")
+    }
+
+    // MARK: The chip after a reorder, and after a 5-minute stop
+
+    @MainActor
+    func testTheChipStillMovesTheNoteWhenTheListsAreReorderedMidNote() async throws {
+        let model = try model(split)
+        model.micTapped(demoApp())
+        let deadline = Date().addingTimeInterval(5)
+        while model.phase != .listening && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(model.captureArea, .personal)
+        XCTAssertTrue(model.moveSection(.work, toTop: true))
+        XCTAssertEqual(model.state.topArea, .work)
+        XCTAssertEqual(model.captureArea, .personal, "moving the lists never moves the note being heard")
+        // The card reads "Into Personal"; its chip sends the note to Work.
+        model.setDestination(.work)
+        XCTAssertEqual(model.captureArea, .work)
+        model.setDestination(.personal)
+        XCTAssertEqual(model.captureArea, .personal, "and back")
+    }
+
+    @MainActor
+    func testAfterAFiveMinuteStopTheNextTapKeepsGoingOnTheSameList() async throws {
+        let model = try model(split)
+        let app = demoApp()
+        // A note the chip sent to Work, stopped at 5 minutes (the stop itself needs a microphone).
+        await model.save(note: note, area: .work, stoppedAtCap: true)
+        XCTAssertEqual(model.notice, TodoCopy.stoppedAtCap)
+        XCTAssertEqual(model.destination, .personal, "the chip is for one note")
+        model.micTapped(app)
+        let deadline = Date().addingTimeInterval(5)
+        while model.phase != .listening && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(model.phase, .listening)
+        XCTAssertEqual(model.captureArea, .work, "Tap the mic to keep going: the monologue stays on Work")
+
+        let other = try model(split)
+        await other.save(note: note, area: .work, stoppedAtCap: false)
+        XCTAssertNotEqual(other.notice, TodoCopy.stoppedAtCap)
+        other.micTapped(app)
+        let later = Date().addingTimeInterval(5)
+        while other.phase != .listening && Date() < later {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(other.captureArea, .personal, "any other note: the next one starts on the top list")
+    }
 }

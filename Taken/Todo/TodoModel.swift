@@ -79,6 +79,9 @@ final class TodoModel {
     private(set) var captureOverride: TodoArea?
     /// A task the list should bring into view; the list clears it once it has scrolled there.
     var scrollTarget: UUID?
+    /// The list a note stopped at 5 minutes went to. While "Stopped at 5 minutes. Tap the mic to keep going." is up,
+    /// the next tap keeps going there, so one monologue stays on one list even when its chip had moved it.
+    @ObservationIgnored private var capContinuation: TodoArea?
     /// When the note being heard started, for the time on the Listening card.
     private(set) var listeningSince: Date?
     /// A fixed time on the Listening card instead of a running one, for the demo's screenshots.
@@ -256,7 +259,8 @@ final class TodoModel {
             break
         case .idle:
             // A new note goes to the top list, even if the paywall comes first; its chip can send it to the other.
-            captureOverride = nil
+            // Right after a 5-minute stop, while its line is up, it keeps going on that note's list.
+            captureOverride = (notice == TodoCopy.stoppedAtCap) ? capContinuation : nil
             let area = destination
             whenAllowed(app) { [weak self] in
                 guard let self else { return }
@@ -300,7 +304,9 @@ final class TodoModel {
     /// changes list at once). For this note only, never saved, and fixed once the note is being sorted. Nothing is
     /// announced: the microphone would hear it.
     func setDestination(_ area: TodoArea) {
-        guard phase != .sorting, area != destination else { return }
+        // While a note is starting or heard, the list it goes to, which moving the lists mid-note does not change.
+        let current = (phase == .starting || phase == .listening) ? captureArea : destination
+        guard phase != .sorting, area != current else { return }
         Haptics.selection(hapticsOn)
         captureOverride = area
         if phase == .starting || phase == .listening { captureArea = area }
@@ -401,7 +407,9 @@ final class TodoModel {
                 let now = Date()
                 self.tick(now: now)
                 if let reason = TodoModel.shouldStop(now: now, startedAt: self.startedAt, lastVoiceAt: self.lastVoiceAt) {
-                    await self.finishListening(reason)
+                    // In a task of its own: finishing cancels this one, and in a cancelled task every wait of the stop
+                    // (the recogniser's last words, the time the parts get) would end at once.
+                    Task { await self.finishListening(reason) }
                     return
                 }
             }
@@ -540,15 +548,22 @@ final class TodoModel {
         }
     }
 
-    private func save(note words: String, area: TodoArea, stoppedAtCap: Bool) async {
+    /// Saves a finished note into `area` and sorts it (the stop and typing come here; tests call it to stand in for a
+    /// note that stopped at 5 minutes, which needs a microphone).
+    func save(note words: String, area: TodoArea, stoppedAtCap: Bool) async {
         let context = noteContext ?? TodoContext(now: clockNow(), timeZone: .current, dayStartHour: dayStartHour)
         let sorter = self.sorter ?? makeNoteSorter(makeSorter(), context: context)
         self.sorter = nil
         noteContext = nil
         // Saved at once as said, out of sight, so nothing said is lost if iOS ends Taken before the model answers. The
-        // sorted tasks replace those lines on the same list.
+        // sorted tasks replace those lines on the same list. The Lock Screen widget is not reloaded for the lines: it
+        // would show every one of them, and a count of them, for up to a minute, just when a lock (the side button
+        // stops a note) has left the person on the Lock Screen. It goes straight to the sorted tasks with the
+        // replace; if iOS ends Taken first, the lines show at its next refresh, so no word is lost.
         let noteId = UUID()
-        let saved = write { $0.add(TodoValidation.asSaid(words), area: area, noteId: noteId, at: clockNow()) } ?? []
+        let saved = write(reloadsWidget: false) {
+            $0.add(TodoValidation.asSaid(words), area: area, noteId: noteId, at: clockNow())
+        } ?? []
         if !saved.isEmpty { sortingNotes.insert(noteId) }
         saveTrace()
         let parts = await sorter.finish(note: words)
@@ -578,6 +593,7 @@ final class TodoModel {
         // One line under the list: the 5-minute stop first, then Keep as one (a short note the model split), then how
         // the note was saved when the model did not sort all of it.
         if stoppedAtCap {
+            capContinuation = area
             show(TodoCopy.stoppedAtCap, for: Self.capNoticeDuration)
         } else if note.keepable {
             offerKeep(KeepOffer(noteId: added[0].noteId, ids: added.map(\.id), transcript: words))
@@ -708,6 +724,8 @@ final class TodoModel {
     func eraseAll() {
         write { $0.eraseAll() }
         #if DEBUG || TAKEN_INTERNAL
+        // A note still being sorted keeps no record: its save after the sort would write the file back.
+        dropTrace()
         (voiceLog ?? .shared).erase()
         #endif
     }
@@ -760,9 +778,10 @@ final class TodoModel {
     // MARK: Writing
 
     /// Every change to todos.json goes through here: the file is read, changed and written under coordination, and the
-    /// list, notifications and widget follow. Nil when it could not be saved (the line under the list says so).
+    /// list, notifications and widget follow (the widget not for a note's lines saved as said while it is sorted). Nil
+    /// when it could not be saved (the line under the list says so).
     @discardableResult
-    func write<T>(_ body: (inout TodoState) throws -> T) -> T? {
+    func write<T>(reloadsWidget: Bool = true, _ body: (inout TodoState) throws -> T) -> T? {
         do {
             let before = state.tasks
             let result = try store.update(body)
@@ -777,7 +796,7 @@ final class TodoModel {
                     Task { await TodoNotificationScheduler.shared.reschedule(tasks) }
                 }
                 // The Lock Screen widget reads the file, so it reloads on every write.
-                WidgetCenter.shared.reloadTimelines(ofKind: TodoCaptureRoute.widgetKind)
+                if reloadsWidget { WidgetCenter.shared.reloadTimelines(ofKind: TodoCaptureRoute.widgetKind) }
             }
             return result.value
         } catch {

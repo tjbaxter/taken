@@ -242,6 +242,9 @@ final class VoiceNoteLogStore: @unchecked Sendable {
 
     let fileURL: URL
     private let queue = DispatchQueue(label: "com.tombaxter.taken.voice-note-log")
+    /// When the log was last cleared, read and written on `queue` only: a note begun before it never writes the file
+    /// back (a note still being sorted, or its token count, finishing after Clear or Erase all data).
+    private var erasedAt: Date?
 
     init(fileURL: URL) {
         self.fileURL = fileURL
@@ -255,6 +258,7 @@ final class VoiceNoteLogStore: @unchecked Sendable {
     /// Adds the note, or replaces its earlier record, off the main thread.
     func save(_ trace: VoiceNoteTrace, now: Date = Date()) {
         queue.async { [self] in
+            if let erasedAt, trace.startedAt < erasedAt { return }
             var all = read()
             all.removeAll { $0.id == trace.id }
             all.insert(trace, at: 0)
@@ -262,9 +266,12 @@ final class VoiceNoteLogStore: @unchecked Sendable {
         }
     }
 
-    /// Clear, and Erase all data: no file is left.
+    /// Clear, and Erase all data: no file is left, and none comes back from a note begun before.
     func erase() {
-        queue.sync { _ = try? FileManager.default.removeItem(at: fileURL) }
+        queue.sync {
+            erasedAt = Date()
+            _ = try? FileManager.default.removeItem(at: fileURL)
+        }
     }
 
     /// Waits for writes still on their way (tests).
