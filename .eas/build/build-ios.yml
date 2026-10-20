@@ -9,8 +9,9 @@ build:
         name: Generate the Xcode project (ios -> repo root)
         command: |
           set -euo pipefail
-          sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app /Applications/Xcode-26*.app /Applications/Xcode.app 2>/dev/null | sort -V | tail -1)" || true
-          xcodebuild -version
+          # The Xcode comes from the image pinned in eas.json (never "latest", which moved from Xcode 26.6 to 27.1
+          # without notice) and must be the one in .xcode-version, which CI tests with. Anything else stops the build.
+          scripts/check-xcode.sh
           if ! command -v xcodegen >/dev/null 2>&1; then
             brew install xcodegen || {
               curl -fsSL -o /tmp/xcodegen.zip https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip
@@ -66,7 +67,7 @@ build:
           credentials: ${ eas.job.secrets.buildCredentials }
     - eas/run_fastlane
     - run:
-        name: Check the built app (App Review Guideline 2.5.19)
+        name: Check the built app (App Review Guideline 2.5.19, the Xcode CI tests with)
         command: |
           set -euo pipefail
           # The binary itself, before it is uploaded: a production build must carry no internal-only code, and an
@@ -84,4 +85,6 @@ build:
           else
             scripts/check-app-store-build.sh "$unpacked/Payload/Taken.app"
           fi
+          # The binary records the Xcode that built it (DTXcode, DTXcodeBuild): it must be the one CI tests with.
+          scripts/check-xcode.sh "$unpacked/Payload/Taken.app"
     - eas/find_and_upload_build_artifacts

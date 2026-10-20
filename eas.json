@@ -9,7 +9,7 @@
       "autoIncrement": true,
       "credentialsSource": "remote",
       "ios": {
-        "image": "latest",
+        "image": "macos-tahoe-26.5-xcode-26.6",
         "config": "build-ios.yml"
       }
     },

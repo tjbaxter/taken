@@ -136,7 +136,7 @@ jobs:
               ;;
           esac
 
-      - name: Select Xcode 26
+      - name: Select Xcode (.xcode-version)
         run: scripts/select-xcode.sh
 
       - name: Install certificate, profiles and API key
