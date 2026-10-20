@@ -3,7 +3,10 @@
 # other profile, and the IPA is exported "TestFlight internal testing only" (the Xcode export option
 # testFlightInternalTestingOnly), so App Store Connect marks the build Internal: it can go to internal tester groups
 # such as "Tom", and can never be added to an App Store version, sent to App Review or given to an external group.
-# scripts/check-eas-configs.sh (CI) fails when anything else differs from build-ios.yml: change both files together.
+# The shared IPA check (scripts/check-app-store-build.sh --internal) refuses to upload an internal build whose app lacks
+# the TFInternalTestingOnly mark that export writes into its Info.plist, so an internal build exported any other way
+# never reaches App Store Connect. scripts/check-eas-configs.sh (CI) fails when anything else differs from
+# build-ios.yml: change both files together.
 build:
   name: Taken iOS internal (TestFlight internal testing only)
   steps:
@@ -14,7 +17,7 @@ build:
           set -euo pipefail
           # >>> internal only
           if [ "${EAS_BUILD_PROFILE:-}" != "internal" ] || [ "${TAKEN_INTERNAL_PRO:-0}" != "1" ]; then
-            echo "build-ios-internal.yml builds only profile internal with TAKEN_INTERNAL_PRO=1, not profile ${EAS_BUILD_PROFILE:-unset} with ${TAKEN_INTERNAL_PRO:-unset}: refusing to build"
+            echo "Profile ${EAS_BUILD_PROFILE:-unset}, TAKEN_INTERNAL_PRO=${TAKEN_INTERNAL_PRO:-unset} is not internal: refusing to build"
             exit 1
           fi
           # <<< internal only
@@ -127,35 +130,4 @@ build:
           else
             scripts/check-app-store-build.sh "$unpacked/Payload/Taken.app"
           fi
-    # >>> internal only
-    - run:
-        name: Check the export is TestFlight internal testing only
-        command: |
-          set -euo pipefail
-          # xcodebuild -exportArchive writes the options it exported with to ExportOptions.plist beside the IPA, in
-          # fastlane gym's temporary output folder. The build is internal-only only if Xcode applied the option.
-          exported="$(find "${TMPDIR:-/tmp}" /var/folders -maxdepth 4 -type f -path '*gym_output*/ExportOptions.plist' 2>/dev/null | head -1 || true)"
-          if [ -z "$exported" ]; then
-            echo "No ExportOptions.plist from the export: refusing to upload a build that may be App Store eligible"
-            exit 1
-          fi
-          echo "Export options Xcode applied ($exported):"
-          plutil -p "$exported"
-          ls -la "$(dirname "$exported")"
-          for extra in DistributionSummary.plist; do
-            if [ -f "$(dirname "$exported")/$extra" ]; then plutil -p "$(dirname "$exported")/$extra"; fi
-          done
-          ipa="$(find ios/build build -maxdepth 2 -name '*.ipa' 2>/dev/null | head -1 || true)"
-          unzip -l "$ipa" | grep -v -E '\.(png|car|nib|strings|ttf)$' || true
-          unpacked="$(mktemp -d)"
-          unzip -q "$ipa" -d "$unpacked"
-          plutil -p "$unpacked/Payload/Taken.app/Info.plist"
-          codesign -d --entitlements - --xml "$unpacked/Payload/Taken.app" 2>/dev/null | plutil -p - || true
-          for f in "$unpacked"/*; do echo "IPA top level: $(basename "$f")"; done
-          if [ "$(plutil -extract testFlightInternalTestingOnly raw -o - "$exported" 2>/dev/null || true)" != "true" ]; then
-            echo "Xcode did not export with testFlightInternalTestingOnly: refusing to upload an App Store eligible build"
-            exit 1
-          fi
-          echo "TestFlight internal testing only: App Store Connect will keep this build for internal testers"
-    # <<< internal only
     - eas/find_and_upload_build_artifacts
