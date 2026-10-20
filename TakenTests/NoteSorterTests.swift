@@ -148,10 +148,17 @@ final class NoteSorterTests: XCTestCase {
     }
 
     func testATaskSaidInTwoPartsIsSavedOnce() async {
-        let fake = Fake(calls: Calls(), answers: { _ in [RawTodo(spoken: "call person0", title: "Call person0")] })
-        let sorted = await NoteSorter(sorter: fake, context: context, budget: budget).finish(note: note)
-        let saved = TodoValidation.assemble(note: note, parts: sorted, context: context)
-        XCTAssertEqual(saved.drafts.map(\.title), ["Call person0"], "only part 1 said it; the others' copies are dropped")
+        // "call person0" said again in the last part: two good answers, one to-do.
+        let repeated = note + " Please call person0 about the thing number 0 today, and then there are a few more words."
+        let sorted = await NoteSorter(sorter: Fake(calls: Calls()), context: context, budget: budget).finish(note: repeated)
+        let saved = TodoValidation.assemble(note: repeated, parts: sorted, context: context)
+        XCTAssertEqual(saved.drafts.map(\.title), (0..<12).map { "Call person\($0)" })
+
+        // A task copied into a part that never said it is not placed there, so it is not saved twice either.
+        let copied = Fake(calls: Calls(), answers: { _ in [RawTodo(spoken: "call person0", title: "Call person0")] })
+        let everywhere = await NoteSorter(sorter: copied, context: context, budget: budget).finish(note: note)
+        XCTAssertEqual(TodoValidation.assemble(note: note, parts: everywhere, context: context).drafts.map(\.title),
+                       ["Call person0"])
     }
 
     func testNoModelSavesTheNoteAsSaid() async {

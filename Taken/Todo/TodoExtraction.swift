@@ -330,7 +330,9 @@ enum TodoValidation {
             let kept = note.withoutFiller(Array(piece))
             // Nothing but filler ("Um.", "Okay."): skipped. A day or time is never filler.
             guard hasContent(note, kept) || SpokenDayTime.said(in: kept.flatMap { note.words[$0].tokens }) else { continue }
+            // Without a dash said between two pieces ("Call mum - buy milk").
             var text = kept.map { note.words[$0].raw }.joined(separator: " ")
+                .trimmingCharacters(in: CharacterSet(charactersIn: "-\u{2013}\u{2014}&+").union(.whitespaces))
             while text.count > TodoText.maxTitleLength {
                 // The most whole words that fit; the rest carries on in the next line.
                 let head = text.prefix(TodoText.maxTitleLength + 1)
