@@ -24,6 +24,9 @@ struct ProfileView: View {
     @State private var photoItem: PhotosPickerItem?
     @State private var pickingPhoto = false
     @State private var loadingPhoto = false
+    #if DEBUG || TAKEN_INTERNAL
+    @State private var showVoiceLog = false
+    #endif
 
     init() {}
 
@@ -42,6 +45,9 @@ struct ProfileView: View {
                     hapticsSection
                     proSection
                     dataSection
+                    #if DEBUG || TAKEN_INTERNAL
+                    if InternalBuild.unlocksPro { internalSection }
+                    #endif
                     aboutSection
                 }
                 .listStyle(.insetGrouped)
@@ -553,6 +559,27 @@ struct ProfileView: View {
             ProfileSectionTitle("Data")
         }
     }
+
+    #if DEBUG || TAKEN_INTERNAL
+    /// The owner's internal builds only (the TakenInternalPro marker): the voice note log, also at taken://todo-log.
+    private var internalSection: some View {
+        Section {
+            Button {
+                showVoiceLog = true
+            } label: {
+                ProfileLinkRow(title: VoiceNoteLogCopy.title, symbol: "waveform")
+            }
+            .buttonStyle(.plain)
+            .profileRow()
+        } header: {
+            ProfileSectionTitle(VoiceNoteLogCopy.section)
+        }
+        .sheet(isPresented: $showVoiceLog) {
+            VoiceNoteLogView()
+                .environment(\.theme, model.theme)
+        }
+    }
+    #endif
 
     private var aboutSection: some View {
         Section {
