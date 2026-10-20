@@ -34,7 +34,7 @@ enum TodoListOption: String, AppEnum, CaseIterable {
 
 /// Which to-dos "Get to-dos" hands on.
 enum TodoShowOption: String, AppEnum, CaseIterable {
-    /// Both lists' open to-dos (or one list's), in the order the list shows them.
+    /// Both lists' open to-dos in the To-do tab's order (the list on top first), or one list's.
     case open
     /// Done on the day being lived (the day-start hour decides it, as it does in the app), newest first.
     case doneToday
@@ -126,7 +126,7 @@ struct GetTodosIntent: AppIntent {
     static var title: LocalizedStringResource { "Get to-dos" }
     static var description: IntentDescription { IntentDescription("Your to-dos from Taken, for use in other shortcuts.") }
     /// Siri reads the list aloud, from both lists and up to 30 days of done ones, so a locked iPhone asks for Face ID or
-    /// the passcode first (Apple, IntentAuthenticationPolicy). The Lock Screen widget still shows the list in view.
+    /// the passcode first (Apple, IntentAuthenticationPolicy). The Lock Screen widget still shows the first titles.
     static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     @Parameter(title: "Show", default: .open)
@@ -161,12 +161,13 @@ struct GetTodosIntent: AppIntent {
     }
 }
 
-/// "Add to-do": one to-do from a shortcut (a title "Use Model" wrote, say), on the list asked for or the one last in
-/// view. Gated exactly like a typed note: the first note needs no Taken Pro, after it adding does.
+/// "Add to-do": one to-do from a shortcut (a title "Use Model" wrote, say), on the list asked for or the one on top of
+/// the To-do tab, where voice notes go. Gated exactly like a typed note: the first note needs no Taken Pro, after it
+/// adding does.
 struct AddTodoIntent: AppIntent {
     static var title: LocalizedStringResource { "Add to-do" }
     static var description: IntentDescription {
-        IntentDescription("Adds a to-do to Taken, on the list you choose or the one last open.")
+        IntentDescription("Adds a to-do to Taken, on the list you choose or the one on top.")
     }
     /// A write, and its answer reads the to-do back: the owner unlocks first, as for Get to-dos.
     static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
@@ -177,7 +178,7 @@ struct AddTodoIntent: AppIntent {
     @Parameter(title: "Due")
     var due: Date?
 
-    @Parameter(title: "List", description: "Personal or Work. Leave it empty for the list last open in Taken.")
+    @Parameter(title: "List", description: "Personal or Work. Leave it empty for the list on top in Taken.")
     var list: TodoListOption?
 
     static var parameterSummary: some ParameterSummary {
@@ -253,10 +254,10 @@ enum TodoAgent {
             .map { TodoEntity($0, now: now, clock: clock) }
     }
 
-    /// What "Get to-dos" returns. A list given keeps to that list; none means both, never mixed into one order of
-    /// their own: open ones come in the order the app shows them.
+    /// What "Get to-dos" returns. A list given keeps to that list; none means both, in the order the To-do tab shows
+    /// them: the list on top first, each list due first. Done ones come newest first.
     static func tasks(in state: TodoState, show: TodoShowOption, area: TodoArea?, now: Date, clock: DayClock) -> [TodoTask] {
-        let open = area.map { state.openTasks(in: $0, clock: clock) } ?? state.openTasks(clock: clock)
+        let open = area.map { state.openTasks(in: $0, clock: clock) } ?? state.openTasksInListOrder(clock: clock)
         switch show {
         case .open:
             return open
@@ -271,8 +272,8 @@ enum TodoAgent {
     }
 
     /// Adds one to-do: cleaned like every title (short lines, never paragraphs), a due date saved as a moment, on the
-    /// list asked for or the one last in view. Throws `needsTitle` when nothing is left of the title and `needsPro` when
-    /// adding is locked; either way nothing is written.
+    /// list asked for or the one on top (`topArea`, where voice notes go). Throws `needsTitle` when nothing is left of
+    /// the title and `needsPro` when adding is locked; either way nothing is written.
     static func add(title: String, due: Date?, area: TodoArea?, store: TodoStore, ledgerStore: ProLedgerStore,
                     now: Date, recheck: (@MainActor @Sendable () async -> Void)? = nil) async throws
         -> (task: TodoTask, state: TodoState) {
@@ -281,7 +282,7 @@ enum TodoAgent {
             throw TodoAgentError.needsPro
         }
         let draft = TodoDraft(title: clean, due: due.map { TodoDue.time($0) })
-        let result = try store.update { state in state.add([draft], area: area ?? state.lastArea, at: now) }
+        let result = try store.update { state in state.add([draft], area: area ?? state.topArea, at: now) }
         guard let task = result.value.first else { throw TodoAgentError.couldNotSave }
         return (task, result.state)
     }
