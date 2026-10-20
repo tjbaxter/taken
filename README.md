@@ -58,7 +58,7 @@ Repository secrets (names only, values never go in the repo):
 | `PROFILE_APP_BASE64` | App Store profile for `com.tombaxter.taken`, base64 |
 | `PROFILE_WIDGETS_BASE64` | App Store profile for `com.tombaxter.taken.widgets`, base64 |
 
-The same project also ships through EAS Build (`eas.json`, `.eas/build/build-ios.yml`), which runs `xcodegen generate` and signs with EAS-held credentials for the targets `Taken` and `TakenWidgets`. Release signing settings in `project.yml` are plain keys so either path can set them.
+The same project also ships through EAS Build (`eas.json`; `.eas/build/build-ios.yml` for the App Store, `.eas/build/build-ios-internal.yml` for the `internal` profile), which runs `xcodegen generate` and signs with EAS-held credentials for the targets `Taken` and `TakenWidgets`. Internal builds are exported "TestFlight internal testing only", so App Store Connect keeps them for internal testers and never offers them for an App Store version or App Review; `scripts/check-eas-configs.sh` (CI) keeps the two configs' checks the same. Release signing settings in `project.yml` are plain keys so either path can set them.
 
 Optional repository variable `ASC_APP_ID`: the app's numeric Apple ID, passed to `altool` so the upload always lands on this app.
 

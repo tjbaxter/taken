@@ -4,9 +4,9 @@
 # testFlightInternalTestingOnly), so App Store Connect marks the build Internal: it can go to internal tester groups
 # such as "Tom", and can never be added to an App Store version, sent to App Review or given to an external group.
 # The shared IPA check (scripts/check-app-store-build.sh --internal) refuses to upload an internal build whose app lacks
-# the TFInternalTestingOnly mark that export writes into its Info.plist, so an internal build exported any other way
-# never reaches App Store Connect. scripts/check-eas-configs.sh (CI) fails when anything else differs from
-# build-ios.yml: change both files together.
+# the TFInternalTestingOnly mark that export writes into its Info.plist, so neither EAS config uploads an internal build
+# exported any other way. scripts/check-eas-configs.sh (CI) fails when anything else differs from build-ios.yml:
+# change both files together.
 build:
   name: Taken iOS internal (TestFlight internal testing only)
   steps:
