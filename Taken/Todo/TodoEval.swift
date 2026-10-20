@@ -5,17 +5,20 @@ import UIKit
 // The on-device sorting eval, for the owner's internal TestFlight builds only. CI cannot run Apple's model, so twelve
 // fixed notes run through the real extractor on the iPhone, one after another, and a sheet shows what the model wrote,
 // what was saved and whether it matches what should be. Opened with the link taken://todo-eval (from Safari, after
-// each internal build: a TestFlight app takes no launch arguments). Only a build carrying the TakenInternalPro marker
-// (the EAS "internal" profile) answers the link; an App Store build ignores it. Results stay on the phone, and Copy
-// results puts them on the clipboard.
+// each internal build: a TestFlight app takes no launch arguments). Compiled only into Debug (for the tests) and the
+// EAS "internal" profile's builds (project.internal.yml adds TAKEN_INTERNAL), so an App Store build does not contain it
+// (App Review Guideline 2.5.19). Inside those, only a build carrying the TakenInternalPro marker answers the link.
+// Results stay on the phone, and Copy results puts them on the clipboard.
 
+#if DEBUG || TAKEN_INTERNAL
 enum TodoEval {
     static let host = "todo-eval"
     static let link = URL(string: "taken://todo-eval")!
     /// 11 of the 12 notes must pass. Run again after every iOS model update.
     static let passBar = 11
 
-    /// `taken://todo-eval` in an internal build. False in an App Store build, whatever the link.
+    /// `taken://todo-eval` in an internal build. False without the TakenInternalPro marker (Debug and CI), whatever the
+    /// link; an App Store build does not contain this code.
     static func isRequest(_ url: URL, unlocked: Bool = InternalBuild.unlocksPro) -> Bool {
         guard unlocked, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         return components.scheme == TodoCaptureRoute.scheme && components.host == host
@@ -239,7 +242,7 @@ final class TodoEvalRoute {
     var isPresented = false
 
     /// The eval link in an internal build: the sheet comes up once any sheet the link closed (AppModel closes them for
-    /// every taken:// link) has gone. False for any other link, and for every link in an App Store build.
+    /// every taken:// link) has gone. False for any other link, and for every link without the TakenInternalPro marker.
     @discardableResult
     func handle(url: URL, unlocked: Bool = InternalBuild.unlocksPro) -> Bool {
         guard TodoEval.isRequest(url, unlocked: unlocked) else { return false }
@@ -416,3 +419,4 @@ enum TodoEvalCopy {
         sorting(.couldNotSort),
     ] + TodoEval.cases.map(\.expected)
 }
+#endif

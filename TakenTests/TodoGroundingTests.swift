@@ -348,7 +348,7 @@ final class TodoGroundingTests: XCTestCase {
     @MainActor
     func testTheEvalLinkIsOnlyForInternalBuilds() {
         XCTAssertTrue(TodoEval.isRequest(TodoEval.link, unlocked: true))
-        XCTAssertFalse(TodoEval.isRequest(TodoEval.link, unlocked: false), "an App Store build ignores it")
+        XCTAssertFalse(TodoEval.isRequest(TodoEval.link, unlocked: false), "without the TakenInternalPro marker the link is ignored")
         XCTAssertFalse(TodoEval.isRequest(TodoCaptureRoute.listURL, unlocked: true))
         XCTAssertFalse(TodoEval.isRequest(URL(string: "https://todo-eval.example.com")!, unlocked: true))
         XCTAssertNil(TodoCaptureRoute.route(for: TodoEval.link), "the To-do tab's routes never take it")

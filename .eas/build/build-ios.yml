@@ -18,15 +18,41 @@ build:
               export PATH="/tmp/xcodegen/xcodegen/bin:$PATH"
             }
           fi
-          xcodegen generate --spec project.yml
+          # Owner-only TestFlight builds (eas.json profile "internal", TAKEN_INTERNAL_PRO=1) are the only builds that
+          # contain the internal Pro unlock and the taken://todo-eval sheet: they generate from project.internal.yml,
+          # which adds the TAKEN_INTERNAL Swift compilation condition. App Store builds generate from project.yml, so
+          # their binary has neither (App Review Guideline 2.5.19). The variable must match the profile, so a variable
+          # of the same name set on EAS's servers can never turn a production build internal.
+          internal=0
+          if [ "${TAKEN_INTERNAL_PRO:-0}" = "1" ]; then internal=1; fi
+          profile_internal=0
+          if [ "${EAS_BUILD_PROFILE:-}" = "internal" ]; then profile_internal=1; fi
+          if [ "$internal" != "$profile_internal" ]; then
+            echo "TAKEN_INTERNAL_PRO=${TAKEN_INTERNAL_PRO:-unset} does not match build profile ${EAS_BUILD_PROFILE:-unset}: refusing to build"
+            exit 1
+          fi
+          spec=project.yml
+          if [ "$internal" = "1" ]; then spec=project.internal.yml; fi
+          echo "Generating from $spec"
+          xcodegen generate --spec "$spec"
+          # The generated project must say the same: TAKEN_INTERNAL once (project level, Release) for internal, never
+          # for production, and no other SWIFT_ACTIVE_COMPILATION_CONDITIONS than XcodeGen's Debug preset, since a
+          # target-level value would hide the project-level one from Taken or TakenWidgets.
+          pbx=Taken.xcodeproj/project.pbxproj
+          flagged="$(grep -c 'TAKEN_INTERNAL' "$pbx" || true)"
+          conditions="$(grep -c 'SWIFT_ACTIVE_COMPILATION_CONDITIONS' "$pbx" || true)"
+          echo "TAKEN_INTERNAL lines: $flagged, SWIFT_ACTIVE_COMPILATION_CONDITIONS lines: $conditions"
+          if [ "$flagged" != "$internal" ] || [ "$conditions" != "$((1 + internal))" ]; then
+            echo "The generated project does not match internal=$internal: refusing to build"
+            exit 1
+          fi
           # EAS looks for the native project in ios/; point it at the root, where XcodeGen put it
           # (generating into ios/ would break SRCROOT-relative Info.plist and entitlements paths).
           rm -rf ios && ln -sfn . ios
           ls ios/Taken.xcodeproj
-          # Owner-only TestFlight builds (eas.json profile "internal") unlock Pro via an Info.plist marker.
-          # App Store builds never set TAKEN_INTERNAL_PRO, so the key is absent and ProGate is unchanged.
-          if [ "${TAKEN_INTERNAL_PRO:-0}" = "1" ]; then
-            echo "INTERNAL BUILD: TakenInternalPro=YES (never submit this build to App Review)"
+          # Second guard: the internal code unlocks Pro and answers taken://todo-eval only with this Info.plist marker.
+          if [ "$internal" = "1" ]; then
+            echo "INTERNAL BUILD: TAKEN_INTERNAL + TakenInternalPro=YES (never submit this build to App Review)"
             /usr/libexec/PlistBuddy -c "Add :TakenInternalPro bool true" Taken/Info.plist
             /usr/libexec/PlistBuddy -c "Add :TakenInternalPro bool true" TakenWidgets/Info.plist
           fi
@@ -39,4 +65,23 @@ build:
           scheme: Taken
           credentials: ${ eas.job.secrets.buildCredentials }
     - eas/run_fastlane
+    - run:
+        name: Check the built app (App Review Guideline 2.5.19)
+        command: |
+          set -euo pipefail
+          # The binary itself, before it is uploaded: a production build must carry no internal-only code, and an
+          # internal build must carry it (which also proves the check can see it). scripts/check-app-store-build.sh.
+          ipa="$(find ios/build build -maxdepth 2 -name '*.ipa' 2>/dev/null | head -1 || true)"
+          if [ -z "$ipa" ]; then
+            echo "No .ipa under ios/build or build: refusing to upload an unchecked build"
+            exit 1
+          fi
+          echo "Checking $ipa"
+          unpacked="$(mktemp -d)"
+          unzip -q "$ipa" -d "$unpacked"
+          if [ "${EAS_BUILD_PROFILE:-}" = "internal" ]; then
+            scripts/check-app-store-build.sh --internal "$unpacked/Payload/Taken.app"
+          else
+            scripts/check-app-store-build.sh "$unpacked/Payload/Taken.app"
+          fi
     - eas/find_and_upload_build_artifacts

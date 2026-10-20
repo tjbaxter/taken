@@ -449,17 +449,23 @@ enum NudgeWindow: Equatable, Sendable {
     case closed
 }
 
-/// The owner's own TestFlight builds can carry `TakenInternalPro = YES` in both Info.plists. Only the EAS build adds it,
-/// and only when TAKEN_INTERNAL_PRO=1 (eas.json profile "internal"). An App Store build never has it, so this is false
-/// for every customer and for App Review.
+#if DEBUG || TAKEN_INTERNAL
+/// The owner's own TestFlight builds (eas.json profile "internal") unlock Pro. Compiled only into Debug (for the tests)
+/// and those builds, which .eas/build/build-ios.yml generates from project.internal.yml (the TAKEN_INTERNAL compilation
+/// condition), so an App Store build does not contain it (App Review Guideline 2.5.19). Second guard: Pro unlocks only
+/// when the Info.plist carries `TakenInternalPro = YES`, which only that EAS step adds, to both plists; Debug and CI
+/// never have it.
 enum InternalBuild {
     static let unlocksPro: Bool = (Bundle.main.object(forInfoDictionaryKey: "TakenInternalPro") as? Bool) == true
 }
+#endif
 
 enum ProGate {
     /// The one rule for every surface. `settled` is false only in the app before StoreKit's first answer.
     static func access(status: ProStatus?, settled: Bool, legacyLog: Bool, hasLogged: Bool, now: Date) -> ProAccess {
+        #if DEBUG || TAKEN_INTERNAL
         if InternalBuild.unlocksPro { return .pro }
+        #endif
         if let status, status.isActive(at: now) { return .pro }
         if !hasLogged { return .firstSession }
         if status == nil && legacyLog { return .pending }

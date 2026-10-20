@@ -5,7 +5,9 @@ import UserNotifications
 struct TakenApp: App {
     @UIApplicationDelegateAdaptor(AppDelegate.self) private var appDelegate
     @State private var model = AppModel.fromLaunchArguments()
+    #if DEBUG || TAKEN_INTERNAL
     @State private var eval = TodoEvalRoute.shared
+    #endif
     @Environment(\.scenePhase) private var scenePhase
 
     var body: some Scene {
@@ -21,12 +23,15 @@ struct TakenApp: App {
                 .onOpenURL { model.handle(url: $0) }
                 // taken://todo and taken://todo/record (the Lock Screen to-do widget): the To-do tab, listening or not.
                 .onOpenURL { TodoCaptureRoute.shared.handle(url: $0) }
-                // taken://todo-eval: the on-device sorting eval, in the owner's internal builds only (TodoEval).
+                #if DEBUG || TAKEN_INTERNAL
+                // taken://todo-eval: the on-device sorting eval (TodoEval). Compiled only into Debug and the owner's
+                // internal builds; an App Store build does not contain it.
                 .onOpenURL { eval.handle(url: $0) }
                 .sheet(isPresented: Binding(get: { eval.isPresented }, set: { eval.isPresented = $0 })) {
                     TodoEvalView()
                         .environment(\.theme, model.theme)
                 }
+                #endif
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.didBecomeActive() }

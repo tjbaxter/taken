@@ -263,6 +263,8 @@ jobs:
             codesign -d --entitlements - --xml "$bundle" 2>/dev/null | grep -q "$APP_GROUP" \
               || { echo "::error::$(basename "$bundle") is missing the App Group entitlement"; exit 1; }
           done
+          # App Review Guideline 2.5.19: nothing owner-only reaches App Store Connect from here.
+          scripts/check-app-store-build.sh "$app"
 
       - name: Export IPA
         run: |

@@ -97,6 +97,8 @@ jobs:
           app="build/DerivedData/Build/Products/Release-iphoneos/Taken.app"
           appex="$app/PlugIns/TakenWidgets.appex"
           test -d "$appex"
+          # App Review Guideline 2.5.19: the App Store shape has no owner-only Pro unlock, eval sheet or marker.
+          scripts/check-app-store-build.sh "$app"
           for bundle in "$app" "$appex"; do
             /usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$bundle/Info.plist"
             /usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$bundle/Info.plist"
