@@ -52,7 +52,9 @@ jobs:
           for sha in $shas; do
             git cat-file -e "$sha^{commit}" 2>/dev/null || continue
             git merge-base --is-ancestor "$sha" "$head" || continue
-            if git diff --quiet "$sha" "$head" -- . ':(exclude)docs/**' ':(exclude)brand/**' ':(exclude)*.md'; then
+            # This workflow file is excluded too: ci.yml does not build or test it, so a fix to it needs no new CI run.
+            if git diff --quiet "$sha" "$head" -- . ':(exclude)docs/**' ':(exclude)brand/**' ':(exclude)*.md' \
+                 ':(exclude).github/workflows/internal-testflight.yml'; then
               echo "ci.yml passed on $sha, and nothing it checks has changed since"
               exit 0
             fi
@@ -85,9 +87,23 @@ jobs:
             exit 1
           fi
 
+      # eas-cli reads the native project before it starts a local build. Without ios/ it treats Taken as an Expo config
+      # project and fails looking for expo-modules-autolinking (run 39515723770). The same two commands as a build from
+      # the Mac (handoff "How to ship a build"); the internal profile's own steps generate again in their working copy.
+      - name: Generate the Xcode project (ios -> repo root)
+        run: |
+          set -euo pipefail
+          command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+          xcodegen generate --spec project.yml
+          ln -sfn . ios
+          ls ios/Taken.xcodeproj >/dev/null
+
       - name: Build the internal profile on this runner (no EAS cloud build)
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          # Capabilities are set in the Developer portal already; syncing them would need an Apple sign-in.
+          EXPO_NO_CAPABILITY_SYNC: "1"
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
         run: |
           set -euo pipefail
           if [ -z "${EXPO_TOKEN:-}" ]; then
@@ -102,6 +118,7 @@ jobs:
       - name: Submit to TestFlight internal testing
         env:
           EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
         run: |
           set -euo pipefail
           npx --yes eas-cli@24.11.0 submit -p ios -e internal --path "$RUNNER_TEMP/Taken-internal.ipa" \
