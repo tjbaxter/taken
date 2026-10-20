@@ -381,7 +381,7 @@ final class TodoModelTests: XCTestCase {
         XCTAssertEqual(model.phase, .listening)
         XCTAssertEqual(model.captureArea, .work, "Tap the mic to keep going: the monologue stays on Work")
 
-        let other = try model(split)
+        let other = try self.model(split)
         await other.save(note: note, area: .work, stoppedAtCap: false)
         XCTAssertNotEqual(other.notice, TodoCopy.stoppedAtCap)
         other.micTapped(app)
