@@ -122,8 +122,8 @@ shoot 26-widgets-standby-signal widgets-standby signal
 shoot 27-settings-locked settings-locked
 shoot 28-paywall-no-yearly paywall-no-yearly
 
-# Voice to-dos (SPEC 3.10): the To-do tab with demo tasks (a time today, tomorrow at 09:00, done today) in every look,
-# and listening with the words on screen.
+# Voice to-dos (SPEC 3.10): the To-do tab as one list, Personal then Work, with demo tasks (a time today, tomorrow at
+# 09:00, done today under Personal) in every look, and listening with the words on screen.
 shoot 29-todo todo
 shoot 30-todo-recording todo-recording
 for look in blush phosphor ice; do
@@ -150,17 +150,24 @@ lands() {
   done
 }
 
-# The 1.1 feedback build (SPEC 3.3, 3.10): the To-do tab with the Work list in view (Personal's count on the switch),
-# and the Add sheet in type mode with "tum" typed (Turmeric suggested), in every look. The chip grid shows under the
+# The 1.1 feedback build (SPEC 3.3, 3.10): the To-do tab as one list with Work dragged on top (so notes go there), and
+# the Add sheet in type mode with "tum" typed (Turmeric suggested), in every look. The chip grid shows under the
 # field, Semaglutide and Tirzepatide among the chips: keep these out of UK store screenshots (REDESIGN.md, Open).
 shoot 41-todo-work todo-work
-lands 41-todo-work "tab=todo sheet=none todoList=work"
+lands 41-todo-work "tab=todo sheet=none todoOrder=work,personal todoInto=work"
 shoot 43-add-search add-search
 lands 43-add-search "sheet=add"
 for look in blush phosphor ice; do
   shoot "42-todo-work-$look" todo-work "$look"
   shoot "44-add-search-$look" add-search "$look"
 done
+# Feedback build 2 (Tom 2026-10-20): three open on Personal and nothing on Work, the state where "3 open" bounced. Both
+# headings show, Work reads "Nothing open", and the line under the title stays. Then a note at its last minute and the
+# typing sheet with its list chip: no lands check, so these pass before the listening build adds those states.
+shoot 46-todo-work-empty todo-work-empty
+lands 46-todo-work-empty "tab=todo sheet=none todoOrder=personal,work"
+shoot 47-todo-cap todo-cap
+shoot 48-todo-type todo-type
 # Links reach the right screen with the quick action's scene delegate in place: Taken opens its own link after launch
 # (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). The demo app writes
 # what is in front to tmp/taken-ui-state.txt (DemoProbe), and the check fails unless the link landed there:
@@ -207,6 +214,8 @@ if [ -n "$small" ] && [ "$small" != "$udid" ]; then
   shoot 40-today-6.3in today
   # Type mode on the smaller iPhone: the pinned field and the suggestion rows stay above the keyboard.
   shoot 45-add-search-6.3in add-search
+  # The one To-do list on the smaller iPhone: both headings and the mic above the tab bar.
+  shoot 49-todo-6.3in todo
 fi
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
