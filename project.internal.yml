@@ -1,10 +1,11 @@
-# The owner's internal TestFlight builds (eas.json profile "internal"). .eas/build/build-ios.yml generates the project
-# from this file, not project.yml, only when TAKEN_INTERNAL_PRO=1 and the build profile is "internal". XcodeGen merges
-# project.yml first and this file on top ("They will be merged in order and then the current spec will be merged on
-# top", XcodeGen ProjectSpec, include), so the one difference is the TAKEN_INTERNAL Swift compilation condition in
+# The owner's internal TestFlight builds (eas.json profile "internal"). .eas/build/build-ios-internal.yml generates the
+# project from this file, not project.yml, only when TAKEN_INTERNAL_PRO=1 and the build profile is "internal", and
+# exports the build "TestFlight internal testing only", so App Store Connect never lets it reach App Review. XcodeGen
+# merges project.yml first and this file on top ("They will be merged in order and then the current spec will be merged
+# on top", XcodeGen ProjectSpec, include), so the one difference is the TAKEN_INTERNAL Swift compilation condition in
 # Release, which compiles in the internal Pro unlock (Shared/Pro.swift) and the taken://todo-eval sheet
-# (Taken/Todo/TodoEval.swift). Taken and TakenWidgets inherit it from the project level. Never build an App Store or
-# App Review build from this file (App Review Guideline 2.5.19).
+# (Taken/Todo/TodoEval.swift). Taken and TakenWidgets inherit it from the project level. Never build an App Store or App
+# Review build from this file (App Review Guideline 2.5.19).
 include:
   - project.yml
 settings:
