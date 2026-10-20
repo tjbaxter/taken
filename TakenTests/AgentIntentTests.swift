@@ -299,6 +299,13 @@ final class AgentIntentTests: XCTestCase {
         }
     }
 
+    /// Siri reads the to-dos aloud, and Add to-do writes: on a locked iPhone both ask for Face ID or the passcode first.
+    func testTheToDoActionsAskALockedIPhoneToUnlock() {
+        for policy in [GetTodosIntent.authenticationPolicy, AddTodoIntent.authenticationPolicy] {
+            guard case .requiresAuthentication = policy else { return XCTFail("\(policy)") }
+        }
+    }
+
     /// The App Intents metadata the build extracts is what Siri and Shortcuts read. The Release device build checks the
     /// file is there; this checks the new actions and types made it in.
     func testTheActionsAreInTheAppIntentsMetadata() throws {

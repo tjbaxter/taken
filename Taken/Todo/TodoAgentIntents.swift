@@ -125,6 +125,9 @@ struct TodoEntityQuery: EnumerableEntityQuery {
 struct GetTodosIntent: AppIntent {
     static var title: LocalizedStringResource { "Get to-dos" }
     static var description: IntentDescription { IntentDescription("Your to-dos from Taken, for use in other shortcuts.") }
+    /// Siri reads the list aloud, from both lists and up to 30 days of done ones, so a locked iPhone asks for Face ID or
+    /// the passcode first (Apple, IntentAuthenticationPolicy). The Lock Screen widget still shows the list in view.
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     @Parameter(title: "Show", default: .open)
     var show: TodoShowOption
@@ -165,6 +168,8 @@ struct AddTodoIntent: AppIntent {
     static var description: IntentDescription {
         IntentDescription("Adds a to-do to Taken, on the list you choose or the one last open.")
     }
+    /// A write, and its answer reads the to-do back: the owner unlocks first, as for Get to-dos.
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     @Parameter(title: "Title", requestValueDialog: "What needs doing?")
     var title: String
