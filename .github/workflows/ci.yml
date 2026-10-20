@@ -70,6 +70,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # Internal builds export "TestFlight internal testing only" from their own EAS config; it must keep every check
+      # the App Store config has.
+      - name: Check the EAS configs
+        run: scripts/check-eas-configs.sh
+
       - name: Select Xcode 26
         run: scripts/select-xcode.sh
 

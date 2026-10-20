@@ -451,8 +451,8 @@ enum NudgeWindow: Equatable, Sendable {
 
 #if DEBUG || TAKEN_INTERNAL
 /// The owner's own TestFlight builds (eas.json profile "internal") unlock Pro. Compiled only into Debug (for the tests)
-/// and those builds, which .eas/build/build-ios.yml generates from project.internal.yml (the TAKEN_INTERNAL compilation
-/// condition), so an App Store build does not contain it (App Review Guideline 2.5.19). Second guard: Pro unlocks only
+/// and those builds, which .eas/build/build-ios-internal.yml generates from project.internal.yml (TAKEN_INTERNAL), so
+/// an App Store build does not contain it (App Review Guideline 2.5.19). Second guard: Pro unlocks only
 /// when the Info.plist carries `TakenInternalPro = YES`, which only that EAS step adds, to both plists; Debug and CI
 /// never have it.
 enum InternalBuild {

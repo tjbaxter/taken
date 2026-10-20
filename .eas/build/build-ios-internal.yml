@@ -1,0 +1,161 @@
+# The owner's internal TestFlight builds (eas.json profile "internal") and nothing else. The same steps and checks as
+# build-ios.yml, plus what sits between the ">>> internal only" and "<<< internal only" lines: this file refuses any
+# other profile, and the IPA is exported "TestFlight internal testing only" (the Xcode export option
+# testFlightInternalTestingOnly), so App Store Connect marks the build Internal: it can go to internal tester groups
+# such as "Tom", and can never be added to an App Store version, sent to App Review or given to an external group.
+# scripts/check-eas-configs.sh (CI) fails when anything else differs from build-ios.yml: change both files together.
+build:
+  name: Taken iOS internal (TestFlight internal testing only)
+  steps:
+    - eas/checkout
+    - run:
+        name: Generate the Xcode project (ios -> repo root)
+        command: |
+          set -euo pipefail
+          # >>> internal only
+          if [ "${EAS_BUILD_PROFILE:-}" != "internal" ] || [ "${TAKEN_INTERNAL_PRO:-0}" != "1" ]; then
+            echo "build-ios-internal.yml builds only profile internal with TAKEN_INTERNAL_PRO=1, not profile ${EAS_BUILD_PROFILE:-unset} with ${TAKEN_INTERNAL_PRO:-unset}: refusing to build"
+            exit 1
+          fi
+          # <<< internal only
+          sudo xcode-select -s "$(ls -d /Applications/Xcode_26*.app /Applications/Xcode-26*.app /Applications/Xcode.app 2>/dev/null | sort -V | tail -1)" || true
+          xcodebuild -version
+          if ! command -v xcodegen >/dev/null 2>&1; then
+            brew install xcodegen || {
+              curl -fsSL -o /tmp/xcodegen.zip https://github.com/yonaskolb/XcodeGen/releases/latest/download/xcodegen.zip
+              unzip -q /tmp/xcodegen.zip -d /tmp/xcodegen
+              export PATH="/tmp/xcodegen/xcodegen/bin:$PATH"
+            }
+          fi
+          # Owner-only TestFlight builds (eas.json profile "internal", TAKEN_INTERNAL_PRO=1) are the only builds that
+          # contain the internal Pro unlock and the taken://todo-eval sheet: they generate from project.internal.yml,
+          # which adds the TAKEN_INTERNAL Swift compilation condition. App Store builds generate from project.yml, so
+          # their binary has neither (App Review Guideline 2.5.19). The variable must match the profile, so a variable
+          # of the same name set on EAS's servers can never turn a production build internal.
+          internal=0
+          if [ "${TAKEN_INTERNAL_PRO:-0}" = "1" ]; then internal=1; fi
+          profile_internal=0
+          if [ "${EAS_BUILD_PROFILE:-}" = "internal" ]; then profile_internal=1; fi
+          if [ "$internal" != "$profile_internal" ]; then
+            echo "TAKEN_INTERNAL_PRO=${TAKEN_INTERNAL_PRO:-unset} does not match build profile ${EAS_BUILD_PROFILE:-unset}: refusing to build"
+            exit 1
+          fi
+          spec=project.yml
+          if [ "$internal" = "1" ]; then spec=project.internal.yml; fi
+          echo "Generating from $spec"
+          xcodegen generate --spec "$spec"
+          # The generated project must say the same: TAKEN_INTERNAL once (project level, Release) for internal, never
+          # for production, and no other SWIFT_ACTIVE_COMPILATION_CONDITIONS than XcodeGen's Debug preset, since a
+          # target-level value would hide the project-level one from Taken or TakenWidgets.
+          pbx=Taken.xcodeproj/project.pbxproj
+          flagged="$(grep -c 'TAKEN_INTERNAL' "$pbx" || true)"
+          conditions="$(grep -c 'SWIFT_ACTIVE_COMPILATION_CONDITIONS' "$pbx" || true)"
+          echo "TAKEN_INTERNAL lines: $flagged, SWIFT_ACTIVE_COMPILATION_CONDITIONS lines: $conditions"
+          if [ "$flagged" != "$internal" ] || [ "$conditions" != "$((1 + internal))" ]; then
+            echo "The generated project does not match internal=$internal: refusing to build"
+            exit 1
+          fi
+          # EAS looks for the native project in ios/; point it at the root, where XcodeGen put it
+          # (generating into ios/ would break SRCROOT-relative Info.plist and entitlements paths).
+          rm -rf ios && ln -sfn . ios
+          ls ios/Taken.xcodeproj
+          # Second guard: the internal code unlocks Pro and answers taken://todo-eval only with this Info.plist marker.
+          if [ "$internal" = "1" ]; then
+            echo "INTERNAL BUILD: TAKEN_INTERNAL + TakenInternalPro=YES (never submit this build to App Review)"
+            /usr/libexec/PlistBuddy -c "Add :TakenInternalPro bool true" Taken/Info.plist
+            /usr/libexec/PlistBuddy -c "Add :TakenInternalPro bool true" TakenWidgets/Info.plist
+          fi
+    - eas/resolve_apple_team_id_from_credentials:
+        id: resolve_apple_team_id_from_credentials
+    - eas/configure_ios_credentials
+    - eas/configure_ios_version
+    - eas/generate_gymfile_from_template:
+        inputs:
+          scheme: Taken
+          credentials: ${ eas.job.secrets.buildCredentials }
+          # >>> internal only
+          # EAS's own template for signed builds, unchanged (DEFAULT_CREDENTIALS_TEMPLATE, expo/eas-cli at 53ac936,
+          # packages/build-tools/src/steps/functions/generateGymfileFromTemplate.ts), plus one export option:
+          # testFlightInternalTestingOnly. fastlane gym hands export_options to xcodebuild -exportOptionsPlist as they are.
+          template: |
+            suppress_xcode_output(true)
+            clean(<%- CLEAN %>)
+
+            scheme("<%- SCHEME %>")
+            <% if (BUILD_CONFIGURATION) { %>
+            configuration("<%- BUILD_CONFIGURATION %>")
+            <% } %>
+
+            export_options({
+            method: "<%- EXPORT_METHOD %>",
+            testFlightInternalTestingOnly: true,
+            provisioningProfiles: {<% _.forEach(PROFILES, function(profile) { %>
+                "<%- profile.BUNDLE_ID %>" => "<%- profile.UUID %>",<% }); %>
+            }<% if (ICLOUD_CONTAINER_ENVIRONMENT) { %>,
+            iCloudContainerEnvironment: "<%- ICLOUD_CONTAINER_ENVIRONMENT %>"
+            <% } %>
+            })
+
+            export_xcargs "OTHER_CODE_SIGN_FLAGS=\"--keychain <%- KEYCHAIN_PATH %>\""
+
+            disable_xcpretty(true)
+            buildlog_path("<%- LOGS_DIRECTORY %>")
+
+            derived_data_path("<%- DERIVED_DATA_PATH %>")
+            result_bundle(true)
+            result_bundle_path("<%- RESULT_BUNDLE_PATH %>")
+
+            output_directory("<%- OUTPUT_DIRECTORY %>")
+          # <<< internal only
+    - eas/run_fastlane
+    - run:
+        name: Check the built app (App Review Guideline 2.5.19)
+        command: |
+          set -euo pipefail
+          # The binary itself, before it is uploaded: a production build must carry no internal-only code, and an
+          # internal build must carry it (which also proves the check can see it). scripts/check-app-store-build.sh.
+          ipa="$(find ios/build build -maxdepth 2 -name '*.ipa' 2>/dev/null | head -1 || true)"
+          if [ -z "$ipa" ]; then
+            echo "No .ipa under ios/build or build: refusing to upload an unchecked build"
+            exit 1
+          fi
+          echo "Checking $ipa"
+          unpacked="$(mktemp -d)"
+          unzip -q "$ipa" -d "$unpacked"
+          if [ "${EAS_BUILD_PROFILE:-}" = "internal" ]; then
+            scripts/check-app-store-build.sh --internal "$unpacked/Payload/Taken.app"
+          else
+            scripts/check-app-store-build.sh "$unpacked/Payload/Taken.app"
+          fi
+    # >>> internal only
+    - run:
+        name: Check the export is TestFlight internal testing only
+        command: |
+          set -euo pipefail
+          # xcodebuild -exportArchive writes the options it exported with to ExportOptions.plist beside the IPA, in
+          # fastlane gym's temporary output folder. The build is internal-only only if Xcode applied the option.
+          exported="$(find "${TMPDIR:-/tmp}" /var/folders -maxdepth 4 -type f -path '*gym_output*/ExportOptions.plist' 2>/dev/null | head -1 || true)"
+          if [ -z "$exported" ]; then
+            echo "No ExportOptions.plist from the export: refusing to upload a build that may be App Store eligible"
+            exit 1
+          fi
+          echo "Export options Xcode applied ($exported):"
+          plutil -p "$exported"
+          ls -la "$(dirname "$exported")"
+          for extra in DistributionSummary.plist; do
+            if [ -f "$(dirname "$exported")/$extra" ]; then plutil -p "$(dirname "$exported")/$extra"; fi
+          done
+          ipa="$(find ios/build build -maxdepth 2 -name '*.ipa' 2>/dev/null | head -1 || true)"
+          unzip -l "$ipa" | grep -v -E '\.(png|car|nib|strings|ttf)$' || true
+          unpacked="$(mktemp -d)"
+          unzip -q "$ipa" -d "$unpacked"
+          plutil -p "$unpacked/Payload/Taken.app/Info.plist"
+          codesign -d --entitlements - --xml "$unpacked/Payload/Taken.app" 2>/dev/null | plutil -p - || true
+          for f in "$unpacked"/*; do echo "IPA top level: $(basename "$f")"; done
+          if [ "$(plutil -extract testFlightInternalTestingOnly raw -o - "$exported" 2>/dev/null || true)" != "true" ]; then
+            echo "Xcode did not export with testFlightInternalTestingOnly: refusing to upload an App Store eligible build"
+            exit 1
+          fi
+          echo "TestFlight internal testing only: App Store Connect will keep this build for internal testers"
+    # <<< internal only
+    - eas/find_and_upload_build_artifacts
