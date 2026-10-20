@@ -7,6 +7,7 @@ struct TakenApp: App {
     @State private var model = AppModel.fromLaunchArguments()
     #if DEBUG || TAKEN_INTERNAL
     @State private var eval = TodoEvalRoute.shared
+    @State private var voiceLog = VoiceNoteLogRoute.shared
     #endif
     @Environment(\.scenePhase) private var scenePhase
 
@@ -29,6 +30,12 @@ struct TakenApp: App {
                 .onOpenURL { eval.handle(url: $0) }
                 .sheet(isPresented: Binding(get: { eval.isPresented }, set: { eval.isPresented = $0 })) {
                     TodoEvalView()
+                        .environment(\.theme, model.theme)
+                }
+                // taken://todo-log: the voice note log (VoiceNoteLog), the same sheet as Profile > Internal opens.
+                .onOpenURL { voiceLog.handle(url: $0) }
+                .sheet(isPresented: Binding(get: { voiceLog.isPresented }, set: { voiceLog.isPresented = $0 })) {
+                    VoiceNoteLogView()
                         .environment(\.theme, model.theme)
                 }
                 #endif

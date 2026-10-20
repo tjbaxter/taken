@@ -267,16 +267,56 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertFalse(TodoNotifications.isTodo(Reminders.requestPrefix + "20738"), "never the nudge's")
     }
 
-    func testListeningStopsAfterAPauseOrWhenNothingIsSaid() {
+    // Replaces testListeningStopsAfterAPauseOrWhenNothingIsSaid: a pause no longer ends a note (Tom, 20 Oct 2026: cut
+    // off at his first pause). A tap finishes it; 30 s of quiet or 5 minutes stop it.
+    func testATapFinishesANoteAndOnlyThirtySecondsOfQuietOrFiveMinutesStopIt() {
         let start = Date(timeIntervalSince1970: 1_000_000)
-        XCTAssertFalse(TodoModel.shouldStop(now: start + 1.0, startedAt: start, lastVoiceAt: start + 0.5, heardWords: true))
-        XCTAssertTrue(TodoModel.shouldStop(now: start + 2.1, startedAt: start, lastVoiceAt: start + 0.5, heardWords: true),
-                      "about 1.5 s of quiet after speech")
-        XCTAssertFalse(TodoModel.shouldStop(now: start + 5, startedAt: start, lastVoiceAt: start, heardWords: false),
-                       "waits for the first words")
-        XCTAssertTrue(TodoModel.shouldStop(now: start + 8.5, startedAt: start, lastVoiceAt: start, heardWords: false))
-        XCTAssertTrue(TodoModel.shouldStop(now: start + 121, startedAt: start, lastVoiceAt: start + 120.9, heardWords: true),
-                      "two minutes at most")
+        func stop(_ now: TimeInterval, lastVoice: TimeInterval) -> TodoStopReason? {
+            TodoModel.shouldStop(now: start + now, startedAt: start, lastVoiceAt: start + lastVoice)
+        }
+        XCTAssertNil(stop(12, lastVoice: 10), "2 s of quiet after words: still listening")
+        XCTAssertNil(stop(20, lastVoice: 10), "10 s")
+        XCTAssertNil(stop(39.9, lastVoice: 10), "29.9 s")
+        XCTAssertNil(stop(29.9, lastVoice: 0), "29.9 s with nothing said")
+        XCTAssertEqual(stop(30, lastVoice: 0), .quiet, "30 s with nothing said")
+        XCTAssertEqual(stop(70, lastVoice: 40), .quiet, "30 s of quiet after words")
+        XCTAssertNil(stop(299, lastVoice: 298.9), "talking at 4:59")
+        XCTAssertEqual(stop(300, lastVoice: 299.9), .cap, "5 minutes at most, even mid-sentence")
+        XCTAssertFalse(TodoModel.capWarning(elapsed: 239.9))
+        XCTAssertTrue(TodoModel.capWarning(elapsed: 240), "the countdown from 4:00")
+        XCTAssertEqual(TodoModel.silenceToStop, 30)
+        XCTAssertEqual(TodoModel.longestNote, 300)
+    }
+
+    func testTheListeningCardTimeAndTheScreenStayingOn() {
+        XCTAssertEqual(TodoCopy.elapsed(12), "0:12")
+        XCTAssertEqual(TodoCopy.elapsed(102), "1:42")
+        XCTAssertEqual(TodoCopy.timeLeft(60), "1:00 left")
+        XCTAssertEqual(TodoCopy.timeLeft(1), "0:01 left")
+        XCTAssertEqual(TodoCopy.spokenElapsed(130), "2 minutes 10 seconds")
+        XCTAssertEqual(TodoCopy.spokenElapsed(60), "1 minute")
+        XCTAssertEqual(TodoCopy.spokenTimeLeft(45), "45 seconds left")
+        XCTAssertEqual(TodoCopy.noteTime(elapsed: 102.4).text, "1:42")
+        XCTAssertFalse(TodoCopy.noteTime(elapsed: 102.4).countdown)
+        XCTAssertEqual(TodoCopy.noteTime(elapsed: 260).text, "0:40 left", "the todo-cap screenshot")
+        XCTAssertTrue(TodoCopy.noteTime(elapsed: 260).countdown)
+        XCTAssertEqual(TodoCopy.noteTime(elapsed: 299.5).text, "0:01 left")
+        for text in [TodoCopy.timeLeft(60), TodoCopy.stoppedAtCap, TodoCopy.spokenElapsed(130), TodoCopy.part(2, of: 5)] {
+            XCTAssertTrue(TodoCopy.all.contains(text), "\(text) is checked by the copy test")
+        }
+        XCTAssertEqual(TodoCopy.stoppedAtCap, "Stopped at 5 minutes. Tap the mic to keep going.")
+
+        XCTAssertTrue(TodoModel.keepsScreenOn(phase: .starting, isDemo: false))
+        XCTAssertTrue(TodoModel.keepsScreenOn(phase: .listening, isDemo: false))
+        XCTAssertFalse(TodoModel.keepsScreenOn(phase: .sorting, isDemo: false), "never once the note is heard")
+        XCTAssertFalse(TodoModel.keepsScreenOn(phase: .idle, isDemo: false))
+        XCTAssertFalse(TodoModel.keepsScreenOn(phase: .listening, isDemo: true), "never in the demo")
+        XCTAssertEqual(TodoListeningCard.tail("short"), "short")
+        let long = (1...100).map { "word\($0)" }.joined(separator: " ")
+        let tail = TodoListeningCard.tail(long)
+        XCTAssertTrue(tail.hasPrefix("\u{2026} word"), tail)
+        XCTAssertTrue(tail.hasSuffix("word100"))
+        XCTAssertLessThanOrEqual(tail.count, TodoListeningCard.shownCharacters + 2, "only the end of a long note")
     }
 
     /// A due as the old tests wrote it: a moment with a time, or the London calendar date of a day-only one.
@@ -347,6 +387,51 @@ final class TodoStoreTests: XCTestCase {
         changed.complete(done.id, at: now)
         XCTAssertEqual(changed.replaceNote(done.id, with: [TodoDraft(title: "Call Sam"), TodoDraft(title: "Call Kim")],
                                            at: now).map(\.id), [done.id], "a note already done stays as it is")
+    }
+
+    func testANoteSavedAsSaidIsReplacedByItsTasksOnlyWhileItsLinesAreUntouched() {
+        let now = at(2026, 10, 20, 9)
+        var state = TodoState()
+        let note = UUID()
+        let lines = state.add(TodoValidation.lines("Call the dentist. Buy milk and bread."), area: .work, noteId: note,
+                              at: now)
+        XCTAssertEqual(lines.map(\.title), ["Call the dentist", "Buy milk and bread"], "every sentence saved at once")
+        let sorted = state.replaceNote(noteId: note, saved: lines, with: [TodoDraft(title: "Call the dentist"),
+                                                                         TodoDraft(title: "Buy milk"),
+                                                                         TodoDraft(title: "Buy bread")], at: now)
+        XCTAssertEqual(sorted.map(\.title), ["Call the dentist", "Buy milk", "Buy bread"])
+        XCTAssertEqual(sorted.map(\.area), [.work, .work, .work], "on the note's list")
+        XCTAssertEqual(Set(sorted.map(\.noteId)), [note])
+        XCTAssertEqual(sorted.map(\.order), [0, 1, 2])
+        XCTAssertEqual(state.tasks.count, 3, "the lines are gone")
+
+        var edited = TodoState()
+        let second = UUID()
+        let saved = edited.add([TodoDraft(title: "Call the dentist"), TodoDraft(title: "Buy milk")], noteId: second, at: now)
+        edited.update(saved[1].id, title: "Buy oat milk", due: nil)
+        XCTAssertEqual(edited.replaceNote(noteId: second, saved: saved, with: [TodoDraft(title: "Call")], at: now)
+                        .map(\.title), ["Call the dentist", "Buy oat milk"], "someone edited a line: the note stays")
+
+        var done = TodoState()
+        let third = UUID()
+        let doneLines = done.add([TodoDraft(title: "Call the dentist")], noteId: third, at: now)
+        done.complete(doneLines[0].id, at: now)
+        XCTAssertEqual(done.replaceNote(noteId: third, saved: doneLines, with: [TodoDraft(title: "Call")], at: now)
+                        .map(\.id), [doneLines[0].id], "a line done meanwhile: the note stays")
+
+        var erased = TodoState()
+        let fourth = UUID()
+        let gone = erased.add([TodoDraft(title: "Call Sam")], noteId: fourth, at: now)
+        erased.eraseAll()
+        XCTAssertTrue(erased.replaceNote(noteId: fourth, saved: gone, with: [TodoDraft(title: "Call Sam")], at: now).isEmpty,
+                      "erased meanwhile: nothing comes back")
+        XCTAssertTrue(erased.tasks.isEmpty)
+
+        var same = TodoState()
+        let fifth = UUID()
+        let kept = same.add([TodoDraft(title: "Sort out the garage")], noteId: fifth, at: now)
+        XCTAssertEqual(same.replaceNote(noteId: fifth, saved: kept, with: [TodoDraft(title: "Sort out the garage")], at: now),
+                       kept, "the model kept it as said")
     }
 
     // MARK: Keep as one
