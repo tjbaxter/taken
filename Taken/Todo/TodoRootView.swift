@@ -235,7 +235,7 @@ struct TodoRootView: View {
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             }
             if todo.phase == .listening || todo.phase == .sorting {
-                TodoLiveCard(phase: todo.phase, transcript: todo.transcript, levels: todo.levels, area: todo.captureArea)
+                TodoListeningCard(todo: todo)
                     .transition(.move(edge: .bottom).combined(with: .opacity))
             } else if let blocker = todo.blocker {
                 blockerCard(blocker)
@@ -432,57 +432,6 @@ private struct TodoMicPressStyle: ButtonStyle {
         configuration.label
             .scaleEffect(configuration.isPressed ? 0.94 : 1)
             .animation(.snappy(duration: 0.18), value: configuration.isPressed)
-    }
-}
-
-/// What is being heard: a live line naming the list it goes to ("Listening · Work"), a small waveform, and the words so
-/// far (the newest stay in view).
-struct TodoLiveCard: View {
-    @Environment(\.theme) private var theme
-    let phase: TodoModel.Phase
-    let transcript: String
-    let levels: [Double]
-    let area: TodoArea
-
-    init(phase: TodoModel.Phase, transcript: String, levels: [Double], area: TodoArea) {
-        self.phase = phase
-        self.transcript = transcript
-        self.levels = levels
-        self.area = area
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Circle()
-                    .fill(theme.signal)
-                    .frame(width: 7, height: 7)
-                    .opacity(phase == .listening ? 1 : 0.4)
-                Text(phase == .sorting ? TodoCopy.sorting : TodoCopy.listeningLine(into: area))
-                    .font(.sans(13, .sansMedium, relativeTo: .footnote))
-                    .foregroundStyle(theme.fgMuted)
-                    .lineLimit(1)
-                Spacer(minLength: 12)
-                if phase == .listening {
-                    TodoWaveform(levels: levels)
-                        .frame(width: 104, height: 22)
-                }
-            }
-            Text(transcript.isEmpty ? "Say what you need to do" : transcript)
-                .font(.sans(19, .sans, relativeTo: .title3))
-                .foregroundStyle(transcript.isEmpty ? theme.fgFaint : theme.fg)
-                .lineLimit(4)
-                .truncationMode(.head)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .animation(.easeOut(duration: 0.15), value: transcript)
-        }
-        .padding(16)
-        .background(theme.bgRaised, in: RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous).strokeBorder(theme.line, lineWidth: 1))
-        .accessibilityElement(children: .combine)
-        .accessibilityLabel(phase == .sorting
-                            ? TodoCopy.sorting
-                            : (transcript.isEmpty ? "\(TodoCopy.listening), \(area.title)" : transcript))
     }
 }
 
