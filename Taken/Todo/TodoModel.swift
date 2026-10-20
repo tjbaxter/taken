@@ -72,6 +72,8 @@ final class TodoModel {
 
     @ObservationIgnored private var capture: SpeechCapture?
     @ObservationIgnored private var extractor: (any TaskExtractor)?
+    /// The sorter for each note: the best this iPhone has (`TodoExtractors.best`), or canned answers in tests.
+    @ObservationIgnored private let makeExtractor: @MainActor () -> any TaskExtractor
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored private var watchTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
@@ -97,11 +99,13 @@ final class TodoModel {
     /// Keep as one stays on screen this long at most.
     nonisolated static let keepOfferDuration: Duration = .seconds(10)
 
-    init(store: TodoStore, isDemo: Bool, launchScreen: String?, clockNow: @escaping @Sendable () -> Date) {
+    init(store: TodoStore, isDemo: Bool, launchScreen: String?, clockNow: @escaping @Sendable () -> Date,
+         makeExtractor: @escaping @MainActor () -> any TaskExtractor = { TodoExtractors.best() }) {
         self.store = store
         self.isDemo = isDemo
         self.launchScreen = launchScreen
         self.clockNow = clockNow
+        self.makeExtractor = makeExtractor
         self.state = store.load()
         self.now = clockNow()
         self.levels = Array(repeating: 0, count: Self.levelCount)
@@ -262,7 +266,7 @@ final class TodoModel {
             phase = .idle
             return
         }
-        let extractor = TodoExtractors.best()
+        let extractor = makeExtractor()
         self.extractor = extractor
         // The model loads while the person talks, so the tasks come back about a second after they stop.
         Task.detached(priority: .userInitiated) { await extractor.prepare() }
@@ -402,7 +406,7 @@ final class TodoModel {
         // model's tasks replace it on the same list.
         let whole = write { $0.add(TodoValidation.wholeNote(words), area: area, at: context.now) }?.first
         sortingNote = whole?.id
-        let extractor = self.extractor ?? TodoExtractors.best()
+        let extractor = self.extractor ?? makeExtractor()
         self.extractor = nil
         let extraction = await Self.extract(words, with: extractor, context: context)
         let drafts = extraction.drafts.isEmpty ? TodoValidation.wholeNote(words) : extraction.drafts
@@ -503,6 +507,14 @@ final class TodoModel {
         withAnimation(.snappy(duration: 0.25)) { _ = write { $0.lastArea = area } }
     }
 
+    /// A tapped due-time notification: the list holding its task comes into view, so the reminder lands on the task it
+    /// named (notifications cover both lists). Left alone while a note is heard or sorted, as the switch is.
+    func reveal(_ id: UUID) {
+        refresh()
+        guard phase == .idle, let task = state.task(id), task.area != area else { return }
+        _ = write { $0.lastArea = task.area }
+    }
+
     func delete(_ task: TodoTask) {
         guard let removed = withAnimation(.snappy(duration: 0.25), { write { $0.delete(task.id) } }) ?? nil else { return }
         TodoHaptics.soft(hapticsOn)
@@ -533,15 +545,17 @@ final class TodoModel {
 
     // MARK: Keep as one
 
-    /// The note's tasks become one task again: the words as said for a short note (otherwise the titles joined), the
-    /// earliest due date, the same note. Nothing changes when one of them was done or deleted meanwhile.
+    /// The note's tasks become one task again: the words said for a short note, without filler or the day and time
+    /// (otherwise the titles joined), the earliest due date, the same note. Nothing changes when one of them was done or
+    /// deleted meanwhile.
     func keepAsOne() {
         guard let offer = keepOffer else { return }
         dismissKeepOffer()
         let tasks = offer.ids.compactMap { state.task($0) }
-        guard tasks.count == offer.ids.count,
-              let title = TodoMerge.title(transcript: offer.transcript, titles: tasks.map(\.title)) else { return }
         let due = TodoMerge.earliestDue(tasks.map(\.due), clock: clock)
+        guard tasks.count == offer.ids.count,
+              let title = TodoMerge.title(transcript: offer.transcript, titles: tasks.map(\.title), hasDue: due != nil)
+        else { return }
         let merged = withAnimation(.snappy(duration: 0.3), {
             write { $0.mergeNote(ids: offer.ids, title: title, due: due) }
         }) ?? nil
@@ -746,6 +760,12 @@ enum TodoNotifications {
     static func identifier(_ id: UUID) -> String { prefix + id.uuidString }
 
     static func isTodo(_ identifier: String) -> Bool { identifier.hasPrefix(prefix) }
+
+    /// The to-do a due-time notification is for, or nil for any other identifier.
+    static func taskID(_ identifier: String) -> UUID? {
+        guard isTodo(identifier) else { return nil }
+        return UUID(uuidString: String(identifier.dropFirst(prefix.count)))
+    }
 
     /// Delivered due-time notifications to withdraw: every one whose to-do is done or deleted.
     static func staleDelivered(_ identifiers: [String], tasks: [TodoTask]) -> [String] {

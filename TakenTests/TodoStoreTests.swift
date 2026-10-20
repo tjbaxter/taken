@@ -362,7 +362,7 @@ final class TodoStoreTests: XCTestCase {
         let due = TodoMerge.earliestDue(note.map(\.due), clock: clock)
         XCTAssertEqual(due, .time(at(2026, 10, 20, 9)), "Tuesday 09:00 comes before any time on Wednesday")
         let title = try XCTUnwrap(TodoMerge.title(transcript: "order Reach toothbrushes on Amazon",
-                                                  titles: note.map(\.title)))
+                                                  titles: note.map(\.title), hasDue: due != nil))
         XCTAssertEqual(title, "Order Reach toothbrushes on Amazon", "a short note reads as it was said")
 
         let merged = try XCTUnwrap(state.mergeNote(ids: note.map(\.id), title: title, due: due))
@@ -406,13 +406,24 @@ final class TodoStoreTests: XCTestCase {
     }
 
     func testKeepAsOneTitleIsTheWordsSaidForAShortNoteOtherwiseTheTitlesJoined() {
-        XCTAssertEqual(TodoMerge.title(transcript: "  um order Reach toothbrushes on Amazon. ", titles: ["A", "B"]),
-                       "Um order Reach toothbrushes on Amazon")
+        XCTAssertEqual(TodoMerge.title(transcript: "  um order Reach toothbrushes on Amazon. ", titles: ["A", "B"], hasDue: false),
+                       "Order Reach toothbrushes on Amazon", "leading filler goes, as in a rebuilt title")
+        XCTAssertEqual(TodoMerge.title(transcript: "Um so I need to order Reach toothbrushes and floss", titles: ["A", "B"],
+                                       hasDue: false), "Order Reach toothbrushes and floss")
+        XCTAssertEqual(TodoMerge.title(transcript: "Order. Reach toothbrushes on Amazon.", titles: ["A", "B"], hasDue: false),
+                       "Order Reach toothbrushes on Amazon", "a pause inside the note is not kept")
+        XCTAssertEqual(TodoMerge.title(transcript: "buy milk, eggs and bread", titles: ["A", "B"], hasDue: false),
+                       "Buy milk, eggs and bread", "a list keeps its commas")
+        XCTAssertEqual(TodoMerge.title(transcript: "Tomorrow at 9 call the dentist and buy milk", titles: ["A", "B"], hasDue: true),
+                       "Call the dentist and buy milk", "the due date carries the day and time")
+        XCTAssertEqual(TodoMerge.title(transcript: "Tomorrow at 9 call the dentist and buy milk", titles: ["A", "B"], hasDue: false),
+                       "Tomorrow at 9 call the dentist and buy milk", "with no due date, the day stays in the words")
         let long = "so I need to call the dentist and also email Priya the deck and then buy milk eggs and bread"
-        XCTAssertEqual(TodoMerge.title(transcript: long, titles: ["Call the dentist", "Email Priya the deck", "Buy milk"]),
+        XCTAssertEqual(TodoMerge.title(transcript: long, titles: ["Call the dentist", "Email Priya the deck", "Buy milk"],
+                                       hasDue: false),
                        "Call the dentist, Email Priya the deck, Buy milk", "past 12 words: the titles, joined")
         let titles = Array(repeating: "Pick up the parcel from the post office on the high street", count: 4)
-        let joined = TodoMerge.title(transcript: long, titles: titles) ?? ""
+        let joined = TodoMerge.title(transcript: long, titles: titles, hasDue: false) ?? ""
         XCTAssertLessThanOrEqual(joined.count, TodoText.maxTitleLength, "never a paragraph")
         XCTAssertNil(TodoMerge.earliestDue([nil, nil], clock: londonClock()))
         XCTAssertEqual(TodoMerge.earliestDue([nil, .day(DayKey(year: 2026, month: 10, day: 22)),

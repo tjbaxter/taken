@@ -389,28 +389,6 @@ enum TodoOrdering {
     }
 }
 
-/// Keep as one: what a split note reads as once it is put back together. Pure, so the tests pin it.
-enum TodoMerge {
-    /// A note this short reads best as it was said.
-    static let maxSpokenWords = 12
-
-    /// The words as they were said when the note was 12 words or fewer ("Order Reach toothbrushes on Amazon"),
-    /// otherwise the tasks' titles in the order said, joined with commas. Cleaned like every title, so at most
-    /// `TodoText.maxTitleLength` characters: the list stays short lines, never paragraphs.
-    static func title(transcript: String, titles: [String]) -> String? {
-        let words = transcript.split(whereSeparator: { $0.isWhitespace }).count
-        if words > 0, words <= maxSpokenWords, let spoken = TodoText.clean(transcript) { return spoken }
-        return TodoText.clean(titles.joined(separator: ", "))
-    }
-
-    /// The soonest of the due dates, ordered as the list orders them (a day alone is due by its end), or nil.
-    static func earliestDue(_ dues: [TodoDue?], clock: DayClock) -> TodoDue? {
-        dues.compactMap { $0 }.min { a, b in
-            (TodoOrdering.sortDate(a, clock: clock) ?? .distantFuture) < (TodoOrdering.sortDate(b, clock: clock) ?? .distantFuture)
-        }
-    }
-}
-
 /// How a task reads: due labels, spoken labels, cleaned titles.
 enum TodoText {
     private static let weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]

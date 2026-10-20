@@ -56,9 +56,13 @@ final class NotificationHandler: NSObject, UNUserNotificationCenterDelegate, @un
     func userNotificationCenter(_ center: UNUserNotificationCenter,
                                 didReceive response: UNNotificationResponse) async {
         let request = response.notification.request
-        // A to-do's due-time notification opens the To-do tab.
+        // A to-do's due-time notification opens the To-do tab on the list that holds the to-do.
         if TodoNotifications.isTodo(request.identifier) {
-            await MainActor.run { TodoCaptureRoute.shared.showList() }
+            let id = TodoNotifications.taskID(request.identifier)
+            await MainActor.run {
+                if let id { TodoModel.shared.reveal(id) }
+                TodoCaptureRoute.shared.showList()
+            }
             return
         }
         let day = Reminders.nudgeDay(identifier: request.identifier, userInfo: request.content.userInfo)

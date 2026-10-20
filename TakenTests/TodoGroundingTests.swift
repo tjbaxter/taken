@@ -185,6 +185,92 @@ final class TodoGroundingTests: XCTestCase {
         XCTAssertEqual(twice.count, 2)
     }
 
+    // A task that was said is never dropped because its `spoken` copy is a little off: it places by its title, or with
+    // one word missed in a short span, and the rest of the note cannot hide the loss (the whole-note fallback only runs
+    // when nothing is left).
+    func testASaidTaskWithASlightlyOffSpokenCopyIsKept() {
+        XCTAssertEqual(saved([RawTodo(spoken: "I have got to renew the car tax", title: "Renew the car tax"),
+                              RawTodo(spoken: "pick up dog food", title: "Pick up dog food")],
+                             "I've gotta renew the car tax and pick up dog food").map(\.title),
+                       ["Renew the car tax", "Pick up dog food"], "a contraction: placed by its title")
+        XCTAssertEqual(saved([RawTodo(spoken: "email Priya the deck", title: "Email Priya the deck"),
+                              RawTodo(spoken: "call the dentist", title: "Call the dentist")],
+                             "I need to e-mail Priya the deck and call the dentist").map(\.title),
+                       ["Email Priya the deck", "Call the dentist"], "e-mail and email are one word")
+        XCTAssertEqual(saved([RawTodo(spoken: "e-mail Sam the invoice", title: "Email Sam the invoice"),
+                              RawTodo(spoken: "call mum", title: "Call mum")],
+                             "Email Sam the invoice and call mum").map(\.title), ["Email Sam the invoice", "Call mum"])
+        XCTAssertEqual(saved([RawTodo(spoken: "call the vet", title: "Call the vet"),
+                              RawTodo(spoken: "pick up dog food", title: "Pick up dog food")],
+                             "Ring the vet, then pick up dog food").map(\.title),
+                       ["Call the vet", "Pick up dog food"], "one word paraphrased in three")
+        XCTAssertEqual(saved([RawTodo(spoken: "call mom", title: "Call mom"),
+                              RawTodo(spoken: "book the dentist", title: "Book the dentist")],
+                             "Call mum and book the dentist").map(\.title),
+                       ["Call mum", "Book the dentist"], "one word missed in two, the title rebuilt from the words said")
+        XCTAssertEqual(SpokenNote("I need to e-mail Priya").aligned(["email", "priya"]), ["e", "mail", "priya"])
+        XCTAssertEqual(SpokenNote("email Sam").aligned(["e", "mail", "sam"]), ["email", "sam"])
+        XCTAssertEqual(SpokenNote("call the bank").aligned(["call", "the", "bank"]), ["call", "the", "bank"])
+    }
+
+    // Two actions split by "and" or a comma stay two, even when the model carries a word of the first into the second
+    // title; a list split into things is still one task (testAListSplitIntoThingsIsOneTask).
+    func testACarriedContextWordDoesNotJoinTwoActions() {
+        let landlord = RawTodo(spoken: "Email the landlord about the boiler", title: "Email the landlord about the boiler")
+        let plumber = RawTodo(spoken: "call a plumber", title: "Call a plumber about the boiler")
+        for note in ["Email the landlord about the boiler and call a plumber", "Email the landlord about the boiler, call a plumber"] {
+            XCTAssertEqual(saved([landlord, plumber], note).map(\.title),
+                           ["Email the landlord about the boiler", "Call a plumber about the boiler"], note)
+        }
+        // Merged on overlapping words, a title cut at 8 words drops the later action whole, never ends on its verb.
+        let overlapping = saved([RawTodo(spoken: "Email the landlord about the boiler and call", title: "Email the landlord"),
+                                 RawTodo(spoken: "call a plumber", title: "Call a plumber")],
+                                "Email the landlord about the boiler and call a plumber")
+        XCTAssertEqual(overlapping.map(\.title), ["Email the landlord about the boiler"])
+    }
+
+    // A shop or website the model made its own task ("on Amazon", "from Boots") joins the action before it, in a note of
+    // any length.
+    func testAShopSplitFromItsActionJoinsIt() {
+        XCTAssertEqual(saved([RawTodo(spoken: "order Reach toothbrushes", title: "Order Reach toothbrushes"),
+                              RawTodo(spoken: "on Amazon", title: "Shop on Amazon")],
+                             "So I need to order Reach toothbrushes on Amazon").map(\.title),
+                       ["Order Reach toothbrushes on Amazon"])
+        XCTAssertEqual(saved([RawTodo(spoken: "order some Reach toothbrushes", title: "Order Reach toothbrushes"),
+                              RawTodo(spoken: "on Amazon", title: "Buy on Amazon")],
+                             "Remind me to order some Reach toothbrushes on Amazon").map(\.title),
+                       ["Order some Reach toothbrushes on Amazon"])
+        XCTAssertEqual(saved([RawTodo(spoken: "grab Dove shampoo", title: "Grab Dove shampoo"),
+                              RawTodo(spoken: "from Boots", title: "Go to Boots"),
+                              RawTodo(spoken: "email Priya", title: "Email Priya")],
+                             "Need to grab Dove shampoo from Boots and email Priya").map(\.title),
+                       ["Grab Dove shampoo from Boots", "Email Priya"], "the prompt's own example")
+        XCTAssertTrue(SpokenNote("order Reach toothbrushes on Amazon").isAttachment(WordSpan(start: 3, end: 4)))
+        XCTAssertFalse(SpokenNote("email Priya in the meantime book the dentist").isAttachment(WordSpan(start: 2, end: 7)),
+                       "more than one content word is a task of its own")
+    }
+
+    // Two tasks the model gave their own times are two timed things: neither G3 nor G4 makes them one, and no
+    // notification is lost.
+    func testTasksWithTheirOwnTimesStayApart() {
+        let gym = RawTodo(spoken: "Gym at 6", title: "Gym", dueISO8601: "2026-10-19T18:00:00", hasTime: true)
+        let mum = RawTodo(spoken: "Call mum at 8", title: "Call mum", dueISO8601: "2026-10-19T20:00:00", hasTime: true)
+        for note in ["Gym at 6. Call mum at 8.", "gym at 6 call mum at 8"] {
+            let drafts = saved([gym, mum], note)
+            XCTAssertEqual(drafts.map(\.title), ["Gym", "Call mum"], note)
+            XCTAssertEqual(drafts.map(\.due), [.time(at(2026, 10, 19, 18)), .time(at(2026, 10, 19, 20))], note)
+        }
+        XCTAssertEqual(saved([RawTodo(spoken: "Gym at 6", title: "Gym"), RawTodo(spoken: "Call mum at 8", title: "Call mum")],
+                             "Gym at 6. Call mum at 8.").map(\.title), ["Gym", "Call mum"],
+                       "a piece with its own time stands alone across a full stop")
+        let dentist = saved([RawTodo(spoken: "Dentist tomorrow", title: "Dentist", dueISO8601: "2026-10-20"),
+                             RawTodo(spoken: "Call mum", title: "Call mum")], "Dentist tomorrow. Call mum.")
+        XCTAssertEqual(dentist.map(\.title), ["Dentist", "Call mum"])
+        XCTAssertEqual(dentist.first?.due, .day(DayKey(year: 2026, month: 10, day: 20)))
+        XCTAssertFalse(SpokenNote("Gym at 6. Call mum at 8.").isOneThought)
+        XCTAssertTrue(SpokenNote("Order Reach toothbrushes. On Amazon.").isOneThought)
+    }
+
     func testAFuzzySpanStillPlaces() {
         let note = "Anyway the main thing is send the Q3 deck to Priya by Thursday"
         XCTAssertEqual(saved([RawTodo(spoken: "send the Q3 deck over to Priya", title: "Send the Q3 deck to Priya")], note).map(\.title),
