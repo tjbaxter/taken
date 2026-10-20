@@ -4,8 +4,9 @@ import UIKit
 import UserNotifications
 import WidgetKit
 
-/// The To-do tab: one tap starts listening, the words show as they are said, a pause of about 1.5 s (or a second tap)
-/// stops, and the on-device model sorts the ramble into tasks. Reads and writes go through `TodoStore`.
+/// The To-do tab: one tap starts listening, the words show as they are said, a second tap finishes (30 s of quiet or 5
+/// minutes stop it too), and the on-device model sorts the ramble into tasks, a long one part by part. Reads and writes
+/// go through `TodoStore`.
 @MainActor
 @Observable
 final class TodoModel {
@@ -38,6 +39,12 @@ final class TodoModel {
         case unavailable
     }
 
+    /// After the stop, the part of a long note being sorted: "part 2 of 5".
+    struct SortingProgress: Equatable, Sendable {
+        let part: Int
+        let of: Int
+    }
+
     let store: TodoStore
     let isDemo: Bool
     let launchScreen: String?
@@ -49,7 +56,7 @@ final class TodoModel {
     private(set) var transcript = ""
     /// Recent input levels from 0 to 1, oldest first, for the waveform.
     private(set) var levels: [Double]
-    /// A one-line note under the list ("Nothing heard...", "Automatic sorting needs Apple Intelligence.").
+    /// A one-line note under the list ("Nothing heard...", "Saved as you said it...").
     private(set) var notice: String?
     private(set) var blocker: Blocker?
     /// Tasks that just came in from a note, drawn with a short highlight.
@@ -61,24 +68,33 @@ final class TodoModel {
     /// "3 to-dos from your note, Keep as one": for `keepOfferDuration`, or until the list changes, the mic is tapped or
     /// the tab is left, whichever comes first. VoiceOver gets the same as an action on each of the note's tasks.
     private(set) var keepOffer: KeepOffer?
-    /// The note being sorted: saved whole already, kept out of the list until its tasks replace it.
-    private(set) var sortingNote: UUID?
-    /// The list a note goes to: the one in view when the mic was tapped (or a quick capture asked), fixed until the
-    /// note is saved. The live card names it, so the destination shows before a word is said. The model never
-    /// chooses the list.
+    /// The notes being sorted: saved as said already, kept out of the list until their tasks replace them.
+    private(set) var sortingNotes: Set<UUID> = []
+    /// The list a note goes to: the top list when the mic was tapped (or a quick capture asked), unless the chip on the
+    /// Listening card or the type sheet sent this note to the other one. Fixed once the note is being sorted. The model
+    /// never chooses the list.
     private(set) var captureArea: TodoArea = .personal
     /// The list chosen for the current note on its chip (`setDestination(_:)`), nil when none was. For that note only:
     /// it goes once the note is saved or comes to nothing, so the next note starts on the top list again.
     private(set) var captureOverride: TodoArea?
     /// A task the list should bring into view; the list clears it once it has scrolled there.
     var scrollTarget: UUID?
+    /// When the note being heard started, for the time on the Listening card.
+    private(set) var listeningSince: Date?
+    /// A fixed time on the Listening card instead of a running one, for the demo's screenshots.
+    private(set) var demoElapsed: TimeInterval?
+    /// After the stop, which part of a long note is being sorted. Nil for a note of one part.
+    private(set) var sortingProgress: SortingProgress?
     /// The moment the list reads from (due labels, Done today). Moves with the clock while the tab is open.
     private(set) var now: Date
 
     @ObservationIgnored private var capture: SpeechCapture?
-    @ObservationIgnored private var extractor: (any TaskExtractor)?
-    /// The sorter for each note: the best this iPhone has (`TodoExtractors.best`), or canned answers in tests.
-    @ObservationIgnored private let makeExtractor: @MainActor () -> any TaskExtractor
+    @ObservationIgnored private var sorter: NoteSorter?
+    /// What sorts each note: the best this iPhone has (`TodoSorters.best`), or canned answers in tests.
+    @ObservationIgnored private let makeSorter: @MainActor () -> any ChunkSorting
+    @ObservationIgnored private let budget: NoteSorter.Budget
+    /// The moment, zone and day-start the note is sorted against, taken at the tap.
+    @ObservationIgnored private var noteContext: TodoContext?
     @ObservationIgnored private var eventsTask: Task<Void, Never>?
     @ObservationIgnored private var watchTask: Task<Void, Never>?
     @ObservationIgnored private var noticeTask: Task<Void, Never>?
@@ -89,28 +105,45 @@ final class TodoModel {
     @ObservationIgnored private var noiseFloor: Float = -60
     @ObservationIgnored private var wordCount = 0
     @ObservationIgnored private var levelTick = 0
+    @ObservationIgnored private var capWarned = false
+    /// The parts of this note are sorted while it is said (SpeechAnalyzer).
+    @ObservationIgnored private var sortsWhileListening = false
+    /// The finished words last handed to the sorter.
+    @ObservationIgnored private var finishedHeard = ""
     @ObservationIgnored private(set) var dayStartHour = 4
     @ObservationIgnored private(set) var hapticsOn = true
+    #if DEBUG || TAKEN_INTERNAL
+    /// The internal voice note log: on only in a build carrying the TakenInternalPro marker; tests give it a file.
+    @ObservationIgnored var voiceLog: VoiceNoteLogStore? = InternalBuild.unlocksPro ? .shared : nil
+    /// The note being recorded for it.
+    @ObservationIgnored var trace: VoiceNoteTrace?
+    #endif
 
     nonisolated static let levelCount = 32
-    /// Quiet after speech this long stops listening.
-    nonisolated static let silenceToStop: TimeInterval = 1.5
-    /// Nothing said this long after the tap stops listening.
-    nonisolated static let nothingHeardAfter: TimeInterval = 8
-    /// One note is at most this long.
-    nonisolated static let longestNote: TimeInterval = 120
-    /// The model gets this long to sort a note before it is saved whole.
-    nonisolated static let sortingLimit: Duration = .seconds(15)
+    /// Quiet this long stops listening: no new words and nothing above the room's noise, words or not. Apple's own
+    /// dictation stops after 30 s of silence; a pause to think is never the end of a note.
+    nonisolated static let silenceToStop: TimeInterval = 30
+    /// One note is at most this long. Tom asked for at least 5 minutes; a tap on the mic starts the next note.
+    nonisolated static let longestNote: TimeInterval = 300
+    /// From here the Listening card counts down, after one soft tap.
+    nonisolated static let capWarningAt: TimeInterval = 240
     /// Keep as one stays on screen this long at most.
     nonisolated static let keepOfferDuration: Duration = .seconds(10)
+    /// The line after a note stopped at 5 minutes stays this long.
+    nonisolated static let capNoticeDuration: Duration = .seconds(8)
+    /// The demo's Listening card: 0:12 (`-screen todo-recording`), 4:20 with 0:40 left (`todo-cap`).
+    nonisolated static let demoRecordingElapsed: TimeInterval = 12
+    nonisolated static let demoCapElapsed: TimeInterval = 260
 
     init(store: TodoStore, isDemo: Bool, launchScreen: String?, clockNow: @escaping @Sendable () -> Date,
-         makeExtractor: @escaping @MainActor () -> any TaskExtractor = { TodoExtractors.best() }) {
+         makeSorter: @escaping @MainActor () -> any ChunkSorting = { TodoSorters.best() },
+         budget: NoteSorter.Budget = .standard) {
         self.store = store
         self.isDemo = isDemo
         self.launchScreen = launchScreen
         self.clockNow = clockNow
-        self.makeExtractor = makeExtractor
+        self.makeSorter = makeSorter
+        self.budget = budget
         self.state = store.load()
         self.now = clockNow()
         self.levels = Array(repeating: 0, count: Self.levelCount)
@@ -128,17 +161,17 @@ final class TodoModel {
         let demoNow = DemoData.referenceNow()
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("todos-demo-\(UUID().uuidString).json")
         let store = TodoStore(fileURL: url)
+        let recording = screen == "todo-recording" || screen == "todo-cap"
         let seeded = screen == "todo-empty"
             ? TodoState()
-            : TodoDemo.state(now: demoNow, recording: screen == "todo-recording", inView: screen == "todo-work" ? .work : .personal)
+            : TodoDemo.state(now: demoNow, recording: recording, inView: screen == "todo-work" ? .work : .personal)
         try? store.replace(with: seeded)
         let model = TodoModel(store: store, isDemo: true, launchScreen: screen, clockNow: { demoNow })
-        if screen == "todo-recording" { model.showDemoRecording() }
+        if recording { model.showDemoRecording() }
         return model
     }
 
-    /// `-screen todo`, `todo-work`, `todo-recording` and `todo-empty` open on the To-do tab (`todo-work` with Work in
-    /// view).
+    /// `-screen todo`, `todo-work`, `todo-recording`, `todo-cap`, `todo-type` and `todo-empty` open on the To-do tab.
     static func opensOnTodo(_ launchScreen: String?) -> Bool {
         launchScreen?.hasPrefix("todo") == true
     }
@@ -146,21 +179,26 @@ final class TodoModel {
     // MARK: Reading
 
     var clock: DayClock { DayClock(dayStartHour: dayStartHour) }
-    /// The list in view: Personal or Work. One at a time, never mixed.
+    /// The list in view while the switch exists (`lastArea`). Nothing reads it for where a note goes.
     var area: TodoArea { state.lastArea }
     var openTasks: [TodoTask] { openTasks(in: area) }
     var doneToday: [TodoTask] { state.doneTasks(on: clock.day(for: now), in: area, clock: clock) }
     var isEmpty: Bool { openTasks.isEmpty && doneToday.isEmpty }
     var isListening: Bool { phase == .listening }
 
-    /// Tasks kept out of the list for now: the note still being sorted, saved whole until its tasks replace it.
-    var hiddenTaskIDs: Set<UUID> { sortingNote.map { [$0] } ?? [] }
+    /// Tasks kept out of the list for now: the lines of each note still being sorted, saved as said until its tasks
+    /// replace them.
+    var hiddenTaskIDs: Set<UUID> {
+        let notes = sortingNotes
+        guard !notes.isEmpty else { return [] }
+        return Set(state.tasks.filter { notes.contains($0.noteId) }.map(\.id))
+    }
 
     /// Where the next note goes, and the current one while it is heard: the top list, unless its chip changed it for
     /// this note.
     var destination: TodoArea { captureOverride ?? state.areaOrder.first ?? .personal }
 
-    /// One list's open tasks, without the note still being sorted.
+    /// One list's open tasks, without the notes still being sorted.
     func openTasks(in area: TodoArea) -> [TodoTask] {
         let hidden = hiddenTaskIDs
         return state.openTasks(in: area, clock: clock).filter { !hidden.contains($0.id) }
@@ -211,18 +249,19 @@ final class TodoModel {
 
     // MARK: Capture
 
-    /// The mic button: start, or stop and sort.
+    /// The mic button: start, or finish and sort.
     func micTapped(_ app: AppModel) {
         dismissKeepOffer()
         attach(app)
         switch phase {
         case .listening:
-            Task { await finishListening() }
+            Task { await finishListening(.tap) }
         case .starting, .sorting:
             break
         case .idle:
-            // The list in view at the tap is where the note goes, even if the paywall comes first.
-            let area = self.area
+            // A new note goes to the top list, even if the paywall comes first; its chip can send it to the other.
+            captureOverride = nil
+            let area = destination
             whenAllowed(app) { [weak self] in
                 guard let self else { return }
                 Task { await self.startListening(into: area) }
@@ -230,13 +269,14 @@ final class TodoModel {
         }
     }
 
-    /// A quick capture (Siri, the control, the Lock Screen, the quick action) asked to start listening. Taken opens on
-    /// the list last in view and records into it.
+    /// A quick capture (Siri, the control, the Lock Screen, the quick action) asked to start listening. The note goes
+    /// to the top list.
     func startFromRequest(_ app: AppModel) {
         dismissKeepOffer()
         attach(app)
         guard phase == .idle else { return }
-        let area = self.area
+        captureOverride = nil
+        let area = destination
         whenAllowed(app) { [weak self] in
             guard let self else { return }
             // Siri may still be handing the microphone back: a busy microphone gets two more tries.
@@ -262,13 +302,22 @@ final class TodoModel {
 
     /// The chip on the Listening card and the type sheet: the current note goes to `area` instead (a note being heard
     /// changes list at once). For this note only, never saved, and fixed once the note is being sorted. Nothing is
-    /// announced: the microphone would hear it. Starting a note still reads the list in view (`area`) until the one
-    /// list replaces the switch.
+    /// announced: the microphone would hear it.
     func setDestination(_ area: TodoArea) {
         guard phase != .sorting, area != destination else { return }
         Haptics.selection(hapticsOn)
         captureOverride = area
         if phase == .starting || phase == .listening { captureArea = area }
+        #if DEBUG || TAKEN_INTERNAL
+        trace?.chose(area)
+        #endif
+    }
+
+    /// The type sheet opens and closes on the top list: a chip changed there and never used is not kept for the next
+    /// note.
+    func resetDestination() {
+        guard phase == .idle else { return }
+        captureOverride = nil
     }
 
     private func startListening(into area: TodoArea, busyRetries: Int = 0) async {
@@ -279,35 +328,46 @@ final class TodoModel {
             showDemoRecording()
             return
         }
-        phase = .starting
+        setPhase(.starting)
         blocker = nil
         clearNotice()
         transcript = ""
         levels = Array(repeating: 0, count: Self.levelCount)
+        #if DEBUG || TAKEN_INTERNAL
+        if voiceLog != nil { trace = VoiceNoteTrace(input: .voice, list: area) }
+        #endif
         let permission = await VoicePermissions.request()
         guard permission == .granted else {
             blocker = permission == .microphoneDenied ? .microphone : .speech
-            phase = .idle
+            setPhase(.idle)
             captureOverride = nil
+            dropTrace()
             return
         }
-        let extractor = makeExtractor()
-        self.extractor = extractor
-        // The model loads while the person talks, so the tasks come back about a second after they stop.
-        Task.detached(priority: .userInitiated) { await extractor.prepare() }
+        // One sorter and one moment per note, from the tap. The model loads while the person talks, so the tasks come
+        // back about a second after they stop.
+        let chunkSorter = makeSorter()
+        let context = TodoContext(now: clockNow(), timeZone: .current, dayStartHour: dayStartHour)
+        noteContext = context
+        sorter = makeNoteSorter(chunkSorter, context: context)
+        Task.detached(priority: .userInitiated) { await chunkSorter.prepare() }
         let capture = SpeechCapture()
         do {
             try await capture.start(locale: .current)
         } catch SpeechCaptureError.unavailable {
-            self.extractor = nil
+            sorter = nil
+            noteContext = nil
             blocker = .unavailable
-            phase = .idle
+            setPhase(.idle)
             captureOverride = nil
+            dropTrace()
             return
         } catch {
             // A call or another app has the microphone.
-            self.extractor = nil
-            phase = .idle
+            sorter = nil
+            noteContext = nil
+            setPhase(.idle)
+            dropTrace()
             if busyRetries > 0 {
                 try? await Task.sleep(for: .milliseconds(700))
                 await startListening(into: area, busyRetries: busyRetries - 1)
@@ -322,7 +382,15 @@ final class TodoModel {
         lastVoiceAt = startedAt
         noiseFloor = -60
         wordCount = 0
-        phase = .listening
+        capWarned = false
+        finishedHeard = ""
+        demoElapsed = nil
+        listeningSince = startedAt
+        sortsWhileListening = NoteSorter.sortsWhileListening && capture.engine == .analyzer
+        setPhase(.listening)
+        #if DEBUG || TAKEN_INTERNAL
+        trace?.listening(context: context, capture: capture)
+        #endif
         // No spoken "listening" for VoiceOver: the microphone would hear it. The haptic and the button say it.
         TodoHaptics.soft(hapticsOn)
         eventsTask = Task { [weak self] in
@@ -334,9 +402,10 @@ final class TodoModel {
             while !Task.isCancelled {
                 try? await Task.sleep(for: .milliseconds(150))
                 guard let self, self.phase == .listening else { return }
-                if TodoModel.shouldStop(now: Date(), startedAt: self.startedAt, lastVoiceAt: self.lastVoiceAt,
-                                        heardWords: self.wordCount > 0) {
-                    await self.finishListening()
+                let now = Date()
+                self.tick(now: now)
+                if let reason = TodoModel.shouldStop(now: now, startedAt: self.startedAt, lastVoiceAt: self.lastVoiceAt) {
+                    await self.finishListening(reason)
                     return
                 }
             }
@@ -345,6 +414,9 @@ final class TodoModel {
 
     private func handle(_ event: SpeechCaptureEvent) {
         guard phase == .listening else { return }
+        #if DEBUG || TAKEN_INTERNAL
+        trace?.eventCount += 1
+        #endif
         switch event {
         case .text(let text):
             let words = text.split(whereSeparator: { $0.isWhitespace }).count
@@ -368,95 +440,152 @@ final class TodoModel {
             next.append(Double(max(0, min(1, (decibels + 55) / 45))))
             levels = next
         case .interrupted:
-            Task { await finishListening() }
+            Task { await finishListening(.interrupted) }
         }
     }
 
-    /// Stop listening: after a pause of about 1.5 s once words have come, after 8 s with nothing said, or at 2 minutes.
-    nonisolated static func shouldStop(now: Date, startedAt: Date, lastVoiceAt: Date, heardWords: Bool) -> Bool {
-        let elapsed = now.timeIntervalSince(startedAt)
-        if elapsed >= longestNote { return true }
-        let quiet = now.timeIntervalSince(lastVoiceAt)
-        if heardWords { return quiet >= silenceToStop }
-        return elapsed >= nothingHeardAfter && quiet >= silenceToStop
+    /// Every few hundred milliseconds while listening: one soft tap at 4:00, and on SpeechAnalyzer the finished words
+    /// to the sorter, read from the capture's lock-guarded transcript.
+    private func tick(now: Date) {
+        if !capWarned, Self.capWarning(elapsed: now.timeIntervalSince(startedAt)) {
+            capWarned = true
+            // A tap only: no sound and no VoiceOver speech, the microphone is on.
+            TodoHaptics.soft(hapticsOn)
+        }
+        guard sortsWhileListening, let capture, let sorter else { return }
+        let finished = capture.finishedText()
+        guard finished != finishedHeard else { return }
+        finishedHeard = finished
+        Task { await sorter.listen(finished: finished) }
+    }
+
+    /// A tap finishes a note. Listening also stops after `silenceToStop` of quiet, words or not (a quiet stop with no
+    /// words says "Nothing heard"), and at `longestNote`.
+    nonisolated static func shouldStop(now: Date, startedAt: Date, lastVoiceAt: Date) -> TodoStopReason? {
+        if now.timeIntervalSince(startedAt) >= longestNote { return .cap }
+        if now.timeIntervalSince(lastVoiceAt) >= silenceToStop { return .quiet }
+        return nil
+    }
+
+    /// From 4:00 the card counts down to 5:00.
+    nonisolated static func capWarning(elapsed: TimeInterval) -> Bool { elapsed >= capWarningAt }
+
+    /// The screen stays on only while a note is starting or being heard, and never in the demo.
+    nonisolated static func keepsScreenOn(phase: Phase, isDemo: Bool) -> Bool {
+        !isDemo && (phase == .starting || phase == .listening)
     }
 
     /// Stops listening and sorts what was said. Locking the phone or leaving Taken mid-note lands here too, so iOS is
     /// asked for the time to finish: the words are saved the moment they are known, sorted or not.
-    func finishListening() async {
+    func finishListening(_ reason: TodoStopReason = .tap) async {
         guard phase == .listening, let capture else { return }
-        phase = .sorting
+        setPhase(.sorting)
         watchTask?.cancel()
+        listeningSince = nil
         TodoHaptics.light(hapticsOn)
         let background = BackgroundTime.begin("Saving a voice note")
         defer { background.end() }
+        let live = transcript.trimmingCharacters(in: .whitespacesAndNewlines)
+        #if DEBUG || TAKEN_INTERNAL
+        trace?.stopped(reason, lastVoice: lastVoiceAt.timeIntervalSince(startedAt), words: wordCount)
+        #endif
         let finalText = await capture.finish()
         eventsTask?.cancel()
         self.capture = nil
         let heard = finalText.trimmingCharacters(in: .whitespacesAndNewlines)
-        let words = heard.isEmpty ? transcript.trimmingCharacters(in: .whitespacesAndNewlines) : heard
+        let words = heard.isEmpty ? live : heard
+        #if DEBUG || TAKEN_INTERNAL
+        trace?.heard(live: live, final: heard, speech: capture.diagnostics())
+        #endif
         guard !words.isEmpty else {
-            extractor = nil
+            sorter = nil
+            noteContext = nil
             transcript = ""
-            phase = .idle
+            setPhase(.idle)
             captureOverride = nil
             show(TodoCopy.nothingHeard)
+            saveTrace()
+            dropTrace()
             return
         }
         transcript = words
-        await save(note: words, area: captureArea)
+        await save(note: words, area: captureArea, stoppedAtCap: reason == .cap)
     }
 
     /// Typed instead of said (no microphone, or no on-device speech): the same sorting, the same Pro rule, into the
-    /// list in view.
+    /// top list or the one the type sheet's chip chose.
     func submitTyped(_ text: String, app: AppModel) {
         let words = text.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !words.isEmpty, phase == .idle else { return }
         dismissKeepOffer()
         attach(app)
-        let area = self.area
+        let area = destination
         whenAllowed(app) { [weak self] in
             guard let self, self.phase == .idle else { return }
-            self.phase = .sorting
+            self.setPhase(.sorting)
             self.captureArea = area
             self.transcript = words
+            let chunkSorter = self.makeSorter()
+            let context = TodoContext(now: self.clockNow(), timeZone: .current, dayStartHour: self.dayStartHour)
+            self.noteContext = context
+            self.sorter = self.makeNoteSorter(chunkSorter, context: context)
+            #if DEBUG || TAKEN_INTERNAL
+            if self.voiceLog != nil {
+                self.trace = VoiceNoteTrace(input: .typed, list: area, chipChanged: self.captureOverride != nil)
+                self.trace?.typed(words, context: context)
+            }
+            #endif
+            Task.detached(priority: .userInitiated) { await chunkSorter.prepare() }
             Task {
                 let background = BackgroundTime.begin("Saving typed to-dos")
                 defer { background.end() }
-                await self.save(note: words, area: area)
+                await self.save(note: words, area: area, stoppedAtCap: false)
             }
         }
     }
 
-    private func save(note words: String, area: TodoArea) async {
-        let context = TodoContext(now: clockNow(), timeZone: .current, dayStartHour: dayStartHour)
-        // Saved whole first, out of sight, so nothing said is lost if iOS ends Taken before the model answers. The
-        // model's tasks replace it on the same list.
-        let whole = write { $0.add(TodoValidation.wholeNote(words), area: area, at: context.now) }?.first
-        sortingNote = whole?.id
-        let extractor = self.extractor ?? makeExtractor()
-        self.extractor = nil
-        let extraction = await Self.extract(words, with: extractor, context: context)
-        let drafts = extraction.drafts.isEmpty ? TodoValidation.wholeNote(words) : extraction.drafts
+    private func save(note words: String, area: TodoArea, stoppedAtCap: Bool) async {
+        let context = noteContext ?? TodoContext(now: clockNow(), timeZone: .current, dayStartHour: dayStartHour)
+        let sorter = self.sorter ?? makeNoteSorter(makeSorter(), context: context)
+        self.sorter = nil
+        noteContext = nil
+        // Saved at once as said, out of sight, so nothing said is lost if iOS ends Taken before the model answers. The
+        // sorted tasks replace those lines on the same list.
+        let noteId = UUID()
+        let saved = write { $0.add(TodoValidation.asSaid(words), area: area, noteId: noteId, at: clockNow()) } ?? []
+        if !saved.isEmpty { sortingNotes.insert(noteId) }
+        saveTrace()
+        let parts = await sorter.finish(note: words)
+        let note = TodoValidation.assemble(note: words, parts: parts, context: context)
         let added = withAnimation(.spring(response: 0.42, dampingFraction: 0.82)) { () -> [TodoTask] in
-            defer { sortingNote = nil }
-            if let whole {
-                return write { $0.replaceNote(whole.id, with: drafts, at: context.now) } ?? [whole]
+            defer { sortingNotes.remove(noteId) }
+            if !saved.isEmpty {
+                return write { $0.replaceNote(noteId: noteId, saved: saved, with: note.drafts, at: clockNow()) } ?? saved
             }
-            return write { $0.add(drafts, area: area, at: context.now) } ?? []
+            return write { $0.add(note.drafts, area: area, noteId: noteId, at: clockNow()) } ?? []
         }
         transcript = ""
-        phase = .idle
+        sortingProgress = nil
+        setPhase(.idle)
         captureOverride = nil
+        #if DEBUG || TAKEN_INTERNAL
+        trace?.sorted(parts, drafts: note, saved: added, clock: clock)
+        saveTrace()
+        if let trace, let voiceLog { VoiceNoteTrace.countTokens(of: trace, into: voiceLog) }
+        dropTrace()
+        #endif
         guard !added.isEmpty else { return }
         arrived = Set(added.map(\.id))
+        scrollTarget = added.first?.id
         TodoHaptics.success(hapticsOn)
         announce(added.count == 1 ? "1 to-do added: \(added[0].title)." : "\(added.count) to-dos added.")
-        // The sorting line only shows when the model did not sort, and Keep as one only when it did and split the
-        // note, so the two never compete for the line.
-        if extraction.sorting == .model && added.count >= 2 {
+        // One line under the list: the 5-minute stop first, then Keep as one (a short note the model split), then how
+        // the note was saved when the model did not sort all of it.
+        if stoppedAtCap {
+            show(TodoCopy.stoppedAtCap, for: Self.capNoticeDuration)
+        } else if note.keepable {
             offerKeep(KeepOffer(noteId: added[0].noteId, ids: added.map(\.id), transcript: words))
-        } else if let line = TodoCopy.sortingNote(extraction.sorting) {
+        } else if let line = TodoCopy.sortingNote(note.sorting) {
             show(line, for: .seconds(8))
         }
         Task { [weak self] in
@@ -465,11 +594,13 @@ final class TodoModel {
         }
     }
 
-    /// The extractor's answer, or the whole note as one task when it takes longer than `limit`.
-    nonisolated static func extract(_ words: String, with extractor: any TaskExtractor, context: TodoContext,
-                                    limit: Duration = sortingLimit) async -> TodoExtraction {
-        await firstResult(of: { await extractor.extract(transcript: words, context: context) }, orAfter: limit,
-                          fallback: TodoExtraction(drafts: TodoValidation.wholeNote(words), sorting: .couldNotSort))
+    private func makeNoteSorter(_ chunkSorter: any ChunkSorting, context: TodoContext) -> NoteSorter {
+        NoteSorter(sorter: chunkSorter, context: context, budget: budget) { [weak self] part, total in
+            Task { @MainActor in
+                guard let self, self.phase == .sorting else { return }
+                self.sortingProgress = total > 1 ? SortingProgress(part: part, of: total) : nil
+            }
+        }
     }
 
     /// Stops listening and keeps what was said (the app went to the background mid-note). The background time is asked
@@ -478,9 +609,22 @@ final class TodoModel {
         guard phase == .listening else { return }
         let background = BackgroundTime.begin("Saving a voice note")
         Task {
-            await finishListening()
+            await finishListening(.leftApp)
             background.end()
         }
+    }
+
+    /// Every phase change. The screen stays on only while a note is starting or being heard: locking the phone ends
+    /// listening, because speech recognition does not run in the background (Apple DTS, forum 53784), so Auto-Lock
+    /// would cut a monologue short. Every way out of listening comes through here, so it never stays on after a note,
+    /// and it is on for 5 minutes at most.
+    /// https://developer.apple.com/forums/thread/53784
+    /// https://developer.apple.com/documentation/uikit/uiapplication/isidletimerdisabled
+    private func setPhase(_ next: Phase) {
+        phase = next
+        guard !isDemo else { return }
+        let keepOn = Self.keepsScreenOn(phase: next, isDemo: isDemo)
+        if UIApplication.shared.isIdleTimerDisabled != keepOn { UIApplication.shared.isIdleTimerDisabled = keepOn }
     }
 
     // MARK: Tasks
@@ -527,21 +671,26 @@ final class TodoModel {
         announce("\(task.title), moved to \(area.title).")
     }
 
-    /// The Personal and Work switch. The choice is `lastArea` in todos.json, so Taken reopens on it, quick captures
-    /// record into it and the Lock Screen widget shows it. Fixed while a note is being heard or sorted: the note goes
-    /// to the list the live card names.
+    /// The Personal and Work switch, while it exists: `lastArea` in todos.json. It no longer decides where a note goes
+    /// (the top list does). Fixed while a note is heard or sorted.
     func select(_ area: TodoArea) {
         guard area != self.area, phase == .idle else { return }
         Haptics.selection(hapticsOn)
         withAnimation(.snappy(duration: 0.25)) { _ = write { $0.lastArea = area } }
     }
 
-    /// A tapped due-time notification: the list holding its task comes into view, so the reminder lands on the task it
-    /// named (notifications cover both lists). Left alone while a note is heard or sorted, as the switch is.
+    /// A tapped due-time notification: the list scrolls to its task and washes it for a moment (notifications cover
+    /// both lists). Left alone while a note is heard or sorted; it never changes where notes go.
     func reveal(_ id: UUID) {
         refresh()
-        guard phase == .idle, let task = state.task(id), task.area != area else { return }
-        _ = write { $0.lastArea = task.area }
+        guard phase == .idle, state.task(id) != nil else { return }
+        scrollTarget = id
+        arrived = [id]
+        Task { [weak self] in
+            try? await Task.sleep(for: .seconds(1.6))
+            guard let self, self.arrived == [id] else { return }
+            withAnimation(.easeOut(duration: 0.4)) { self.arrived = [] }
+        }
     }
 
     func delete(_ task: TodoTask) {
@@ -567,9 +716,12 @@ final class TodoModel {
         TodoHaptics.soft(hapticsOn)
     }
 
-    /// Settings > Erase all data: the tasks go too. The first free note stays used.
+    /// Settings > Erase all data: the tasks go too, and the internal voice note log. The first free note stays used.
     func eraseAll() {
         write { $0.eraseAll() }
+        #if DEBUG || TAKEN_INTERNAL
+        (voiceLog ?? .shared).erase()
+        #endif
     }
 
     // MARK: Keep as one
@@ -632,11 +784,11 @@ final class TodoModel {
             dismissKeepOffer()
             if !isDemo {
                 let tasks = result.state.tasks
-                // Switching between Personal and Work changes no task, so no notification needs rebuilding.
+                // A change to the order of the lists changes no task, so no notification needs rebuilding.
                 if tasks != before {
                     Task { await TodoNotificationScheduler.shared.reschedule(tasks) }
                 }
-                // The Lock Screen widget shows the list in view, so it reloads when either changes.
+                // The Lock Screen widget reads the file, so it reloads on every write.
                 WidgetCenter.shared.reloadTimelines(ofKind: TodoCaptureRoute.widgetKind)
             }
             return result.value
@@ -671,14 +823,43 @@ final class TodoModel {
         UIAccessibility.post(notification: .announcement, argument: text)
     }
 
+    // MARK: Voice note log
+
+    /// Writes the note's record now (at the stop, and again once it is saved), so a kill mid-sort still keeps the words.
+    private func saveTrace() {
+        #if DEBUG || TAKEN_INTERNAL
+        if let trace { voiceLog?.save(trace) }
+        #endif
+    }
+
+    private func dropTrace() {
+        #if DEBUG || TAKEN_INTERNAL
+        trace = nil
+        #endif
+    }
+
     // MARK: Demo
 
-    /// `-screen todo-recording`: listening, words on screen, a live-looking waveform. No microphone.
+    /// `-screen todo-recording` and `todo-cap`: listening, words on screen, a live-looking waveform and a fixed time.
+    /// No microphone.
     private func showDemoRecording() {
-        phase = .listening
+        setPhase(.listening)
         transcript = TodoDemo.transcript
         levels = TodoDemo.levels(count: Self.levelCount)
+        listeningSince = nil
+        demoElapsed = launchScreen == "todo-cap" ? Self.demoCapElapsed : Self.demoRecordingElapsed
     }
+}
+
+/// Why a note stopped listening, for the 5-minute line and the internal voice note log.
+enum TodoStopReason: String, Codable, Sendable {
+    case tap
+    case quiet = "quiet 30 s"
+    case cap = "5 minutes"
+    /// A call, Siri or a route change took the microphone.
+    case interrupted
+    /// Taken went to the background: a lock, a swipe home.
+    case leftApp = "left the app"
 }
 
 /// The copy of the To-do tab, in one place (no dashes, never "free", no exclamation marks).
@@ -687,19 +868,26 @@ enum TodoCopy {
     static let listening = "Listening"
     static let sorting = "Sorting into to-dos"
     static let tapToFinish = "Tap to finish"
-    static let needsAppleIntelligence = "Saved as one to-do. Automatic sorting needs Apple Intelligence."
-    static let couldNotSort = "Saved as one to-do. Tap it to edit."
-    static let appleIntelligenceOff = "Saved as one to-do. Turn on Apple Intelligence in Settings to sort notes into to-dos."
-    static let modelNotReady = "Saved as one to-do. Apple Intelligence is still getting ready on this iPhone."
+    /// The Listening card before a word is said.
+    static let sayIt = "Say what you need to do"
+    static let needsAppleIntelligence = "Saved as you said it. Automatic sorting needs Apple Intelligence."
+    static let appleIntelligenceOff = "Saved as you said it. Turn on Apple Intelligence in Settings to sort notes into to-dos."
+    static let modelNotReady = "Saved as you said it. Apple Intelligence is still getting ready on this iPhone."
+    /// The model could not sort any of the note in time.
+    static let allUnsorted = "Saved as you said it, one line per sentence. Tap one to edit."
+    /// It sorted some parts of a long note; the rest is saved as said.
+    static let partUnsorted = "Part of your note was saved as you said it."
+    static let stoppedAtCap = "Stopped at 5 minutes. Tap the mic to keep going."
 
-    /// The line under the list after a note, when it was not sorted into separate to-dos.
+    /// The line under the list after a note, when it was not all sorted into separate to-dos.
     static func sortingNote(_ sorting: TodoSorting) -> String? {
         switch sorting {
         case .model: return nil
+        case .partlySorted: return partUnsorted
         case .needsAppleIntelligence: return needsAppleIntelligence
         case .appleIntelligenceOff: return appleIntelligenceOff
         case .modelNotReady: return modelNotReady
-        case .couldNotSort: return couldNotSort
+        case .couldNotSort: return allUnsorted
         }
     }
     static let microphoneOff = "Microphone access is off for Taken."
@@ -731,12 +919,58 @@ enum TodoCopy {
     /// "Move to Work": the VoiceOver action, named for where the task goes.
     static func moveAction(to area: TodoArea) -> String { "Move to \(area.title)" }
 
-    static let all: [String] = [empty, listening, sorting, tapToFinish, needsAppleIntelligence, couldNotSort,
-                                appleIntelligenceOff, modelNotReady,
+    // The chip on the Listening card and the type sheet.
+
+    /// "Into Personal": the chip's words.
+    static func into(_ area: TodoArea) -> String { "Into \(area.title)" }
+    /// "Goes to Personal": what VoiceOver reads for the chip.
+    static func goesTo(_ area: TodoArea) -> String { "Goes to \(area.title)" }
+    /// "Double tap to send it to Work."
+    static func sendTo(_ area: TodoArea) -> String { "Double tap to send it to \(area.title)." }
+
+    // The time on the Listening card.
+
+    /// "0:12", "1:42": the time heard so far.
+    static func elapsed(_ seconds: Int) -> String {
+        let value = max(0, seconds)
+        return String(format: "%d:%02d", value / 60, value % 60)
+    }
+
+    /// "1:00 left" down to "0:01 left", from 4:00.
+    static func timeLeft(_ seconds: Int) -> String { "\(elapsed(seconds)) left" }
+
+    /// "2 minutes 10 seconds", for VoiceOver.
+    static func spokenElapsed(_ seconds: Int) -> String {
+        let value = max(0, seconds)
+        let (minutes, rest) = (value / 60, value % 60)
+        var parts: [String] = []
+        if minutes > 0 { parts.append(minutes == 1 ? "1 minute" : "\(minutes) minutes") }
+        if rest > 0 || minutes == 0 { parts.append(rest == 1 ? "1 second" : "\(rest) seconds") }
+        return parts.joined(separator: " ")
+    }
+
+    /// "45 seconds left", for VoiceOver.
+    static func spokenTimeLeft(_ seconds: Int) -> String { "\(spokenElapsed(seconds)) left" }
+
+    /// What the card shows for the time: the time heard, or from 4:00 what is left, and whether it is the countdown.
+    static func noteTime(elapsed seconds: TimeInterval) -> (text: String, spoken: String, countdown: Bool) {
+        let heard = Int(seconds)
+        guard TodoModel.capWarning(elapsed: seconds) else { return (elapsed(heard), spokenElapsed(heard), false) }
+        let left = max(0, Int(TodoModel.longestNote) - heard)
+        return (timeLeft(left), spokenTimeLeft(left), true)
+    }
+
+    /// "part 2 of 5": a long note being sorted after the stop.
+    static func part(_ part: Int, of total: Int) -> String { "part \(part) of \(total)" }
+
+    static let all: [String] = [empty, listening, sorting, tapToFinish, sayIt, needsAppleIntelligence,
+                                appleIntelligenceOff, modelNotReady, allUnsorted, partUnsorted, stoppedAtCap,
                                 microphoneOff, speechOff, unavailable, microphoneBusy, nothingHeard, couldNotSave,
                                 openSettings, typeInstead, doneToday, keepAsOne, keptAsOne, fromYourNote(3),
-                                emptyWork, list]
-        + TodoArea.allCases.flatMap { [$0.title, TodoCopy.listeningLine(into: $0), TodoCopy.moveAction(to: $0)] }
+                                emptyWork, list, elapsed(102), timeLeft(60), timeLeft(1), spokenElapsed(130),
+                                spokenTimeLeft(45), part(2, of: 5)]
+        + TodoArea.allCases.flatMap { [$0.title, TodoCopy.listeningLine(into: $0), TodoCopy.moveAction(to: $0),
+                                      TodoCopy.into($0), TodoCopy.goesTo($0), TodoCopy.sendTo($0)] }
 }
 
 @MainActor
