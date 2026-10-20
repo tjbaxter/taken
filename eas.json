@@ -17,6 +17,9 @@
       "extends": "production",
       "env": {
         "TAKEN_INTERNAL_PRO": "1"
+      },
+      "ios": {
+        "config": "build-ios-internal.yml"
       }
     }
   },

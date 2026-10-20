@@ -10,6 +10,11 @@
 # strings of 15 bytes or fewer inside the code, where strings(1) cannot see them, and drops literals only tests use
 # ("taken://todo-eval" is gone from that build), so do not swap in a short or test-only string.
 #
+# An internal build must also be exported "TestFlight internal testing only" (.eas/build/build-ios-internal.yml), so
+# App Store Connect can never put it in an App Store version or App Review. Xcode's export with that option writes
+# TFInternalTestingOnly = true into the app's Info.plist (seen on the internal build 1.1.0 (14), not on (12) or (13));
+# an App Store build must not have it.
+#
 # Usage: scripts/check-app-store-build.sh path/to/Taken.app            the App Store shape: no marker may be present
 #        scripts/check-app-store-build.sh --internal path/to/Taken.app  the internal shape: the markers must be present
 set -euo pipefail
@@ -50,11 +55,17 @@ app_hits="$(markers_in "$app/Taken")"
 widget_hits="$(markers_in "$appex/TakenWidgets")"
 app_plist="$(plist_marked "$app/Info.plist")"
 widget_plist="$(plist_marked "$appex/Info.plist")"
-report="Taken: ${app_hits:-none}; TakenWidgets: ${widget_hits:-none}; Info.plist marker: app $app_plist, widget $widget_plist"
+# plutil prints its "no value" error on stdout, so a failed read is "unset", not its message.
+internal_only="$(plutil -extract TFInternalTestingOnly raw -o - "$app/Info.plist" 2>/dev/null)" || internal_only=unset
+report="Taken: ${app_hits:-none}; TakenWidgets: ${widget_hits:-none}; Info.plist marker: app $app_plist, widget $widget_plist; TFInternalTestingOnly: $internal_only"
 
 if [ "$expect" = "absent" ]; then
   if [ -n "$app_hits$widget_hits" ] || [ "$app_plist" = yes ] || [ "$widget_plist" = yes ]; then
     echo "::error::App Store build contains internal-only code. $report"
+    exit 1
+  fi
+  if [ "$internal_only" = true ]; then
+    echo "::error::App Store build is exported TestFlight internal testing only, so it could never be submitted. $report"
     exit 1
   fi
   echo "App Store shape: no internal-only code or TakenInternalPro marker in Taken or TakenWidgets"
@@ -67,6 +78,10 @@ case " $app_hits " in *" TodoEvalView "*) ;; *) echo "::error::Taken lacks the e
 case " $widget_hits " in *" TakenInternalPro "*) ;; *) echo "::error::TakenWidgets lacks the Pro unlock. $report"; exit 1 ;; esac
 if [ "$app_plist" != yes ] || [ "$widget_plist" != yes ]; then
   echo "::error::An Info.plist lacks the TakenInternalPro marker. $report"
+  exit 1
+fi
+if [ "$internal_only" != true ]; then
+  echo "::error::Not exported TestFlight internal testing only: App Store Connect could put it in App Review. $report"
   exit 1
 fi
 echo "Internal shape: $report"
