@@ -22,15 +22,27 @@ fi
 app="${1:?usage: check-app-store-build.sh [--internal] path/to/Taken.app}"
 appex="$app/PlugIns/TakenWidgets.appex"
 markers='TakenInternalPro|TodoEvalView|TodoEvalRunner|TodoEvalRoute|Restock Always pads and Native deodorant'
+# Every build of both targets keeps the App Group ID (TakenStore.appGroupID): a scan that cannot see it read nothing,
+# and the check fails rather than calling an unread binary clean.
+control='group.com.tombaxter.taken'
 
-# The markers in one binary, space separated ("" when none).
+command -v strings >/dev/null && test -x /usr/libexec/PlistBuddy \
+  || { echo "::error::strings or PlistBuddy is not available"; exit 1; }
+
+# The markers in one binary, space separated ("" when none). Fails when the binary cannot be read.
 markers_in() {
   test -s "$1" || { echo "::error::$1 is missing" >&2; exit 1; }
-  { strings -a "$1" | grep -o -E "$markers" || true; } | sort -u | tr '\n' ' '
+  local text
+  text="$(strings -a "$1")" || { echo "::error::strings failed on $1" >&2; exit 1; }
+  grep -q -F "$control" <<<"$text" || { echo "::error::$1 has no $control: the scan read nothing" >&2; exit 1; }
+  { grep -o -E "$markers" <<<"$text" || [ $? -eq 1 ]; } | sort -u | tr '\n' ' '
 }
-# "yes" when the Info.plist carries the TakenInternalPro key.
+# "yes" when the Info.plist carries the TakenInternalPro key. Fails when the plist cannot be read.
 plist_marked() {
   test -f "$1" || { echo "::error::$1 is missing" >&2; exit 1; }
+  # Every real Info.plist names its bundle: one that does not is unreadable, not unmarked.
+  plutil -extract CFBundleIdentifier raw -o - "$1" >/dev/null 2>&1 \
+    || { echo "::error::$1 is not a readable Info.plist" >&2; exit 1; }
   if /usr/libexec/PlistBuddy -c 'Print :TakenInternalPro' "$1" >/dev/null 2>&1; then echo yes; else echo no; fi
 }
 

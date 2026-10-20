@@ -17,7 +17,8 @@ enum TodoEval {
     /// 11 of the 12 notes must pass. Run again after every iOS model update.
     static let passBar = 11
 
-    /// `taken://todo-eval` in an internal build. False in an App Store build, whatever the link.
+    /// `taken://todo-eval` in an internal build. False without the TakenInternalPro marker (Debug and CI), whatever the
+    /// link; an App Store build does not contain this code.
     static func isRequest(_ url: URL, unlocked: Bool = InternalBuild.unlocksPro) -> Bool {
         guard unlocked, let components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return false }
         return components.scheme == TodoCaptureRoute.scheme && components.host == host
@@ -241,7 +242,7 @@ final class TodoEvalRoute {
     var isPresented = false
 
     /// The eval link in an internal build: the sheet comes up once any sheet the link closed (AppModel closes them for
-    /// every taken:// link) has gone. False for any other link, and for every link in an App Store build.
+    /// every taken:// link) has gone. False for any other link, and for every link without the TakenInternalPro marker.
     @discardableResult
     func handle(url: URL, unlocked: Bool = InternalBuild.unlocksPro) -> Bool {
         guard TodoEval.isRequest(url, unlocked: unlocked) else { return false }
