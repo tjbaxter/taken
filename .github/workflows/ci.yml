@@ -19,7 +19,7 @@ permissions:
 jobs:
   test:
     name: Build and test
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -35,7 +35,7 @@ jobs:
       - name: Pick simulator
         id: sim
         run: |
-          udid="$(scripts/pick-simulator.sh "iPhone 17 Pro" "iPhone 17" "iPhone 16 Pro")"
+          udid="$(scripts/pick-simulator.sh "iPhone 18 Pro" "iPhone 17 Pro" "iPhone 17")"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
           xcrun simctl list devices | grep "$udid"
 
@@ -65,7 +65,7 @@ jobs:
 
   device-build:
     name: Release build for device (unsigned)
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -168,7 +168,7 @@ jobs:
 
   screenshots:
     name: Screenshots
-    runs-on: macos-26
+    runs-on: xcode-27
     timeout-minutes: 45
     steps:
       - uses: actions/checkout@v7
@@ -184,10 +184,10 @@ jobs:
       - name: Pick simulator
         id: sim
         run: |
-          udid="$(scripts/pick-simulator.sh "iPhone 17 Pro Max" "iPhone 16 Pro Max")"
+          udid="$(scripts/pick-simulator.sh "iPhone 18 Pro Max" "iPhone 17 Pro Max")"
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
           xcrun simctl list devices | grep "$udid"
-          small="$(scripts/pick-simulator.sh "iPhone 17 Pro" "iPhone 17" "iPhone 16 Pro")"
+          small="$(scripts/pick-simulator.sh "iPhone 18 Pro" "iPhone 17 Pro" "iPhone 17")"
           echo "small=$small" >> "$GITHUB_OUTPUT"
           xcrun simctl list devices | grep "$small"
 
@@ -214,6 +214,23 @@ jobs:
           path: screenshots/*.png
           if-no-files-found: error
           retention-days: 30
+
+      # The store frames (store-shots.yml) are built from 1320 x 2868 captures, App Store Connect's "iPhone with Dynamic
+      # Island (large display)"; the 6.3-inch ones are 1206 x 2622 (medium display). The simulator picker falls back to
+      # another iPhone when a named one is missing, so a capture of the wrong size fails here instead of being scaled.
+      - name: Check the capture sizes
+        run: |
+          set -euo pipefail
+          for f in screenshots/*.png; do
+            w="$(sips -g pixelWidth "$f" | awk '/pixelWidth/ {print $2}')"
+            h="$(sips -g pixelHeight "$f" | awk '/pixelHeight/ {print $2}')"
+            case "$(basename "$f")" in *-6.3in.png) want=1206x2622 ;; *) want=1320x2868 ;; esac
+            if [ "${w}x${h}" != "$want" ]; then
+              echo "::error::$(basename "$f") is ${w}x${h}, expected $want"
+              exit 1
+            fi
+          done
+          echo "Every capture has its App Store size: $(ls screenshots/*.png | wc -l | tr -d ' ') files"
 
       - name: Upload screenshot diagnostics
         if: always()
