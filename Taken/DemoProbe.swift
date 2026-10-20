@@ -3,7 +3,7 @@ import Foundation
 /// CI only (`-demo`): what is in front, written to `tmp/taken-ui-state.txt` in the app's container whenever it changes,
 /// so scripts/screenshots.sh can fail a link check that lands on the wrong screen instead of saving a picture of it.
 /// Lines: `tab=today|todo|history`, `sheet=<route or none>`, `paywall=0|1`, `todo=idle|starting|listening|sorting`,
-/// `todoList=personal|work` (the to-do list in view).
+/// `todoOrder=personal,work` (the to-do lists top first) and `todoInto=personal|work` (where the next note goes).
 @MainActor
 enum DemoProbe {
     static let fileName = "taken-ui-state.txt"
@@ -15,7 +15,8 @@ enum DemoProbe {
             "sheet=\(model.sheet?.id ?? "none")",
             "paywall=\(model.paywall == nil ? 0 : 1)",
             "todo=\(todo.phase)",
-            "todoList=\(todo.area.rawValue)",
+            "todoOrder=\(todo.state.areaOrder.map(\.rawValue).joined(separator: ","))",
+            "todoInto=\(todo.destination.rawValue)",
         ]
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)

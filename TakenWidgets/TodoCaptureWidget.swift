@@ -3,8 +3,9 @@ import SwiftUI
 import WidgetKit
 
 // Quick capture from the Lock Screen and Control Center (REDESIGN.md, voice to-dos): the mic opens Taken already
-// listening; the list shows what is still open. Both read todos.json in the App Group. The faces are in
-// Shared/TodoWidgetViews.swift, so the app's widget gallery draws the same ones.
+// listening; the list shows what is still open on both lists, in the To-do tab's order (`areaOrder`), with one count.
+// Both read todos.json in the App Group. The faces are in Shared/TodoWidgetViews.swift, so the app's widget gallery
+// draws the same ones.
 
 struct TodoProvider: TimelineProvider {
     func placeholder(in context: Context) -> TodoEntry {
@@ -22,8 +23,8 @@ struct TodoProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping @Sendable (Timeline<TodoEntry>) -> Void) {
         let now = Date()
-        // The app reloads this whenever the tasks or the list in view (Personal or Work) change; the hourly refresh keeps
-        // the order honest as times pass.
+        // The app reloads this whenever the tasks or the order of the lists change; the hourly refresh keeps the order
+        // honest as times pass.
         completion(Timeline(entries: [Self.entry(at: now)], policy: .after(now.addingTimeInterval(3600))))
     }
 

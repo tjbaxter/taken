@@ -1,12 +1,23 @@
 import Foundation
 
-/// To-dos for the `-demo` screenshots (`-screen todo`, `todo-work`, `todo-recording`), at the demo's moment (21:41).
-/// Personal and Work both have tasks, so each screenshot shows the other list's count on the switch. Kept in a
-/// temporary file, never the real one.
+/// To-dos for the `-demo` screenshots, at the demo's moment (21:41), in a temporary file, never the real one:
+/// - `todo` and `todo-recording`: Personal on top with its open tasks and two done today, Work under it with three
+///   from the morning stand-up, so both headings show.
+/// - `todo-work`: the same with Work on top, where notes go.
+/// - `todo-work-empty`: the case Tom hit, three open on Personal and nothing on Work, so the Work heading reads
+///   "Nothing open" and the line under the title stays "3 open".
 enum TodoDemo {
     static let transcript = "Tomorrow by nine I need to call the dentist, pick up the dry cleaning and email Sam the deck. Oh and book flights for March"
 
-    static func state(now: Date, recording: Bool, inView: TodoArea = .personal, timeZone: TimeZone = .current) -> TodoState {
+    /// The `-screen` launch argument, which picks the seed when no screen is given.
+    static var launchScreen: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-screen"), index + 1 < arguments.count else { return nil }
+        return arguments[index + 1]
+    }
+
+    static func state(now: Date, recording: Bool, inView: TodoArea = .personal, timeZone: TimeZone = .current,
+                      screen: String? = TodoDemo.launchScreen) -> TodoState {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         func at(dayOffset: Int, _ hour: Int, _ minute: Int = 0) -> Date {
@@ -21,12 +32,18 @@ enum TodoDemo {
         let lunch = UUID()
         let evening = UUID()
         let standup = UUID()
-        var tasks: [TodoTask] = [
+        let personal: [TodoTask] = [
             TodoTask(title: "Take the bins out", due: .time(at(dayOffset: 0, 22, 30)),
                      createdAt: at(dayOffset: 0, 18, 5), noteId: evening, order: 0),
             TodoTask(title: "Renew the car insurance", due: .day(day(3)),
                      createdAt: at(dayOffset: 0, 12, 40), noteId: lunch, order: 0),
             TodoTask(title: "Send Mum the photos", createdAt: at(dayOffset: 0, 12, 40), noteId: lunch, order: 1),
+        ]
+        if screen == "todo-work-empty" {
+            // Three open on Personal, nothing on Work, nothing done: exactly what Tom had when the "3 open" bounced.
+            return TodoState(tasks: personal, firstNoteAt: at(dayOffset: -6, 9), lastArea: .personal)
+        }
+        var tasks: [TodoTask] = personal + [
             TodoTask(title: "Buy milk", createdAt: at(dayOffset: 0, 8, 12), completedAt: at(dayOffset: 0, 18, 12),
                      noteId: morning, order: 0),
             TodoTask(title: "Pay the window cleaner", createdAt: at(dayOffset: 0, 8, 12),
@@ -52,7 +69,10 @@ enum TodoDemo {
                 TodoTask(title: "Book flights for March", createdAt: at(dayOffset: 0, 21, 30), noteId: note, order: 3),
             ]
         }
-        return TodoState(tasks: tasks, firstNoteAt: at(dayOffset: -6, 9), lastArea: inView)
+        // `todo-work` puts Work on top, so its notes go there; `lastArea` follows for builds that still read it.
+        let workOnTop = inView == .work || screen == "todo-work"
+        return TodoState(tasks: tasks, firstNoteAt: at(dayOffset: -6, 9), lastArea: workOnTop ? .work : .personal,
+                         areaOrder: workOnTop ? [.work, .personal] : TodoState.defaultAreaOrder)
     }
 
     /// A waveform mid-sentence.

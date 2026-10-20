@@ -12,8 +12,9 @@ enum TodoDue: Hashable, Sendable {
     case day(DayKey)
 }
 
-/// Which list a to-do is on (REDESIGN.md): personal things and work things are never mixed. One list shows at a time,
-/// and a note lands in the list in view. The names are Apple's own default Focus names.
+/// Which list a to-do is on (REDESIGN.md): personal things and work things, each under its own heading on the one
+/// To-do tab, in the order the person chose (`TodoState.areaOrder`). A note goes to the list on top unless its chip
+/// says otherwise. The names are Apple's own default Focus names.
 enum TodoArea: String, Codable, CaseIterable, Identifiable, Sendable {
     case personal
     case work
@@ -62,7 +63,7 @@ struct TodoTask: Codable, Identifiable, Hashable, Sendable {
     var noteId: UUID
     /// Where it came in its note, so a ramble keeps the order it was said in.
     var order: Int
-    /// Personal or Work: the list in view when it was said, or where it was moved since.
+    /// Personal or Work: the list its note went to, or where it was moved since.
     var area: TodoArea
 
     init(id: UUID = UUID(), title: String, due: TodoDue? = nil, createdAt: Date, completedAt: Date? = nil,
@@ -151,8 +152,9 @@ struct TodoState: Codable, Hashable, Sendable {
     var tasks: [TodoTask] = []
     /// The first voice note ever saved. That one needs no Taken Pro; after it the mic does. Erasing keeps it.
     var firstNoteAt: Date?
-    /// The list in view (Personal or Work). Taken reopens on it, quick captures record into it, and the Lock Screen
-    /// widget shows it.
+    /// The list that was in view before one list replaced the Personal | Work switch. Kept for compatibility, read and
+    /// written as before so a file stays readable by every build, but nothing routes a note by it any more: new notes
+    /// go to the list on top (`topArea`), and the widget and Shortcuts follow `areaOrder`.
     var lastArea: TodoArea = .personal
     /// The order of the two lists on the To-do tab, top first: every list once, Personal first until it is changed.
     /// Set it through `setAreaOrder(_:)`, which keeps it whole.
@@ -162,6 +164,9 @@ struct TodoState: Codable, Hashable, Sendable {
     static let doneRetention: TimeInterval = 30 * 24 * 60 * 60
     /// Personal, then Work.
     static let defaultAreaOrder: [TodoArea] = TodoArea.allCases
+
+    /// The list on top of the To-do tab: where a note, a quick capture or "Add to-do" with no list goes.
+    var topArea: TodoArea { areaOrder.first ?? .personal }
 
     init(tasks: [TodoTask] = [], firstNoteAt: Date? = nil, lastArea: TodoArea = .personal,
          areaOrder: [TodoArea] = TodoState.defaultAreaOrder) {
@@ -353,7 +358,7 @@ struct TodoState: Codable, Hashable, Sendable {
         tasks.append(task)
     }
 
-    /// Erase all data: the tasks go, Personal is in view and on top again; the first free note stays used.
+    /// Erase all data: the tasks go and Personal is on top again; the first note on the house stays used.
     mutating func eraseAll() {
         tasks = []
         lastArea = .personal

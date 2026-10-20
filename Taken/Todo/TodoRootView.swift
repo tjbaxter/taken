@@ -1,9 +1,12 @@
+import CoreTransferable
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// The To-do tab (REDESIGN.md, voice to-dos): a big mic, the words as they are said, and the tasks the on-device model
 /// makes of them. Tap a circle to finish a task, swipe left to delete, swipe right to move it to the other list, tap
-/// the words to edit. Personal and Work show one at a time, never mixed, and a note lands in the list in view. Every
-/// colour comes from the look (`Theme`), so it reads the same in Signal, Blush, Phosphor and Ice.
+/// the words to edit. Personal and Work are headed sections of one scrolling list (`TodoSections`), in the order the
+/// person drags them into: touch and hold a heading and drop it on the other list, or use its menu. Every colour
+/// comes from the look (`Theme`), so it reads the same in Signal, Blush, Phosphor and Ice.
 ///
 /// It is the To-do tab of RootView's tab bar, which follows every voice to-do request (`.opensTodoTab`): Siri, the
 /// control, the Lock Screen, links, notifications and the quick action land here. Its sheets (edit, type) are the
@@ -13,8 +16,12 @@ struct TodoRootView: View {
     @Environment(\.theme) private var theme
     @Environment(\.scenePhase) private var scenePhase
     @Environment(\.openURL) private var openURL
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var todo = TodoModel.shared
     @State private var route = TodoCaptureRoute.shared
+    /// The rows a dragged heading is over, with their list, so that list's heading lights up as the place it lands.
+    @State private var targeted: [TodoRowID: TodoArea] = [:]
+    @State private var dragSource = TodoSectionDragSource()
 
     init() {}
 
@@ -23,7 +30,7 @@ struct TodoRootView: View {
             .safeAreaInset(edge: .bottom, spacing: 0) { dock }
             .background(theme.bg.ignoresSafeArea())
             .overlay {
-                if todo.isEmpty && todo.phase == .idle && todo.blocker == nil {
+                if !todo.hasListedTasks && todo.phase == .idle && todo.blocker == nil {
                     emptyState
                 }
             }
@@ -76,56 +83,128 @@ struct TodoRootView: View {
 
     // MARK: List
 
+    /// One list: the title, then each list's heading with its open tasks and its tasks done today under it. A task row
+    /// is the same in either list. Nothing here reads a list "in view", so where notes go changes no row, and the line
+    /// under the title stays while any task is listed (the "3 open" that vanished when an empty Work list came in).
     private var list: some View {
-        List {
-            header
-                .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 20))
-                .listRowSeparator(.hidden)
-                .listRowBackground(Color.clear)
-            // The list in view. Fixed while a note is heard or sorted: it goes where the live card says.
-            TodoListSwitch(selected: todo.area, openCounts: openCounts, enabled: todo.phase == .idle) { area in
-                todo.select(area)
-            }
-            .listRowInsets(EdgeInsets(top: 0, leading: 20, bottom: 12, trailing: 20))
-            .listRowSeparator(.hidden)
-            .listRowBackground(Color.clear)
-            ForEach(todo.openTasks) { task in
-                row(task)
-            }
-            if !todo.doneToday.isEmpty {
-                Text(TodoCopy.doneToday)
-                    .font(.sans(13, .sansMedium, relativeTo: .footnote))
-                    .foregroundStyle(theme.fgSubtle)
-                    .accessibilityAddTraits(.isHeader)
-                    .listRowInsets(EdgeInsets(top: 26, leading: 20, bottom: 6, trailing: 20))
+        let rows = todo.sectionRows
+        return ScrollViewReader { proxy in
+            List {
+                TabHeader(title: "To-do", subtitle: TodoSections.summary(rows))
+                    .listRowInsets(EdgeInsets(top: 8, leading: 20, bottom: 12, trailing: 20))
                     .listRowSeparator(.hidden)
                     .listRowBackground(Color.clear)
-                ForEach(todo.doneToday) { task in
-                    row(task)
+                ForEach(rows) { item in
+                    if let task = item.task {
+                        droppable(row(task), id: item.id, area: item.area)
+                    } else {
+                        droppable(sectionHeader(item, first: item.id == rows.first?.id), id: item.id, area: item.area)
+                    }
                 }
             }
+            .listStyle(.plain)
+            .scrollContentBackground(.hidden)
+            .environment(\.defaultMinListRowHeight, 44)
+            .onAppear { scrollToTarget(proxy) }
+            .onChange(of: todo.scrollTarget) { _, _ in scrollToTarget(proxy) }
         }
-        .listStyle(.plain)
-        .scrollContentBackground(.hidden)
-        .environment(\.defaultMinListRowHeight, 44)
     }
 
-    private var header: some View {
-        TabHeader(title: "To-do", subtitle: todo.isEmpty ? nil : summary)
+    /// Brings the task the model asked for into view (a note just saved, a tapped due-time notification), then clears
+    /// the request.
+    private func scrollToTarget(_ proxy: ScrollViewProxy) {
+        guard let id = todo.scrollTarget else { return }
+        withAnimation(reduceMotion ? nil : .spring(response: 0.42, dampingFraction: 0.82)) {
+            proxy.scrollTo(TodoRowID.task(id), anchor: .center)
+        }
+        todo.scrollTarget = nil
     }
 
-    /// Each list's open tasks, for the count on the switch.
-    private var openCounts: [TodoArea: Int] {
-        Dictionary(uniqueKeysWithValues: TodoArea.allCases.map { ($0, todo.openTasks(in: $0).count) })
+    /// A list's heading: its name and open count, "Nothing open" under it when it has nothing open or done today. Touch
+    /// and hold to drag it onto the other list (Apple DTS: move sections with draggable and dropDestination,
+    /// https://developer.apple.com/forums/thread/780117), or open its menu; VoiceOver has the same as an action (HIG,
+    /// drag and drop: offer another way).
+    private func sectionHeader(_ item: TodoSectionRow, first: Bool) -> some View {
+        let area = item.area
+        let onTop = todo.isOnTop(area)
+        let move = onTop ? TodoListCopy.moveToBottom(area) : TodoListCopy.moveToTop(area)
+        return VStack(alignment: .leading, spacing: 4) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(area.title)
+                    .font(.sans(15, .sansSemibold, relativeTo: .subheadline))
+                    .foregroundStyle(theme.fg)
+                if item.openCount > 0 {
+                    Text("\(item.openCount)")
+                        .font(.mono(13, .monoMedium, relativeTo: .footnote))
+                        .foregroundStyle(theme.fgSubtle)
+                }
+            }
+            if item.isEmpty {
+                Text(TodoListCopy.nothingOpen)
+                    .font(.sans(15, .sans, relativeTo: .subheadline))
+                    .foregroundStyle(theme.fgFaint)
+            }
+        }
+        .frame(maxWidth: .infinity, minHeight: 32, alignment: .leading)
+        .contentShape(Rectangle())
+        .draggable(dragPayload(area)) { dragPreview(area) }
+        .contextMenu {
+            Button {
+                todo.moveSection(area, toTop: !onTop)
+            } label: {
+                Label(move, systemImage: onTop ? "arrow.down" : "arrow.up")
+            }
+        }
+        .listRowInsets(EdgeInsets(top: first ? 4 : 20, leading: 20, bottom: 6, trailing: 20))
+        .listRowSeparator(.hidden)
+        .listRowBackground(lit(area) ? theme.signalWash : Color.clear)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityLabel(TodoListCopy.headerLabel(area, open: item.openCount))
+        .accessibilityHint(TodoListCopy.headerHint)
+        .accessibilityAction(named: move) { todo.moveSection(area, toTop: !onTop) }
     }
 
-    /// "3 open, 2 done today", for the list in view.
-    private var summary: String {
-        let open = todo.openTasks.count
-        let done = todo.doneToday.count
-        var parts = ["\(open) open"]
-        if done > 0 { parts.append("\(done) done today") }
-        return parts.joined(separator: ", ")
+    /// What a heading carries when the drag begins. It also notes which list is being dragged, so only the other one
+    /// lights up as a place to drop (HIG: highlight a destination only when it can accept the item). Own choice: no
+    /// source documents when SwiftUI reads the payload, and a plain reference never redraws the list if read early.
+    private func dragPayload(_ area: TodoArea) -> TodoSectionDrag {
+        dragSource.area = area
+        return TodoSectionDrag(area: area)
+    }
+
+    /// The heading as it rides under the finger: its name on the look's raised surface.
+    private func dragPreview(_ area: TodoArea) -> some View {
+        HStack(spacing: 6) {
+            Image(systemName: area.symbol)
+                .font(.system(size: 12, weight: .semibold))
+            Text(area.title)
+                .font(.sans(15, .sansSemibold))
+        }
+        .foregroundStyle(theme.fg)
+        .padding(.horizontal, 14)
+        .frame(minHeight: 36)
+        .background(theme.bgRaised, in: Capsule())
+        .overlay(Capsule().strokeBorder(theme.line, lineWidth: 1))
+    }
+
+    /// Every heading and task row takes a dropped heading: dropped anywhere on the other list, it takes that list's
+    /// place, so the two swap. A drop on its own list changes nothing and goes back.
+    private func droppable<Content: View>(_ content: Content, id: TodoRowID, area: TodoArea) -> some View {
+        content.dropDestination(for: TodoSectionDrag.self) { items, _ in
+            targeted = [:]
+            defer { dragSource.area = nil }
+            guard let dragged = items.first?.area else { return false }
+            return todo.dropSection(dragged, on: area)
+        } isTargeted: { inside in
+            targeted[id] = inside ? area : nil
+        }
+    }
+
+    /// A dragged heading is over this list, and it is the other list's heading.
+    private func lit(_ area: TodoArea) -> Bool {
+        guard let source = dragSource.area, source != area else { return false }
+        return targeted.values.contains(area)
     }
 
     private func row(_ task: TodoTask) -> some View {
@@ -218,7 +297,7 @@ struct TodoRootView: View {
     }
 
     private var emptyState: some View {
-        Text(TodoCopy.emptyLine(for: todo.area))
+        Text(TodoCopy.empty)
             .font(.sans(17, .sans, relativeTo: .body))
             .foregroundStyle(theme.fgMuted)
             .multilineTextAlignment(.center)
@@ -435,72 +514,6 @@ private struct TodoMicPressStyle: ButtonStyle {
     }
 }
 
-/// Personal | Work (REDESIGN.md): one list in view at a time, never mixed. A capsule track on the look's raised
-/// surface; the selected pill in the signal's wash and edge slides between the two. The list not in view shows how many
-/// are open on it, in Geist Mono, so nothing waiting there is forgotten. 44 pt tall, each half a 44 pt target.
-struct TodoListSwitch: View {
-    @Environment(\.theme) private var theme
-    @Namespace private var pill
-    let selected: TodoArea
-    let openCounts: [TodoArea: Int]
-    let enabled: Bool
-    let onSelect: (TodoArea) -> Void
-
-    init(selected: TodoArea, openCounts: [TodoArea: Int], enabled: Bool, onSelect: @escaping (TodoArea) -> Void) {
-        self.selected = selected
-        self.openCounts = openCounts
-        self.enabled = enabled
-        self.onSelect = onSelect
-    }
-
-    var body: some View {
-        HStack(spacing: 0) {
-            ForEach(TodoArea.allCases) { area in
-                segment(area)
-            }
-        }
-        .background(theme.bgRaised, in: Capsule())
-        .overlay(Capsule().strokeBorder(theme.line, lineWidth: 1))
-        .accessibilityElement(children: .contain)
-    }
-
-    private func segment(_ area: TodoArea) -> some View {
-        let isSelected = area == selected
-        let count = isSelected ? 0 : openCounts[area] ?? 0
-        return Button {
-            onSelect(area)
-        } label: {
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
-                Text(area.title)
-                    .font(.sans(15, .sansMedium, relativeTo: .subheadline))
-                    .foregroundStyle(isSelected ? theme.fg : theme.fgMuted)
-                if count > 0 {
-                    Text("\(count)")
-                        .font(.mono(13, .monoMedium, relativeTo: .footnote))
-                        .foregroundStyle(theme.fgSubtle)
-                }
-            }
-            .lineLimit(1)
-            .frame(maxWidth: .infinity, minHeight: 38)
-            .background {
-                if isSelected {
-                    Capsule()
-                        .fill(theme.signalWash)
-                        .overlay(Capsule().strokeBorder(theme.signalEdge, lineWidth: 1))
-                        .matchedGeometryEffect(id: "pill", in: pill)
-                }
-            }
-            // The inset is part of the target, so each half takes taps across the whole 44 pt track.
-            .padding(3)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-        .disabled(!enabled)
-        .accessibilityLabel(count > 0 ? "\(area.title), \(count) open" : area.title)
-        .accessibilityAddTraits(isSelected ? AccessibilityTraits.isSelected : AccessibilityTraits())
-    }
-}
-
 /// Bars from the recent input levels.
 struct TodoWaveform: View {
     @Environment(\.theme) private var theme
@@ -555,5 +568,21 @@ struct TodoPillButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// Which list's heading is being dragged: set when the drag begins, cleared on the drop. A plain reference, not
+/// observed, so setting it never redraws anything.
+final class TodoSectionDragSource {
+    var area: TodoArea?
+
+    init() {}
+}
+
+/// A dragged heading as data, inside Taken only: the list it names, as JSON (`CodableRepresentation`, as Apple DTS's
+/// sample for moving List sections does).
+extension TodoSectionDrag: Transferable {
+    static var transferRepresentation: some TransferRepresentation {
+        CodableRepresentation(contentType: .data)
     }
 }
