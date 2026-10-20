@@ -67,6 +67,11 @@ final class TodoModel {
     /// note is saved. The live card names it, so the destination shows before a word is said. The model never
     /// chooses the list.
     private(set) var captureArea: TodoArea = .personal
+    /// The list chosen for the current note on its chip (`setDestination(_:)`), nil when none was. For that note only:
+    /// it goes once the note is saved or comes to nothing, so the next note starts on the top list again.
+    private(set) var captureOverride: TodoArea?
+    /// A task the list should bring into view; the list clears it once it has scrolled there.
+    var scrollTarget: UUID?
     /// The moment the list reads from (due labels, Done today). Moves with the clock while the tab is open.
     private(set) var now: Date
 
@@ -85,7 +90,7 @@ final class TodoModel {
     @ObservationIgnored private var wordCount = 0
     @ObservationIgnored private var levelTick = 0
     @ObservationIgnored private(set) var dayStartHour = 4
-    @ObservationIgnored private var hapticsOn = true
+    @ObservationIgnored private(set) var hapticsOn = true
 
     nonisolated static let levelCount = 32
     /// Quiet after speech this long stops listening.
@@ -148,9 +153,17 @@ final class TodoModel {
     var isEmpty: Bool { openTasks.isEmpty && doneToday.isEmpty }
     var isListening: Bool { phase == .listening }
 
+    /// Tasks kept out of the list for now: the note still being sorted, saved whole until its tasks replace it.
+    var hiddenTaskIDs: Set<UUID> { sortingNote.map { [$0] } ?? [] }
+
+    /// Where the next note goes, and the current one while it is heard: the top list, unless its chip changed it for
+    /// this note.
+    var destination: TodoArea { captureOverride ?? state.areaOrder.first ?? .personal }
+
     /// One list's open tasks, without the note still being sorted.
     func openTasks(in area: TodoArea) -> [TodoTask] {
-        state.openTasks(in: area, clock: clock).filter { $0.id != sortingNote }
+        let hidden = hiddenTaskIDs
+        return state.openTasks(in: area, clock: clock).filter { !hidden.contains($0.id) }
     }
 
     func dueLabel(_ task: TodoTask) -> String? { TodoText.dueLabel(task, now: now, clock: clock) }
@@ -247,6 +260,17 @@ final class TodoModel {
         }
     }
 
+    /// The chip on the Listening card and the type sheet: the current note goes to `area` instead (a note being heard
+    /// changes list at once). For this note only, never saved, and fixed once the note is being sorted. Nothing is
+    /// announced: the microphone would hear it. Starting a note still reads the list in view (`area`) until the one
+    /// list replaces the switch.
+    func setDestination(_ area: TodoArea) {
+        guard phase != .sorting, area != destination else { return }
+        Haptics.selection(hapticsOn)
+        captureOverride = area
+        if phase == .starting || phase == .listening { captureArea = area }
+    }
+
     private func startListening(into area: TodoArea, busyRetries: Int = 0) async {
         guard phase == .idle else { return }
         captureArea = area
@@ -264,6 +288,7 @@ final class TodoModel {
         guard permission == .granted else {
             blocker = permission == .microphoneDenied ? .microphone : .speech
             phase = .idle
+            captureOverride = nil
             return
         }
         let extractor = makeExtractor()
@@ -277,6 +302,7 @@ final class TodoModel {
             self.extractor = nil
             blocker = .unavailable
             phase = .idle
+            captureOverride = nil
             return
         } catch {
             // A call or another app has the microphone.
@@ -286,6 +312,7 @@ final class TodoModel {
                 try? await Task.sleep(for: .milliseconds(700))
                 await startListening(into: area, busyRetries: busyRetries - 1)
             } else {
+                captureOverride = nil
                 show(TodoCopy.microphoneBusy)
             }
             return
@@ -372,6 +399,7 @@ final class TodoModel {
             extractor = nil
             transcript = ""
             phase = .idle
+            captureOverride = nil
             show(TodoCopy.nothingHeard)
             return
         }
@@ -419,6 +447,7 @@ final class TodoModel {
         }
         transcript = ""
         phase = .idle
+        captureOverride = nil
         guard !added.isEmpty else { return }
         arrived = Set(added.map(\.id))
         TodoHaptics.success(hapticsOn)
@@ -590,8 +619,10 @@ final class TodoModel {
 
     // MARK: Writing
 
+    /// Every change to todos.json goes through here: the file is read, changed and written under coordination, and the
+    /// list, notifications and widget follow. Nil when it could not be saved (the line under the list says so).
     @discardableResult
-    private func write<T>(_ body: (inout TodoState) throws -> T) -> T? {
+    func write<T>(_ body: (inout TodoState) throws -> T) -> T? {
         do {
             let before = state.tasks
             let result = try store.update(body)
@@ -634,7 +665,8 @@ final class TodoModel {
         notice = nil
     }
 
-    private func announce(_ text: String) {
+    /// Says `text` to VoiceOver, never in the demo. Not for use while a note is heard: the microphone would hear it.
+    func announce(_ text: String) {
         guard !isDemo else { return }
         UIAccessibility.post(notification: .announcement, argument: text)
     }

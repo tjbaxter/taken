@@ -2,9 +2,9 @@ import XCTest
 @testable import Taken
 
 /// The To-do tab's model wired together (TodoModel, SPEC 3.10): Keep as one comes only after a note the model split and
-/// goes on any change, a note goes to the list in view at the tap, the switch holds while a note is sorted, and a tapped
-/// due-time notification shows its task's list. A temporary file and canned model answers stand in for todos.json and
-/// the on-device model.
+/// goes on any change, a note goes to the list in view at the tap, the switch holds while a note is sorted, a tapped
+/// due-time notification shows its task's list, the chip changes where one note goes, and the note being sorted stays
+/// out of the list. A temporary file and canned model answers stand in for todos.json and the on-device model.
 final class TodoModelTests: XCTestCase {
     /// Sorts every note with canned answers through the real validation, as the on-device model's answer is.
     private struct Canned: TaskExtractor {
@@ -155,5 +155,72 @@ final class TodoModelTests: XCTestCase {
         XCTAssertEqual(model.area, .work, "a to-do that has gone changes nothing")
         model.reveal(personal.id)
         XCTAssertEqual(model.area, .personal)
+    }
+
+    // MARK: Where a note goes, and what the list hides
+
+    @MainActor
+    func testTheDestinationIsTheTopListUnlessTheChipChangesItForOneNote() async throws {
+        let model = try model(split, delay: .milliseconds(300), seed: TodoState(areaOrder: [.work, .personal]))
+        XCTAssertEqual(model.destination, .work, "the top list")
+        let file = try Data(contentsOf: model.store.fileURL)
+        model.setDestination(.personal)
+        XCTAssertEqual(model.destination, .personal)
+        XCTAssertEqual(try Data(contentsOf: model.store.fileURL), file, "never saved: it is for this note only")
+
+        model.submitTyped(note, app: demoApp())
+        XCTAssertEqual(model.phase, .sorting)
+        model.setDestination(.work)
+        XCTAssertEqual(model.destination, .personal, "fixed while the note is sorted")
+        await settle(model)
+        XCTAssertEqual(model.destination, .work, "once the note is saved, the next one starts on the top list again")
+
+        model.write { $0.setAreaOrder([.personal, .work]) }
+        XCTAssertEqual(model.destination, .personal, "and follows the order")
+        XCTAssertEqual(model.store.load().areaOrder, [.personal, .work])
+    }
+
+    @MainActor
+    func testTheChipMovesTheNoteBeingHeard() async throws {
+        let model = try model(split)
+        let app = demoApp()
+        model.micTapped(app)
+        let deadline = Date().addingTimeInterval(5)
+        while model.phase != .listening && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        XCTAssertEqual(model.phase, .listening, "the demo listens without a microphone")
+        XCTAssertEqual(model.hapticsOn, app.hapticsOn, "the model follows the app's haptics setting")
+        XCTAssertEqual(model.captureArea, .personal)
+        model.setDestination(.work)
+        XCTAssertEqual(model.captureArea, .work, "the note being heard now goes to Work")
+        XCTAssertEqual(model.destination, .work)
+        model.setDestination(.personal)
+        XCTAssertEqual(model.captureArea, .personal, "and back")
+        XCTAssertEqual(model.store.load().lastArea, .personal, "the list in view never changes with it")
+    }
+
+    @MainActor
+    func testTheNoteBeingSortedIsHiddenUntilItsTasksReplaceIt() async throws {
+        let model = try model(split, delay: .milliseconds(300))
+        XCTAssertTrue(model.hiddenTaskIDs.isEmpty)
+        model.submitTyped(note, app: demoApp())
+        let deadline = Date().addingTimeInterval(5)
+        while model.hiddenTaskIDs.isEmpty && model.phase == .sorting && Date() < deadline {
+            try? await Task.sleep(for: .milliseconds(10))
+        }
+        let whole = try XCTUnwrap(model.hiddenTaskIDs.first, "the note is saved whole at once")
+        XCTAssertEqual(model.hiddenTaskIDs.count, 1)
+        XCTAssertNotNil(model.store.load().task(whole), "in the file already, so nothing said is lost")
+        XCTAssertTrue(model.openTasks(in: .personal).isEmpty, "and out of the list while it is sorted")
+        await settle(model)
+        XCTAssertTrue(model.hiddenTaskIDs.isEmpty)
+        XCTAssertEqual(Set(model.openTasks.map(\.title)), ["Call the dentist", "Buy milk"])
+
+        let first = try XCTUnwrap(model.openTasks.first)
+        model.scrollTarget = first.id
+        XCTAssertEqual(model.scrollTarget, first.id, "the list can be asked to bring a task into view")
+        model.scrollTarget = nil
+        XCTAssertNil(model.scrollTarget)
     }
 }
