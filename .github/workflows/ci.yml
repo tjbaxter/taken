@@ -174,7 +174,8 @@ jobs:
   screenshots:
     name: Screenshots
     runs-on: macos-26
-    # 37 to 48 minutes since To-do v2 added its list, cap and type screens in every look; runner speed varies.
+    # 37 to 48 minutes with To-do v2's list, cap and type screens in every look; v3 drops the list and type screens,
+    # and runner speed varies.
     timeout-minutes: 75
     steps:
       - uses: actions/checkout@v7

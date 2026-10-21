@@ -1,21 +1,20 @@
 import SwiftUI
 
-/// Tap a task: change its words, when it is due or which list it is on, or delete it.
+/// Tap a task: change its words or when it is due, or delete it.
 struct TodoEditSheet: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     let task: TodoTask
     let clock: DayClock
-    let onSave: (String, TodoDue?, TodoArea) -> Void
+    let onSave: (String, TodoDue?) -> Void
     let onDelete: () -> Void
 
     @State private var title: String
     @State private var hasDue: Bool
     @State private var hasTime: Bool
     @State private var due: Date
-    @State private var area: TodoArea
 
-    init(task: TodoTask, clock: DayClock, onSave: @escaping (String, TodoDue?, TodoArea) -> Void,
+    init(task: TodoTask, clock: DayClock, onSave: @escaping (String, TodoDue?) -> Void,
          onDelete: @escaping () -> Void) {
         self.task = task
         self.clock = clock
@@ -25,7 +24,6 @@ struct TodoEditSheet: View {
         _hasDue = State(initialValue: task.due != nil)
         _hasTime = State(initialValue: task.hasTime)
         _due = State(initialValue: TodoEditSheet.pickerDate(task.due, clock: clock))
-        _area = State(initialValue: task.area)
     }
 
     /// What the picker starts on: the time said, the day said at 09:00 where the iPhone is now, or tomorrow at 09:00.
@@ -73,21 +71,6 @@ struct TodoEditSheet: View {
                 .tint(theme.signal)
                 .listRowBackground(theme.bgRaised)
                 Section {
-                    // Personal or Work: the same two names as the To-do tab's lists.
-                    Picker(TodoCopy.list, selection: $area) {
-                        ForEach(TodoArea.allCases) { option in
-                            Text(option.title).tag(option)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                } header: {
-                    Text(TodoCopy.list)
-                        .font(.sans(13, .sansMedium, relativeTo: .footnote))
-                        .foregroundStyle(theme.fgSubtle)
-                        .textCase(nil)
-                }
-                .listRowBackground(theme.bgRaised)
-                Section {
                     Button(role: .destructive) {
                         onDelete()
                         dismiss()
@@ -110,7 +93,7 @@ struct TodoEditSheet: View {
                 }
                 ToolbarItem(placement: .confirmationAction) {
                     Button("Save") {
-                        onSave(title, Self.savedDue(hasDue: hasDue, hasTime: hasTime, picked: due, clock: clock), area)
+                        onSave(title, Self.savedDue(hasDue: hasDue, hasTime: hasTime, picked: due, clock: clock))
                         dismiss()
                     }
                     .font(.sans(16, .sansSemibold, relativeTo: .body))
@@ -133,15 +116,13 @@ struct TodoEditSheet: View {
     }
 }
 
-/// Typing instead of talking (no microphone, or no on-device speech): the same sorting into tasks. The chip above the
-/// words says which list they go to, the top one unless it is changed here, for this note only.
+/// Typing instead of talking (no microphone, or no on-device speech): the same sorting into tasks, onto the one list.
 struct TodoTypeSheet: View {
     @Environment(\.theme) private var theme
     @Environment(\.dismiss) private var dismiss
     let onSubmit: (String) -> Void
 
     @State private var text = ""
-    @State private var todo = TodoModel.shared
     @FocusState private var focused: Bool
 
     init(onSubmit: @escaping (String) -> Void) {
@@ -151,16 +132,6 @@ struct TodoTypeSheet: View {
     var body: some View {
         NavigationStack {
             VStack(alignment: .leading, spacing: 12) {
-                Button {
-                    todo.setDestination(todo.destination.other)
-                } label: {
-                    TodoDestinationChip(area: todo.destination)
-                }
-                .buttonStyle(.plain)
-                .accessibilityLabel(TodoCopy.goesTo(todo.destination))
-                .accessibilityHint(TodoCopy.sendTo(todo.destination.other))
-                // The 44 pt target's slack under the capsule counts toward the 12 pt above the editor.
-                .padding(.bottom, -9)
                 ZStack(alignment: .topLeading) {
                     if text.isEmpty {
                         Text("Call the dentist tomorrow at 9, buy milk, email Sam the deck")
@@ -201,11 +172,7 @@ struct TodoTypeSheet: View {
                     .disabled(text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                 }
             }
-            .onAppear {
-                todo.resetDestination()
-                focused = true
-            }
-            .onDisappear { todo.resetDestination() }
+            .onAppear { focused = true }
         }
         .presentationDetents([.medium, .large])
         .presentationBackground(theme.bg)

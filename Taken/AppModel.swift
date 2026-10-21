@@ -287,8 +287,6 @@ final class AppModel {
         case "item":
             if let item = state.items.first(where: { $0.name == "Finasteride" }) { sheet = .editItem(item.id) }
         case "paywall", "paywall-no-yearly": presentPaywall(origin: .intro)
-        // The type sheet over the To-do tab, with its list chip.
-        case "todo-type": sheet = .todoType
         default: break
         }
     }

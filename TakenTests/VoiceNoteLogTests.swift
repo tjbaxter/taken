@@ -11,7 +11,7 @@ final class VoiceNoteLogTests: XCTestCase {
     }
 
     private func trace(at start: Date, words: String = "Call the dentist and buy milk") -> VoiceNoteTrace {
-        var trace = VoiceNoteTrace(input: .voice, list: .work, at: start)
+        var trace = VoiceNoteTrace(input: .voice, at: start)
         trace.finalTranscript = words
         trace.liveTranscript = words
         return trace
@@ -60,7 +60,7 @@ final class VoiceNoteLogTests: XCTestCase {
         let log = store()
         var note = trace(at: Date())
         log.save(note)
-        note.saved = [VoiceNoteTrace.Saved(title: "Call the dentist", due: nil, list: "work", id: UUID())]
+        note.saved = [VoiceNoteTrace.Saved(title: "Call the dentist", due: nil, id: UUID())]
         log.save(note)
         log.flush()
         XCTAssertEqual(log.load().map(\.id), [note.id], "written at the stop and again at the save, one record")
@@ -103,7 +103,6 @@ final class VoiceNoteLogTests: XCTestCase {
         note.liveTranscript = "Call the dentist tomorrow. Buy milk and"
         note.stopReason = TodoStopReason.tap.rawValue
         note.engine = SpeechEngine.analyzer.rawValue
-        note.chipChanged = true
         note.marks = [.init(label: "transcriber ready", seconds: 0.8), .init(label: "stop", seconds: 34.2)]
         note.resets = [TranscriptReset(at: 12, before: "Call the dentist tomorrow", after: "Buy")]
         note.parts = [
@@ -113,26 +112,25 @@ final class VoiceNoteLogTests: XCTestCase {
             .init(index: 1, cut: "end", words: "4..<8", carried: nil, text: "Buy milk and eggs.", prompt: "p",
                   promptTokens: nil, sentAt: 34.5, seconds: 15.2, outcome: "timed out", answer: []),
         ]
-        note.saved = [.init(title: "Call the dentist", due: "2026-10-21", list: "work", id: UUID()),
-                      .init(title: "Buy milk and eggs", due: nil, list: "work", id: UUID())]
+        let eggs = UUID()
+        note.saved = [.init(title: "Call the dentist", due: "2026-10-21", id: UUID()),
+                      .init(title: "Buy milk and eggs", due: nil, id: eggs)]
         let report = VoiceNoteLog.report(note)
-        XCTAssertTrue(report.contains("List: work, chip changed: yes"), report)
+        XCTAssertFalse(report.contains("List:"), "one list: no list and no chip in the record")
         XCTAssertTrue(report.contains("Heard: Call the dentist tomorrow. Buy milk and eggs."), report)
         XCTAssertTrue(report.contains("Live card: Call the dentist tomorrow. Buy milk and"), "the live card differed")
         XCTAssertTrue(report.contains("Reset at 12.0 s: before \"Call the dentist tomorrow\", after \"Buy\""), report)
         XCTAssertTrue(report.contains("Part 1: sentence cut, words 0..<4, sent at 10.0 s, 2.5 s, model, 1 prompt characters, 300 tokens"), report)
         XCTAssertTrue(report.contains("Part 2: end cut, words 4..<8, sent at 34.5 s, 15.2 s, timed out"), report)
         XCTAssertTrue(report.contains("Part 1 model: spoken \"Call the dentist tomorrow\", title \"Call the dentist\", due 2026-10-21"), report)
-        XCTAssertTrue(report.contains("Saved: Buy milk and eggs on work"), report)
+        XCTAssertTrue(report.contains("Saved: Buy milk and eggs, \(eggs.uuidString)"), report)
+        XCTAssertTrue(report.contains("Saved: Call the dentist (2026-10-21), "), report)
         XCTAssertTrue(report.contains("Timings: transcriber ready 0.8 s, stop 34.2 s"), report)
-        XCTAssertEqual(VoiceNoteLog.row(note, timeZone: london), "17:18 \u{00B7} Work \u{00B7} 34 s \u{00B7} stopped: tap \u{00B7} 2 to-dos")
+        XCTAssertEqual(VoiceNoteLog.row(note, timeZone: london), "17:18 \u{00B7} 34 s \u{00B7} stopped: tap \u{00B7} 2 to-dos")
     }
 
-    func testTheRecordKeepsWhatTheTranscriberSaidAndWhereTheNoteWent() {
-        var note = VoiceNoteTrace(input: .voice, list: .personal)
-        note.chose(.work)
-        XCTAssertEqual(note.list, "work")
-        XCTAssertTrue(note.chipChanged, "the chip sent it to Work")
+    func testTheRecordKeepsWhatTheTranscriberSaid() {
+        var note = VoiceNoteTrace(input: .voice)
         var speech = SpeechDiagnostics(engine: .recognizer, why: "iOS 17 to 25")
         speech.resets = [TranscriptReset(at: 3, before: "Call the dentist", after: "Buy")]
         speech.restarts = 1
@@ -142,6 +140,25 @@ final class VoiceNoteLogTests: XCTestCase {
         XCTAssertEqual(note.resets.count, 1)
         XCTAssertEqual(note.engine, "SFSpeechRecognizer")
         XCTAssertEqual(note.engineWhy, "iOS 17 to 25")
+    }
+
+    /// A record a list build wrote (with the note's list, its chip and each task's list) still loads, and keeps the rest.
+    func testARecordFromAListBuildStillLoads() throws {
+        var old = trace(at: at(2026, 10, 20, 17, 18))
+        old.saved = [.init(title: "LinkedIn ICP", due: nil, id: UUID())]
+        let encoder = JSONEncoder()
+        encoder.dateEncodingStrategy = .iso8601
+        var object = try XCTUnwrap(JSONSerialization.jsonObject(with: try encoder.encode([old])) as? [[String: Any]])
+        object[0]["list"] = "work"
+        object[0]["chipChanged"] = true
+        object[0]["saved"] = [["title": "LinkedIn ICP", "list": "work", "id": old.saved[0].id.uuidString]]
+        let log = store()
+        try FileManager.default.createDirectory(at: log.fileURL.deletingLastPathComponent(), withIntermediateDirectories: true)
+        try JSONSerialization.data(withJSONObject: object).write(to: log.fileURL)
+        let loaded = log.load()
+        XCTAssertEqual(loaded.map(\.id), [old.id])
+        XCTAssertEqual(loaded.first?.saved.map(\.title), ["LinkedIn ICP"])
+        XCTAssertEqual(loaded.first?.finalTranscript, old.finalTranscript)
     }
 
     func testTheLogCopyKeepsTheRules() {

@@ -7,9 +7,9 @@ import WidgetKit
 
 struct TodoEntry: TimelineEntry {
     let date: Date
-    /// Open tasks on both lists in the To-do tab's order (the list on top first, each list due first), at most three.
+    /// Open tasks, due first (the To-do tab's order), at most three.
     let open: [String]
-    /// Open tasks on both lists.
+    /// Every open task.
     let openCount: Int
 
     init(date: Date, open: [String], openCount: Int) {
@@ -18,14 +18,14 @@ struct TodoEntry: TimelineEntry {
         self.openCount = openCount
     }
 
-    /// What the widget shows for a set of tasks at a moment: both lists in the order the To-do tab shows them, with one
-    /// count, so the Lock Screen and the app agree. The app reloads the widget on every write, a new order too.
+    /// What the widget shows for a set of tasks at a moment: the one list in the order the To-do tab shows it, with its
+    /// count, so the Lock Screen and the app agree. The app reloads the widget on every write.
     init(date: Date, state: TodoState, clock: DayClock) {
-        let open = state.openTasksInListOrder(clock: clock)
+        let open = state.openTasks(clock: clock)
         self.init(date: date, open: open.prefix(3).map(\.title), openCount: open.count)
     }
 
-    /// The rectangular header with the open count across both lists: "To-do · 4", or "To-do" with nothing open.
+    /// The rectangular header with the open count: "To-do · 4", or "To-do" with nothing open.
     var header: String {
         openCount == 0 ? "To-do" : "To-do \u{00B7} \(openCount)"
     }
@@ -46,7 +46,7 @@ struct TodoCircularView: View {
     }
 }
 
-/// What is still open on both lists, in the To-do tab's order.
+/// What is still open, in the To-do tab's order.
 struct TodoRectangularView: View {
     let entry: TodoEntry
 
