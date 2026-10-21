@@ -397,9 +397,10 @@ final class AppModel {
         apply(store.load())
         guard !isDemo else { return }
         let snapshot = state
+        // A Taken widget added to the Lock Screen while Taken was away ends the widget invite before it shows. Its own
+        // task, so a slow answer from WidgetKit never holds up the renewal check or the nudges below.
+        Task { await checkLockScreenWidget() }
         Task {
-            // A Taken widget added to the Lock Screen while Taken was away ends the widget invite before it shows.
-            await checkLockScreenWidget()
             // Renewals, refunds and purchases made elsewhere land here (PRO.md: refresh on foreground).
             await pro.foreground()
             await Reminders.reschedule(state: snapshot, now: Date())
