@@ -64,7 +64,11 @@ struct RootView: View {
         .onChange(of: model.sheet) { _, _ in DemoProbe.record(model) }
         .onChange(of: model.paywall?.id) { _, _ in DemoProbe.record(model) }
         .onChange(of: model.trialAsk) { _, _ in DemoProbe.record(model) }
-        .onChange(of: TodoModel.shared.phase) { _, _ in DemoProbe.record(model) }
+        .onChange(of: TodoModel.shared.phase) { _, phase in
+            DemoProbe.record(model)
+            // A trial ask that waited for the voice note comes once it is done.
+            if phase == .idle { model.captureDidSettle() }
+        }
     }
 
     private var tabBinding: Binding<AppTab> {

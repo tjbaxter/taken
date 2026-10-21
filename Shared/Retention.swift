@@ -18,16 +18,23 @@ enum TodayPrompt: Equatable, Sendable {
     /// "Log from your Lock Screen: add the Taken widget": once, on the first day that reaches All taken, and never to
     /// someone whose Lock Screen already has the Taken widget.
     case widgetInvite
+    /// The trial reminder's own words ("Your Taken trial ends Sunday 1 Nov. ..."), while notifications are not allowed
+    /// for Taken, from the moment the reminder would have come until the trial ends (`TrialReminder.notice`). A tap
+    /// opens Apple's Manage subscription sheet. It keeps the paywall's "we remind you" without notifications.
+    case trialEnds(String)
 }
 
 enum TodayPrompts {
     /// Which row Today shows, if any. The nudge offer first (the lever with clinical evidence), then the repair, then the
     /// widget invite. None while locked: the Taken Pro bar sits there, and each of them leads to something Pro unlocks.
     /// `lockScreenWidget`: a Taken stack widget is already on the Lock Screen (WidgetKit's configured widgets), so the
-    /// invite would be noise. A repair line closed for its day stays closed that day.
+    /// invite would be noise. A repair line closed for its day stays closed that day. The trial notice
+    /// (`trialNotice`, only while notifications cannot deliver the trial reminder) comes before all of them: it is
+    /// the reminder the paywall promised, and it lasts at most 3 days.
     static func pick(settings: StackSettings, hasStack: Bool, today: DaySummary, repairDay: DayKey?,
-                     locked: Bool, lockScreenWidget: Bool = false) -> TodayPrompt? {
+                     locked: Bool, lockScreenWidget: Bool = false, trialNotice: String? = nil) -> TodayPrompt? {
         guard hasStack, !locked else { return nil }
+        if let trialNotice { return .trialEnds(trialNotice) }
         if !settings.reminderEnabled && !settings.nudgeOfferDone { return .nudgeOffer(minutes: settings.reminderMinutes) }
         if let repairDay, settings.repairClosedDay != repairDay.ordinal { return .repair(repairDay) }
         if today.allTaken && !settings.widgetInviteDone && !lockScreenWidget

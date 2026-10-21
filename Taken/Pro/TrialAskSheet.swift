@@ -1,15 +1,18 @@
 import SwiftUI
 
-/// The one notification ask right after a trial starts (`TrialAsk`, SPEC 3.9): both reasons on one short sheet,
-/// Continue (iOS's own prompt follows) and a quiet Not now. Apple: ask in context, and title the pre-prompt button
-/// like Continue, never Allow (https://developer.apple.com/documentation/usernotifications/asking-permission-to-use-notifications,
-/// https://developer.apple.com/design/human-interface-guidelines/privacy).
+/// The one notification ask right after a trial starts (`TrialAsk`, SPEC 3.9): both reasons on one short sheet and one
+/// button, Continue, which opens iOS's own prompt. Apple: ask in context, title the pre-prompt button like Continue,
+/// never Allow, "Include only one button", and offer no way "to leave the screen or window without viewing the system
+/// alert, like offering an option to close or cancel"
+/// (https://developer.apple.com/documentation/usernotifications/asking-permission-to-use-notifications,
+/// https://developer.apple.com/design/human-interface-guidelines/privacy). So it has no second button and cannot be
+/// swiped away; iOS's alert carries the no.
 struct TrialAskSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
     @State private var busy = false
     /// The content's own height: the sheet is as tall as what it says, not half the screen.
-    @State private var contentHeight: CGFloat = 340
+    @State private var contentHeight: CGFloat = 300
 
     init() {}
 
@@ -40,7 +43,7 @@ struct TrialAskSheet: View {
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.top, 8)
                 Button {
-                    answer(allow: true)
+                    answer()
                 } label: {
                     Text(TrialAsk.allow)
                         .font(.sans(17, .sansSemibold, relativeTo: .body))
@@ -51,24 +54,12 @@ struct TrialAskSheet: View {
                 }
                 .buttonStyle(PressStyle())
                 .disabled(busy)
+                .accessibilityHint("Shows the iPhone's notification prompt.")
                 .padding(.top, 28)
-                Button {
-                    answer(allow: false)
-                } label: {
-                    Text(TrialAsk.notNow)
-                        .font(.sans(15, .sansMedium, relativeTo: .callout))
-                        .foregroundStyle(theme.fgMuted)
-                        .frame(maxWidth: .infinity)
-                        .frame(minHeight: 44)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .disabled(busy)
-                .padding(.top, 6)
             }
             .padding(.horizontal, 24)
             .padding(.top, 30)
-            .padding(.bottom, 12)
+            .padding(.bottom, 16)
             .background {
                 GeometryReader { proxy in
                     Color.clear
@@ -81,15 +72,18 @@ struct TrialAskSheet: View {
         .background(theme.bg.ignoresSafeArea())
         // Larger text than fits scrolls inside the sheet.
         .presentationDetents([.height(contentHeight)])
-        .presentationDragIndicator(.visible)
+        .presentationDragIndicator(.hidden)
+        .interactiveDismissDisabled(true)
         .presentationBackground(theme.bg)
+        // Only an ask that is on screen uses up the one ask.
+        .onAppear { model.trialAskDidAppear() }
     }
 
-    private func answer(allow: Bool) {
+    private func answer() {
         guard !busy else { return }
         busy = true
         Task {
-            await model.answerTrialAsk(allow: allow)
+            await model.answerTrialAsk()
             busy = false
         }
     }

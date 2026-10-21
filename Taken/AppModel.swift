@@ -84,12 +84,16 @@ final class AppModel {
     var expandedItemID: UUID?
     /// The Taken Pro sheet, and which presentation level shows it.
     var paywall: PaywallRequest?
-    /// The one notification ask after a trial starts (`TrialAsk`), on the presentation level the paywall was on.
+    /// The one notification ask after a trial starts (`TrialAsk`): the presentation level it is on, once nothing else
+    /// holds the screen (`presentTrialAskIfClear`).
     var trialAsk: PaywallAnchor?
     /// How iOS's notification permission is read (`Reminders.permission`); tests and `-demo` give their own answer.
     @ObservationIgnored var notificationPermission: @MainActor () async -> NotificationPermission = {
         await Reminders.permission()
     }
+    /// A voice note is starting, being heard or being sorted: the trial ask waits for it (`TodoModel.phase`). Tests
+    /// give their own answer.
+    @ObservationIgnored var captureBusy: @MainActor () -> Bool = { TodoModel.shared.phase != .idle }
     /// Chips pre-selected in the Add sheet for the `-demo -screen add` screenshot, and how often each is taken.
     let demoPreselect: [String]
     let demoChoices: [String: FrequencyChoice]
@@ -102,6 +106,9 @@ final class AppModel {
     /// Increments each time a tap finishes the day (All taken), to run its check animation once.
     private(set) var lockInCount = 0
     private(set) var notificationsDenied = false
+    /// iOS allows Taken's notifications, as last read (on every return to the foreground). Nil until read. While it is
+    /// false, Today carries the trial reminder's words itself (`TrialReminder.notice`).
+    private(set) var notificationsAllowed: Bool?
     /// Yesterday, while Today offers to fill it in (`TodayPrompts.repairDay`); worked out with the stats.
     private(set) var repairDay: DayKey?
     /// `-demo` shows a one-time row only when its `-screen` asks: today-nudge-offer, today-repair, today-widget-invite.
@@ -120,10 +127,24 @@ final class AppModel {
     @ObservationIgnored private var iconWaitsForSettings = false
     /// What the paywall was opened for, run once Pro is on and the sheet has closed.
     @ObservationIgnored private var afterPaywall: (@MainActor () -> Void)?
-    /// A trial started in the paywall: the notification ask follows on this level once the sheet has gone.
-    @ObservationIgnored private var trialAskAfterPaywall: PaywallAnchor?
-    /// The notification ask was answered (Continue or Not now), so closing it adds nothing.
+    /// A trial started in the paywall: the notification ask follows once the sheet has gone.
+    @ObservationIgnored private var trialAskAfterPaywall = false
+    /// The ask is due and waits until nothing else holds the screen: no paywall, no iOS prompt, no voice note, no
+    /// sheet opened since the paywall (`trialAskLevel`). Nothing is used up until it is on screen (`trialAskDidAppear`).
+    @ObservationIgnored private var trialAskDue = false
+    /// The sheet the paywall was over when the trial started: the ask may show over it while it is still up.
+    @ObservationIgnored private var trialAskSheet: SheetRoute?
+    /// Continue was tapped. The ask has no other way out (Apple's HIG), so closing without it means something else
+    /// closed it (a voice to-do request), and it comes back once nothing else holds the screen.
     @ObservationIgnored private var trialAskAnswered = false
+    /// How many sheets are on screen at each level above TODAY (`PaywallHost`): a sheet still closing counts until
+    /// it has gone.
+    @ObservationIgnored private var levelsOnScreen: [PaywallAnchor: Int] = [:]
+    @ObservationIgnored private var trialAskRetry: Task<Void, Never>?
+    /// A voice to-do request holds the ask back this long, so the recording it asked for starts first (it starts about
+    /// half a second after the To-do tab comes to the front, `TodoRootView.consumeRequest`). Tests shorten it.
+    @ObservationIgnored var trialAskVoiceHold: TimeInterval = 3
+    @ObservationIgnored private var trialAskHeldUntil: Date?
     /// iOS's notification prompt is up (the nudge's Turn on or toggle): the trial ask then stays away.
     @ObservationIgnored private var askingPermission = false
 
@@ -252,7 +273,13 @@ final class AppModel {
     var todayPrompt: TodayPrompt? {
         if isDemo { return demoPrompt }
         return TodayPrompts.pick(settings: settings, hasStack: hasStack, today: today, repairDay: repairDay,
-                                 locked: isLocked, lockScreenWidget: lockScreenWidget ?? true)
+                                 locked: isLocked, lockScreenWidget: lockScreenWidget ?? true, trialNotice: trialNotice)
+    }
+
+    /// The trial reminder's words for Today while notifications cannot carry them (`TrialReminder.notice`).
+    var trialNotice: String? {
+        guard notificationsAllowed == false else { return nil }
+        return TrialReminder.notice(status: pro.status, price: pro.renewalPrice, state: state, now: now)
     }
 
     static func demoRow(forScreen screen: String?, settings: StackSettings, today: DayKey) -> TodayPrompt? {
@@ -420,8 +447,9 @@ final class AppModel {
             await Reminders.reschedule(state: snapshot, now: Date())
             // Due-time notifications too: tasks saved before notifications were allowed get theirs now.
             await TodoNotificationScheduler.shared.reschedule(TodoStore.shared.load().tasks)
-            let denied = await Reminders.isDenied()
-            self.notificationsDenied = denied && snapshot.settings.reminderEnabled
+            let permission = await self.notificationPermission()
+            self.notificationsDenied = permission == .denied && snapshot.settings.reminderEnabled
+            self.notificationsAllowed = permission == .allowed
         }
         consumePendingLog()
         // A first dose logged from a widget, or an app closed before the sheet came up, still gets its one paywall.
@@ -452,11 +480,20 @@ final class AppModel {
     /// action): the To-do tab comes to the front and any sheet over it closes, so Listening and the stop button show.
     func openTodoTab() {
         if sheet != nil { sheet = nil }
+        // The trial ask steps aside for the recording, held back until it has started, and comes back once it is done.
+        if trialAsk != nil {
+            trialAsk = nil
+            if !trialAskAnswered { trialAskDue = true }
+        }
+        if trialAskDue {
+            trialAskHeldUntil = Date().addingTimeInterval(trialAskVoiceHold)
+            retryTrialAsk()
+        }
         tab = .todo
     }
 
-    /// The To-do tab is in front with no sheet or paywall over it: the mic may open.
-    var showsTodoTabUncovered: Bool { tab == .todo && sheet == nil && paywall == nil }
+    /// The To-do tab is in front with no sheet, paywall or trial ask over it: the mic may open.
+    var showsTodoTabUncovered: Bool { tab == .todo && sheet == nil && paywall == nil && trialAsk == nil }
 
     func handle(url: URL) {
         guard url.scheme == "taken" else { return }
@@ -578,16 +615,20 @@ final class AppModel {
     /// one notification ask after it (`TrialAsk`).
     func paywallUnlocked(trialStarted: Bool = false) {
         if let pending = paywall?.pending { afterPaywall = pending }
-        if trialStarted, let anchor = paywall?.anchor { trialAskAfterPaywall = anchor }
+        if trialStarted, paywall != nil { trialAskAfterPaywall = true }
     }
 
     /// The paywall sheet finished closing.
     func paywallDidDismiss() {
         let action = afterPaywall
         afterPaywall = nil
-        if let anchor = trialAskAfterPaywall {
-            trialAskAfterPaywall = nil
-            Task { [weak self] in await self?.offerTrialAsk(at: anchor) }
+        if trialAskAfterPaywall {
+            trialAskAfterPaywall = false
+            // The sheet the paywall was over, before the tap that opened it runs (it may close that sheet or open one).
+            let over = sheet
+            Task { [weak self] in await self?.offerTrialAsk(over: over) }
+        } else if trialAskDue {
+            retryTrialAsk()
         }
         guard let action, access.allowsLogging else { return }
         action()
@@ -597,33 +638,104 @@ final class AppModel {
 
     /// Right after a trial starts: the one short sheet asking for notifications, for the evening nudge and the reminder
     /// before the trial ends, only while iOS has not asked yet and only once. When iOS already has an answer, the
-    /// reminder follows it (scheduled only when allowed).
-    func offerTrialAsk(at anchor: PaywallAnchor) async {
+    /// reminder follows it (scheduled only when allowed). The ask never takes the screen from the person: while the
+    /// tap that opened the paywall has opened a sheet, started a voice note or brought up iOS's prompt, it waits, and
+    /// it comes when nothing else holds the screen, on TODAY or over the sheet the paywall was over if that is still
+    /// up. `over` is that sheet (nil on TODAY).
+    func offerTrialAsk(over route: SheetRoute?) async {
         // The paywall has gone and the tap that opened it has run (it may be the nudge's own Turn on).
         try? await Task.sleep(for: .milliseconds(400))
         let permission = await notificationPermission()
-        let clear = paywall == nil && !askingPermission && !(anchor == .root && sheet != nil)
-        guard clear, TrialAsk.shows(trialStarted: true, permission: permission, alreadyShown: pro.trialAskShown) else {
-            if !isDemo {
-                let snapshot = state
-                await Reminders.reschedule(state: snapshot, now: Date())
-            }
+        guard TrialAsk.shows(trialStarted: true, permission: permission, alreadyShown: pro.trialAskShown) else {
+            await rescheduleReminders()
             return
         }
-        pro.markTrialAskShown()
-        trialAskAnswered = false
-        trialAsk = anchor
+        trialAskDue = true
+        trialAskSheet = route
+        presentTrialAskIfClear()
     }
 
-    /// Continue (iOS's prompt follows) or Not now. Allowed: the evening nudge comes on at its time, which answers
-    /// Today's nudge offer, and the trial reminder is scheduled with it. Any answer, a no included, answers Today's
-    /// nudge offer too, so there is never a second ask (own choice).
-    func answerTrialAsk(allow: Bool) async {
+    /// Shows the waiting ask where the person is, once nothing else holds the screen (`trialAskLevel`). Returns the
+    /// level it went to, or nil while it still waits.
+    @discardableResult
+    func presentTrialAskIfClear() -> PaywallAnchor? {
+        guard trialAskDue, trialAsk == nil, let level = trialAskLevel() else { return nil }
+        trialAskDue = false
+        trialAskAnswered = false
+        trialAsk = level
+        return level
+    }
+
+    /// Where the ask may show right now, or nil while the person is busy: a paywall or iOS's prompt is up, a voice note
+    /// is starting, being heard or sorted, a sheet inside a sheet is up, a sheet opened since the paywall (the Add sheet
+    /// a locked "+" asked for) is up, or a sheet is still opening or closing. Over the sheet the paywall was over while
+    /// it is still up; otherwise on TODAY.
+    private func trialAskLevel() -> PaywallAnchor? {
+        if let held = trialAskHeldUntil, Date() < held { return nil }
+        guard paywall == nil, !askingPermission, !captureBusy(), (levelsOnScreen[.nested] ?? 0) == 0 else { return nil }
+        let sheetOnScreen = (levelsOnScreen[.sheet] ?? 0) > 0
+        if let sheet {
+            return sheetOnScreen && sheet == trialAskSheet ? .sheet : nil
+        }
+        return sheetOnScreen ? nil : .root
+    }
+
+    /// Tries the waiting ask again after a moment, so a sheet that just closed has finished: iOS's prompt may have
+    /// answered it meanwhile, and then it is dropped and the reminder follows that answer.
+    func retryTrialAsk(after delay: Duration = .milliseconds(350)) {
+        guard trialAskDue else { return }
+        // Held back for a voice to-do request: not before the hold ends.
+        let heldFor = max(trialAskHeldUntil?.timeIntervalSinceNow ?? 0, 0)
+        let wait = heldFor > 0 ? max(delay, .milliseconds(Int(heldFor * 1000) + 200)) : delay
+        trialAskRetry?.cancel()
+        trialAskRetry = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard let self, !Task.isCancelled, self.trialAskDue, self.trialAsk == nil else { return }
+            guard await self.notificationPermission() == .notDetermined else {
+                self.trialAskDue = false
+                await self.rescheduleReminders()
+                return
+            }
+            self.presentTrialAskIfClear()
+        }
+    }
+
+    /// A sheet above TODAY came on screen (`PaywallHost`), at `.sheet` or `.nested`.
+    func levelDidAppear(_ level: PaywallAnchor) {
+        guard level != .root else { return }
+        levelsOnScreen[level, default: 0] += 1
+    }
+
+    /// A sheet above TODAY has gone: the waiting ask may come now.
+    func levelDidDisappear(_ level: PaywallAnchor) {
+        guard level != .root else { return }
+        levelsOnScreen[level] = max((levelsOnScreen[level] ?? 0) - 1, 0)
+        // An ask over a sheet that something else closed went with it: it comes back on TODAY.
+        if trialAsk == level, (levelsOnScreen[level] ?? 0) == 0 {
+            trialAsk = nil
+            if !trialAskAnswered { trialAskDue = true }
+        }
+        retryTrialAsk()
+    }
+
+    /// A voice note finished (the To-do tab's phase is back to idle): the waiting ask may come now.
+    func captureDidSettle() {
+        retryTrialAsk()
+    }
+
+    /// The ask is on screen: only now is the one ask used up (`ProLedger.trialAskAt`).
+    func trialAskDidAppear() {
+        pro.markTrialAskShown()
+    }
+
+    /// Continue, the ask's one button: iOS's prompt follows, and iOS's alert carries the no. Allowed: the evening nudge
+    /// comes on at its time, which answers Today's nudge offer, and the trial reminder is scheduled with it. Either answer
+    /// to iOS answers Today's nudge offer too, so there is never a second ask (own choice).
+    func answerTrialAsk() async {
         trialAskAnswered = true
-        if allow { await setReminderEnabled(true) }
+        await setReminderEnabled(true)
         if !settings.nudgeOfferDone { write { $0.settings.nudgeOfferDone = true } }
         trialAsk = nil
-        guard allow else { return }
         if settings.reminderEnabled {
             show(Toast(message: RetentionCopy.nudgeOn, time: Fmt.minutes(settings.reminderMinutes)))
         } else if notificationsDenied {
@@ -631,12 +743,19 @@ final class AppModel {
         }
     }
 
-    /// The ask was swiped away: the same as Not now.
+    /// The ask has gone. It cannot be swiped away, so without Continue something else closed it (a voice to-do
+    /// request): it comes back once nothing else holds the screen.
     func trialAskDidDismiss() {
         trialAsk = nil
         guard !trialAskAnswered else { return }
-        trialAskAnswered = true
-        if !settings.nudgeOfferDone { write { $0.settings.nudgeOfferDone = true } }
+        trialAskDue = true
+        retryTrialAsk()
+    }
+
+    private func rescheduleReminders() async {
+        guard !isDemo else { return }
+        let snapshot = state
+        await Reminders.reschedule(state: snapshot, now: Date())
     }
 
     /// About 1.5 s after the first dose the paywall slides up, once.
@@ -667,6 +786,8 @@ final class AppModel {
             iconWaitsForSettings = false
             scheduleIconSync(after: .milliseconds(350))
         }
+        // The trial ask waiting for this sheet to close comes now (`presentTrialAskIfClear`).
+        retryTrialAsk()
         guard introWaitsForSheet else { return }
         introWaitsForSheet = false
         scheduleIntro(after: .milliseconds(500))
@@ -884,6 +1005,9 @@ final class AppModel {
             let granted = await Reminders.requestPermission()
             askingPermission = false
             notificationsDenied = !granted
+            notificationsAllowed = granted
+            // A trial ask waiting for this prompt: iOS has its answer now, so it is dropped (`retryTrialAsk`).
+            retryTrialAsk()
             guard granted else { return }
             // Notifications are allowed now: to-dos with a time get theirs too.
             await TodoNotificationScheduler.shared.reschedule(TodoStore.shared.load().tasks)
@@ -895,6 +1019,12 @@ final class AppModel {
 
     func setReminderMinutes(_ minutes: Int) {
         write { $0.settings.reminderMinutes = minutes }
+    }
+
+    /// Profile > Reminder > Trial reminder. Off withdraws it, pending or delivered, and Today's line with it; the write
+    /// reschedules (`Sync.afterWrite`).
+    func setTrialReminder(_ enabled: Bool) {
+        write { $0.settings.trialReminderEnabled = enabled }
     }
 
     /// Profile > Wake-up time. The day rolls over 4 hours before it (never seen or set), so every view, widget, Siri

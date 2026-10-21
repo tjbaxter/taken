@@ -259,15 +259,17 @@ enum ProCopy {
     /// The three steps under the yearly plan while its introductory offer costs nothing and this Apple Account can still
     /// have it: "Today: full Pro", "Day 4: we remind you", "Day 7: $19.99 a year starts". Built from StoreKit's trial
     /// length, display price and period, never from numbers in the code; the reminder day is the trial length minus
-    /// `TrialReminder.leadDays`, and a trial of 3 days or less has no reminder step (it gets no reminder). Empty when
-    /// there is no such offer.
-    static func trialTimeline(_ offer: PlanOffer?, eligible: Bool, now: Date, timeZone: TimeZone = .current) -> [TrialStep] {
+    /// `TrialReminder.leadDays`, and a trial of 3 days or less has no reminder step (it gets no reminder). Nor does it
+    /// when notifications are already turned off for Taken (`remindable` false): the paywall never promises a reminder
+    /// it knows cannot come. Empty when there is no such offer.
+    static func trialTimeline(_ offer: PlanOffer?, eligible: Bool, now: Date, timeZone: TimeZone = .current,
+                              remindable: Bool = true) -> [TrialStep] {
         guard let offer, let price = PlanPrice(offer), let intro = liveIntro(offer, eligible: eligible),
               intro.mode == .onUs else { return [] }
         let days = trialDays(intro, from: now, timeZone: timeZone)
         guard days >= 1 else { return [] }
         var steps = [TrialStep(day: "Today", text: "full Pro")]
-        if days > TrialReminder.leadDays {
+        if remindable && days > TrialReminder.leadDays {
             steps.append(TrialStep(day: "Day \(days - TrialReminder.leadDays)", text: "we remind you"))
         }
         steps.append(TrialStep(day: "Day \(days)", text: "\(renewal(price)) starts"))

@@ -55,13 +55,17 @@ private struct PaywallHost: ViewModifier {
     func body(content: Content) -> some View {
         content
             .environment(\.paywallAnchor, anchor)
+            // Which levels are on screen, so the trial ask waits for a sheet to finish opening or closing.
+            .onAppear { model.levelDidAppear(anchor) }
+            .onDisappear { model.levelDidDisappear(anchor) }
             .sheet(item: binding, onDismiss: { model.paywallDidDismiss() }) { request in
                 PaywallView(request: request)
                     .environment(model)
                     .environment(\.theme, model.theme)
                     .preferredColorScheme(model.theme.scheme)
             }
-            // The one notification ask after a trial starts, on the level the paywall was on, once it has gone.
+            // The one notification ask after a trial starts, once the paywall has gone and nothing else holds the
+            // screen.
             .sheet(isPresented: askBinding, onDismiss: { model.trialAskDidDismiss() }) {
                 TrialAskSheet()
                     .environment(model)

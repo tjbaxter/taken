@@ -1,12 +1,14 @@
+import StoreKit
 import SwiftUI
 
 /// Today's one quiet row under the progress line (SPEC 3.1, the 1.1 retention build): the evening nudge offered once,
-/// the honest repair for yesterday, or the widget invite after the first All taken. One at a time, out of the stack's
-/// way, in the look's own tokens.
+/// the honest repair for yesterday, the widget invite after the first All taken, or the trial reminder's words while
+/// notifications cannot carry them. One at a time, out of the stack's way, in the look's own tokens.
 struct TodayPromptRow: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
     let prompt: TodayPrompt
+    @State private var managing = false
 
     init(prompt: TodayPrompt) {
         self.prompt = prompt
@@ -17,6 +19,44 @@ struct TodayPromptRow: View {
         case .nudgeOffer(let minutes): nudgeOffer(minutes: minutes)
         case .repair(let day): repair(day)
         case .widgetInvite: widgetInvite
+        case .trialEnds(let text): trialEnds(text)
+        }
+    }
+
+    // MARK: Trial notice
+
+    /// The trial reminder's own words (`TrialReminder.notice`); a tap opens Apple's Manage subscription sheet, the same
+    /// one Profile opens. No close: it goes when the trial ends, converts or is cancelled, or with Profile's Trial
+    /// reminder.
+    private func trialEnds(_ text: String) -> some View {
+        Button {
+            managing = true
+        } label: {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: "bell")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.signalInk)
+                    .accessibilityHidden(true)
+                Text(text)
+                    .font(.sans(15, .sansMedium, relativeTo: .subheadline))
+                    .foregroundStyle(theme.fg)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .background(theme.bgRaised, in: shape)
+        .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
+        .accessibilityHint("Opens your subscription.")
+        .manageSubscriptionsSheet(isPresented: $managing)
+        .onChange(of: managing) { _, open in
+            // A trial cancelled in Apple's sheet takes the line and the reminder away at once.
+            if !open { Task { await model.pro.refresh() } }
         }
     }
 

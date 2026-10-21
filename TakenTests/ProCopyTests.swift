@@ -218,6 +218,18 @@ final class ProCopyTests: XCTestCase {
                        "the terms line under the button stays as it was")
     }
 
+    func testTheTimelineNeverPromisesAReminderThatCannotCome() {
+        let now = at(2026, 10, 21, 9)
+        XCTAssertEqual(ProCopy.trialTimeline(yearly(intro: onUsWeek), eligible: true, now: now, timeZone: london,
+                                             remindable: false).map(\.line),
+                       ["Today: full Pro", "Day 7: $19.99 a year starts"],
+                       "notifications already off for Taken: no reminder step, the rest as it was")
+        XCTAssertEqual(ProCopy.trialTimeline(yearly(intro: onUsWeek), eligible: true, now: now, timeZone: london,
+                                             remindable: true).map(\.line),
+                       ["Today: full Pro", "Day 4: we remind you", "Day 7: $19.99 a year starts"],
+                       "not asked yet, or allowed: the promise stays")
+    }
+
     func testAPlanPriceSurvivesTheCache() throws {
         let price = try XCTUnwrap(PlanPrice(yearly(intro: onUsWeek)))
         XCTAssertEqual(price, PlanPrice(displayPrice: "$19.99", period: PlanPeriod(value: 1, unit: .year)))

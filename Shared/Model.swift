@@ -147,6 +147,10 @@ struct StackSettings: Codable, Hashable, Sendable {
     /// The day (DayKey ordinal) whose repair line ("Forgot to log yesterday? Fill it in") was closed: it stays hidden for
     /// that day only. Not kept by Erase all data.
     var repairClosedDay: Int?
+    /// Profile > Reminder > Trial reminder: the one notification before a Taken Pro trial ends (`TrialReminder`). On
+    /// unless turned off there; files from before it read as on. Apple's HIG asks for an in-app switch for every kind of
+    /// notification people agreed to (https://developer.apple.com/design/human-interface-guidelines/managing-notifications).
+    var trialReminderEnabled: Bool = true
 
     /// The Nudge toggle in Profile, or Turn on on the offer: either is an explicit answer, so the one-time offer on Today
     /// never comes back after it, even once the nudge is turned off again.
@@ -209,7 +213,7 @@ struct StackSettings: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case wakeMinutes, dayStartHour, reminderEnabled, reminderMinutes, hapticsEnabled, theme
-        case nudgeOfferDone, widgetInviteDay, widgetInviteDone, repairClosedDay
+        case nudgeOfferDone, widgetInviteDay, widgetInviteDone, repairClosedDay, trialReminderEnabled
     }
 
     init(from decoder: any Decoder) throws {
@@ -231,6 +235,7 @@ struct StackSettings: Codable, Hashable, Sendable {
         widgetInviteDay = try? c.decodeIfPresent(Int.self, forKey: .widgetInviteDay)
         widgetInviteDone = (try? c.decodeIfPresent(Bool.self, forKey: .widgetInviteDone)) ?? false
         repairClosedDay = try? c.decodeIfPresent(Int.self, forKey: .repairClosedDay)
+        trialReminderEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .trialReminderEnabled)) ?? true
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -247,6 +252,8 @@ struct StackSettings: Codable, Hashable, Sendable {
         try c.encodeIfPresent(widgetInviteDay, forKey: .widgetInviteDay)
         if widgetInviteDone { try c.encode(true, forKey: .widgetInviteDone) }
         try c.encodeIfPresent(repairClosedDay, forKey: .repairClosedDay)
+        // Written only once turned off, so a file that never changed it looks as it did.
+        if !trialReminderEnabled { try c.encode(false, forKey: .trialReminderEnabled) }
     }
 }
 
