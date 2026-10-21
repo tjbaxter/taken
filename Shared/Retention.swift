@@ -1,8 +1,8 @@
 import Foundation
 
 // The 1.1 retention build (SPEC 3.1, 2026-10-21): what keeps people logging and renewing, as pure rules. Today's one
-// quiet row: the evening nudge offered once, the honest repair, the widget invite. The reminder before a trial ends is
-// TrialReminder.swift. Copy rules: no em or en dash, never the word for no charge, no exclamation marks.
+// quiet row: the evening nudge offered once, the honest repair, the widget invite. Copy rules: no em or en dash, never
+// the word for no charge, no exclamation marks.
 
 /// The one quiet line Today may show under its progress line. At most one at a time, never in the capture path.
 enum TodayPrompt: Equatable, Sendable {

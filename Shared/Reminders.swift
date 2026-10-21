@@ -121,13 +121,11 @@ enum Reminders {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .denied
     }
 
-    /// Replace every pending nudge with a fresh plan, and withdraw delivered nudges that no longer apply. The trial
-    /// reminder (`TrialReminder`) is rebuilt with them, so its count stays current and a cancelled or converted trial
-    /// never gets one. Neither asks for permission: only Turn on does.
+    /// Replace every pending nudge with a fresh plan, and withdraw delivered nudges that no longer apply.
     static func reschedule(state: StackState, now: Date) async {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
-        let ours = pending.map(\.identifier).filter { $0.hasPrefix(requestPrefix) || $0 == TrialReminder.identifier }
+        let ours = pending.map(\.identifier).filter { $0.hasPrefix(requestPrefix) }
         if !ours.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ours) }
 
         let delivered = await center.deliveredNotifications().map(\.request.identifier)
@@ -137,18 +135,7 @@ enum Reminders {
         let ledger = ProLedgerStore.shared.load()
         let window = ProGate.nudgeWindow(access: ProGate.access(ledger: ledger, state: state, now: now), status: ledger?.status)
         let plans = plan(state: state, now: now, window: window)
-        let trial = TrialReminder.plan(status: ledger?.status, state: state, now: now)
-        guard !plans.isEmpty || trial != nil, await isAuthorized() else { return }
-
-        if let trial {
-            let content = UNMutableNotificationContent()
-            content.body = trial.body
-            content.sound = .default
-            content.threadIdentifier = "taken.pro"
-            let trigger = UNCalendarNotificationTrigger(dateMatching: trial.components, repeats: false)
-            try? await center.add(UNNotificationRequest(identifier: TrialReminder.identifier, content: content,
-                                                        trigger: trigger))
-        }
+        guard !plans.isEmpty, await isAuthorized() else { return }
 
         for plan in plans {
             let content = UNMutableNotificationContent()
