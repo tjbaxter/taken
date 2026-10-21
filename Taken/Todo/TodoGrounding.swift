@@ -29,11 +29,14 @@ enum TodoGrounding {
     ///   messages to my LinkedIn ICPs"), is rebuilt from the speaker's own words. A kept title takes the spelling said
     ///   for a word it wrote singular or plural ("ICP" said as "ICPs").
     /// - G6 a merged task keeps the first due date said.
-    /// - G7 a due stands only as far as it was said for its task: in its words, earlier in its sentence, in a header just
-    ///   before ("Tomorrow."), or in the part's carried phrase. A clock time stays only where a time was said ("at 8",
-    ///   "4 pm", "half past 3", "noon", "in 20 minutes"); a day alone ("today", "tomorrow", "Friday") keeps the day and
-    ///   never a time; nothing said, and the due goes. The task always stays. A time within `promptNowSlack` of the
-    ///   prompt's own "Now", with no time said, always goes (Tom's six tasks due 09:21, 21 Oct 2026).
+    /// - G7 a due stands only as far as it was said for its task. A day: in its words, earlier in its sentence, in a
+    ///   header just before ("Tomorrow."), or in the part's carried phrase. A clock time ("at 8", "4 pm", "9:30", "half
+    ///   three", "8 tonight", "noon", "in 20 minutes") only in the task's own words, the time its sentence opens with
+    ///   ("Today by 4 pm I need to X, Y and Z"), a header or the carried phrase, never in another task's words ("Call
+    ///   mum at 8 tonight, take my tablets": the tablets get no time). A day alone ("today", "tomorrow", "Friday")
+    ///   keeps the day and never a time; nothing said, and the due goes. The task always stays. A time within
+    ///   `promptNowSlack` of the prompt's own "Now", with no time said in the task's own words, always goes (Tom's six
+    ///   tasks due 09:21, 21 Oct 2026).
     /// G2 to G7 run once over the whole note, so a task split across two parts ("Order Reach toothbrushes. | On Amazon")
     /// is joined again. `context` is the moment the note was sorted against (the prompt's "Now").
     static func reconcile(_ raw: [RawTodo], transcript: String, windows: [Range<Int>?]? = nil,
@@ -52,8 +55,8 @@ enum TodoGrounding {
         let note = SpokenNote(transcript)
         // A task that cannot be placed on words (an answer stored before `spoken`, or a note with no words) keeps its
         // due, except a clock time at the prompt's "Now" when no time was said anywhere in the note (G7).
-        let wholeNote = SaidWhen(day: SpokenDayTime.saysDay(in: note.tokens),
-                                 time: SpokenDayTime.saysTime(in: note.tokens))
+        let all = note.words.indices
+        let wholeNote = SaidWhen(day: note.saysDay(in: all), time: note.saysTime(in: all), ownTime: note.saysTime(in: all))
         func unplaced(_ task: RawTodo) -> RawTodo {
             guard let context, isPromptNow(task, context: context), !wholeNote.time else { return task }
             return dueAsSaid(task, when: wholeNote)
@@ -184,8 +187,12 @@ enum TodoGrounding {
                     guard let carried, carried.indices.contains(member) else { return nil }
                     return carried[member]
                 }
-                // With no time said for it, a time at the prompt's "Now" goes here too.
-                grounded = dueAsSaid(grounded, when: note.saidWhen(around: group.span, nextStart: nextStart, carried: phrases))
+                let earlier = groups.map(\.span).filter { $0.end < group.span.start }
+                var when = note.saidWhen(around: group.span, nextStart: nextStart, earlier: earlier, carried: phrases)
+                // A time at the prompt's "Now" needs a time said in the task's own words: the time a sentence opens
+                // with, said for an earlier task, is not enough.
+                if let context, isPromptNow(grounded, context: context), !when.ownTime { when.time = false }
+                grounded = dueAsSaid(grounded, when: when)
             }
             result.append((source: index, task: grounded))
         }
@@ -768,32 +775,67 @@ struct SpokenNote {
         return start
     }
 
-    /// What was said for the words of `span` (G7), a day and a clock time apart: in them, earlier in their sentence, in
-    /// the words after them up to the next break, separator or task ("Gym at 6"), in a header sentence just before
-    /// ("Tomorrow. Call the bank"), or in a carried phrase.
-    func saidWhen(around span: WordSpan, nextStart: Int?, carried: [String] = []) -> SaidWhen {
-        guard !words.isEmpty else { return SaidWhen(day: false, time: false) }
+    /// What was said for the words of `span` (G7), a day and a clock time apart, given the spans of the tasks said
+    /// before it (`earlier`).
+    /// - A day: in its words, earlier in its sentence, in the words after them up to the next break, separator or task,
+    ///   in a header sentence just before ("Tomorrow. Call the bank"), or in a carried phrase.
+    /// - A clock time, narrower: in the task's own words (from the break after the task before it, through its words, to
+    ///   the next break, separator or task: "Gym at 6"), in the day and time words its sentence opens with before the
+    ///   first task's action ("Today by 4 pm I need to email Sam, call the bank"), in a header or in a carried phrase.
+    ///   Never in an earlier task's words: in "Call mum at 8 tonight, take my tablets" only mum has a time, with or
+    ///   without full stops.
+    func saidWhen(around span: WordSpan, nextStart: Int?, earlier: [WordSpan] = [], carried: [String] = []) -> SaidWhen {
+        guard !words.isEmpty else { return SaidWhen(day: false, time: false, ownTime: false) }
         let start = sentenceStart(of: span.start)
-        var end = min(span.end, words.count - 1)
-        let limit = min(nextStart ?? words.count, words.count)
-        while end + 1 < limit, words[end + 1].breakBefore == .none, !isSeparatorWord(end + 1) { end += 1 }
-        var said = (start...end).flatMap { words[$0].tokens }
+        let first = min(span.start, words.count - 1)
+        let end = trailingEnd(of: span, limit: nextStart)
+        // The task's own words start after the words the task before it carries on to.
+        let previous = earlier.filter { $0.end < first }.map(\.end).max()
+        let lead = max(start, previous.map { trailingEnd(of: WordSpan(start: $0, end: $0), limit: first) + 1 } ?? start)
+        let own = min(lead, first)..<(end + 1)
+        // The words the sentence opens with: before any task, then on through an earlier task's words only while they
+        // are day and time words ("Today by 4 pm" copied into the first task's `spoken`).
+        var opening = start
+        while opening < first {
+            let inTask = earlier.contains { $0.start <= opening && opening <= $0.end }
+            if inTask && !words[opening].tokens.allSatisfy(SpokenDayTime.isHeaderWord) { break }
+            opening += 1
+        }
+        var header: Range<Int>?
         if start > 0 {
-            let header = sentenceStart(of: start - 1)
-            if isDayTimeHeader(header..<start) { said = (header..<start).flatMap { words[$0].tokens } + said }
+            let headerStart = sentenceStart(of: start - 1)
+            if isDayTimeHeader(headerStart..<start) { header = headerStart..<start }
         }
-        var when = SaidWhen(day: SpokenDayTime.saysDay(in: said), time: SpokenDayTime.saysTime(in: said))
-        for phrase in carried {
-            let tokens = SpokenNote.tokens(of: phrase)
-            when.day = when.day || SpokenDayTime.saysDay(in: tokens)
-            when.time = when.time || SpokenDayTime.saysTime(in: tokens)
-        }
-        return when
+        let phrases = carried.map { SpokenNote($0) }
+        let headerTime = header.map { saysTime(in: $0) } ?? false
+        let ownTime = saysTime(in: own) || headerTime || phrases.contains { $0.saysTime(in: $0.words.indices) }
+        let day = saysDay(in: start..<(end + 1)) || (header.map { saysDay(in: $0) } ?? false)
+            || phrases.contains { $0.saysDay(in: $0.words.indices) }
+        return SaidWhen(day: day, time: ownTime || saysTime(in: start..<opening), ownTime: ownTime)
     }
 
-    /// A day or a time was said for the words of `span`.
-    func saysDayOrTime(around span: WordSpan, nextStart: Int?, carried: [String] = []) -> Bool {
-        saidWhen(around: span, nextStart: nextStart, carried: carried).any
+    /// The last word a span carries on to: the words after it up to the next break, separator or `limit`.
+    private func trailingEnd(of span: WordSpan, limit: Int?) -> Int {
+        var end = min(span.end, words.count - 1)
+        let limit = min(limit ?? words.count, words.count)
+        while end + 1 < limit, words[end + 1].breakBefore == .none, !isSeparatorWord(end + 1) { end += 1 }
+        return end
+    }
+
+    /// A clock time was said in words `range`: time words (`SpokenDayTime.saysTime`), or a word written as one ("9:30",
+    /// "4:00", "7.30"), which the tokens no longer show.
+    func saysTime(in range: Range<Int>) -> Bool {
+        let range = range.clamped(to: words.indices)
+        guard !range.isEmpty else { return false }
+        return range.contains { SpokenDayTime.isClockTime(words[$0]) }
+            || SpokenDayTime.saysTime(in: range.flatMap { words[$0].tokens })
+    }
+
+    /// A day was said in words `range`.
+    func saysDay(in range: Range<Int>) -> Bool {
+        let range = range.clamped(to: words.indices)
+        guard !range.isEmpty else { return false }
+        return SpokenDayTime.saysDay(in: range.flatMap { words[$0].tokens })
     }
 
     /// A sentence that only says when: four words or fewer, every one a day or time word, a connector or filler, and a
@@ -1043,8 +1085,9 @@ struct SpokenNote {
 struct SaidWhen: Equatable, Sendable {
     var day: Bool
     var time: Bool
-
-    var any: Bool { day || time }
+    /// A time said in the task's own words, a header or the carried phrase, not only in the time its sentence opens
+    /// with before an earlier task: what a time at the prompt's own "Now" needs to stay.
+    var ownTime: Bool
 }
 
 /// The words that let a due date stand, narrower than `SpokenNote.dayAndTimeWords` (which also keeps "now", "later",
@@ -1099,19 +1142,64 @@ enum SpokenDayTime {
     }
 
     /// A clock time: a number after at, by, around, before, until, till, from or past ("at 6", "half past 3"), before
-    /// am, pm or o'clock ("4 pm", "8 o'clock"), after "quarter to"; "noon", "midday" or "midnight"; or "in 20 minutes".
+    /// am, pm or o'clock ("4 pm", "8 o'clock"), after "quarter to"; an hour after "half" ("half three", the British
+    /// half past) or before a part of the day ("8 tonight", "7 this evening", "4 in the afternoon"); "noon", "midday" or
+    /// "midnight"; or "in 20 minutes", "in an hour", "in half an hour". Duckling's rules for the same: "half <integer>
+    /// (UK style hour-of-day)", "<time-of-day> <part-of-day>", "in|within|after <duration>" with "a <unit-of-duration>"
+    /// and "half a <time-grain>" (https://github.com/facebook/duckling/blob/main/Duckling/Time/EN/Rules.hs,
+    /// https://github.com/facebook/duckling/blob/main/Duckling/Duration/EN/Rules.hs). A word written as a clock time
+    /// ("9:30") is `isClockTime`, since its tokens no longer show it.
     static func saysTime(in tokens: [String]) -> Bool {
+        func peek(_ index: Int) -> String? { tokens.indices.contains(index) ? tokens[index] : nil }
         for (index, token) in tokens.enumerated() {
-            let previous = index > 0 ? tokens[index - 1] : nil
-            let next = index + 1 < tokens.count ? tokens[index + 1] : nil
+            let previous = peek(index - 1)
+            let next = peek(index + 1)
             if timeWords.contains(token) { return true }
+            // "in an hour", "in a minute", "in half an hour".
+            if token == "in" {
+                if let next, next == "a" || next == "an", let unit = peek(index + 2), durations.contains(unit) {
+                    return true
+                }
+                if next == "half", let article = peek(index + 2), article == "a" || article == "an",
+                   let unit = peek(index + 3), durations.contains(unit) { return true }
+            }
             guard isNumber(token) else { continue }
             if let previous, beforeTime.contains(previous) { return true }
             if previous == "to", index >= 2, tokens[index - 2] == "quarter" { return true }
             if let next, afterTime.contains(next) { return true }
             if previous == "in", let next, durations.contains(next) { return true }
+            if isHour(token) {
+                if previous == "half" { return true }
+                // "8 tonight", "7 this evening", "9 tomorrow morning", "4 in the afternoon".
+                var part = index + 1
+                if let lead = peek(part), lead == "this" || lead == "tomorrow" {
+                    part += 1
+                } else if peek(part) == "in", peek(part + 1) == "the" {
+                    part += 2
+                }
+                if let word = peek(part), partsOfDay.contains(word) { return true }
+            }
         }
         return false
+    }
+
+    /// The parts of a day an hour may be said before: "8 tonight", "7 this evening".
+    static let partsOfDay: Set<String> = ["tonight", "morning", "afternoon", "evening"]
+
+    /// An hour on a 12-hour clock, as said: 1 to 12, or one to twelve.
+    static func isHour(_ token: String) -> Bool {
+        if let value = Int(token), token.allSatisfy(\.isNumber) { return (1...12).contains(value) }
+        return ["one", "two", "three", "four", "five", "six", "seven", "eight", "nine", "ten", "eleven", "twelve"]
+            .contains(token)
+    }
+
+    /// A word written as a clock time, hours and minutes: "9:30", "4:00", "19.30" (Duckling's "hh:mm",
+    /// `((?:[01]?\d)|(?:2[0-3]))[:.]([0-5]\d)`), never a price ("£9.50").
+    static func isClockTime(_ word: SpokenNote.Word) -> Bool {
+        guard word.surface.range(of: #"^([01]?\d|2[0-3])[:.][0-5]\d$"#, options: .regularExpression) != nil else {
+            return false
+        }
+        return !word.raw.contains(where: { "£$€¥".contains($0) })
     }
 
     /// A day: today, tonight, tomorrow, a weekday, a month, "next week", "end of day", a date ("the 23rd").
