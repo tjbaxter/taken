@@ -161,6 +161,86 @@ final class ProCopyTests: XCTestCase {
         XCTAssertEqual(ProPlan.allCases.map(\.title), ["Yearly", "Monthly", "Lifetime"])
     }
 
+    // MARK: The trial promise (2026-10-21)
+
+    func testTheTrialTimelineForTheSevenDayTrial() {
+        let now = at(2026, 10, 21, 9)
+        let steps = ProCopy.trialTimeline(yearly(intro: onUsWeek), eligible: true, now: now, timeZone: london)
+        XCTAssertEqual(steps.map(\.line), ["Today: full Pro", "Day 4: we remind you", "Day 7: $19.99 a year starts"])
+        XCTAssertEqual(steps.map(\.day), ["Today", "Day 4", "Day 7"])
+        XCTAssertEqual(steps.map(\.displayText), ["Full Pro", "We remind you", "$19.99 a year starts"])
+        let days = IntroTerms(mode: .onUs, period: PlanPeriod(value: 7, unit: .day), periodCount: 1, displayPrice: "$0.00")
+        XCTAssertEqual(ProCopy.trialTimeline(yearly(intro: days), eligible: true, now: now, timeZone: london), steps,
+                       "7 days reads the same as 1 week")
+        XCTAssertEqual(TrialReminder.leadDays, 3, "the reminder day is the trial length minus 3")
+    }
+
+    func testTheTrialTimelineFollowsTheRealTrialLengthAndPrice() {
+        let now = at(2026, 10, 21, 9)
+        func lines(_ intro: IntroTerms, _ offer: PlanOffer? = nil) -> [String] {
+            ProCopy.trialTimeline(offer ?? yearly(intro: intro), eligible: true, now: now, timeZone: london).map(\.line)
+        }
+        XCTAssertEqual(lines(IntroTerms(mode: .onUs, period: week, periodCount: 2, displayPrice: "$0.00")),
+                       ["Today: full Pro", "Day 11: we remind you", "Day 14: $19.99 a year starts"])
+        XCTAssertEqual(lines(IntroTerms(mode: .onUs, period: PlanPeriod(value: 1, unit: .month), periodCount: 1,
+                                        displayPrice: "$0.00")),
+                       ["Today: full Pro", "Day 28: we remind you", "Day 31: $19.99 a year starts"],
+                       "a month from 21 Oct is 31 days on the calendar")
+        XCTAssertEqual(lines(IntroTerms(mode: .onUs, period: PlanPeriod(value: 3, unit: .day), periodCount: 1,
+                                        displayPrice: "$0.00")),
+                       ["Today: full Pro", "Day 3: $19.99 a year starts"], "3 days: no reminder, so none is promised")
+        XCTAssertEqual(lines(IntroTerms(mode: .onUs, period: PlanPeriod(value: 4, unit: .day), periodCount: 1,
+                                        displayPrice: "$0.00")),
+                       ["Today: full Pro", "Day 1: we remind you", "Day 4: $19.99 a year starts"])
+        let gb = yearly(intro: onUsWeek, price: "19.99", display: "£19.99", currency: "GBP", locale: Locale(identifier: "en_GB"))
+        XCTAssertEqual(lines(onUsWeek, gb).last, "Day 7: £19.99 a year starts", "the storefront's own price")
+        let quarterly = PlanOffer(plan: .monthly, displayPrice: "$9.99", price: 9.99, currencyCode: "USD", locale: us,
+                                  period: PlanPeriod(value: 3, unit: .month), intro: onUsWeek)
+        XCTAssertEqual(lines(onUsWeek, quarterly).last, "Day 7: $9.99 every 3 months starts")
+        XCTAssertEqual(ProCopy.perPlain(PlanPeriod(value: 1, unit: .month)), "a month")
+        XCTAssertEqual(ProCopy.renewal(PlanPrice(displayPrice: "$19.99", period: PlanPeriod(value: 1, unit: .year))),
+                       "$19.99 a year")
+    }
+
+    func testTheTrialTimelineOnlyWhileTheOfferApplies() {
+        let now = at(2026, 10, 21, 9)
+        XCTAssertEqual(ProCopy.trialTimeline(yearly(intro: onUsWeek), eligible: false, now: now, timeZone: london), [],
+                       "the offer was used: no timeline")
+        XCTAssertEqual(ProCopy.trialTimeline(yearly(), eligible: true, now: now, timeZone: london), [], "no offer")
+        XCTAssertEqual(ProCopy.trialTimeline(nil, eligible: true, now: now, timeZone: london), [], "not loaded")
+        XCTAssertEqual(ProCopy.trialTimeline(lifetime, eligible: true, now: now, timeZone: london), [])
+        let payAsYouGo = IntroTerms(mode: .payAsYouGo, period: PlanPeriod(value: 1, unit: .month), periodCount: 3,
+                                    displayPrice: "$0.99")
+        XCTAssertEqual(ProCopy.trialTimeline(yearly(intro: payAsYouGo), eligible: true, now: now, timeZone: london), [],
+                       "only an offer that costs nothing is a trial")
+        XCTAssertEqual(ProCopy.terms(yearly(intro: onUsWeek), eligible: true),
+                       "7 days on us, then $19.99 per year. Renews automatically until cancelled. Cancel anytime in Settings at least 24 hours before renewal.",
+                       "the terms line under the button stays as it was")
+    }
+
+    func testTheTimelineNeverPromisesAReminderThatCannotCome() {
+        let now = at(2026, 10, 21, 9)
+        XCTAssertEqual(ProCopy.trialTimeline(yearly(intro: onUsWeek), eligible: true, now: now, timeZone: london,
+                                             remindable: false).map(\.line),
+                       ["Today: full Pro", "Day 7: $19.99 a year starts"],
+                       "notifications already off for Taken: no reminder step, the rest as it was")
+        XCTAssertEqual(ProCopy.trialTimeline(yearly(intro: onUsWeek), eligible: true, now: now, timeZone: london,
+                                             remindable: true).map(\.line),
+                       ["Today: full Pro", "Day 4: we remind you", "Day 7: $19.99 a year starts"],
+                       "not asked yet, or allowed: the promise stays")
+    }
+
+    func testAPlanPriceSurvivesTheCache() throws {
+        let price = try XCTUnwrap(PlanPrice(yearly(intro: onUsWeek)))
+        XCTAssertEqual(price, PlanPrice(displayPrice: "$19.99", period: PlanPeriod(value: 1, unit: .year)))
+        XCTAssertNil(PlanPrice(lifetime), "one payment has no recurring price")
+        let data = try JSONEncoder().encode(price)
+        XCTAssertEqual(try JSONDecoder().decode(PlanPrice.self, from: data), price)
+        let zero = #"{"displayPrice":"$1","period":{"value":0,"unit":"year"}}"#
+        XCTAssertEqual(try JSONDecoder().decode(PlanPrice.self, from: Data(zero.utf8)).period.value, 1,
+                       "a period is never shorter than one unit")
+    }
+
     func testRestoreLinesAreTrueForEveryone() {
         // Said to someone who never bought and to a subscriber whose plan ended: neither has anything active.
         XCTAssertEqual(ProCopy.nothingToRestore, "No active Taken Pro on this Apple Account.")
@@ -178,6 +258,10 @@ final class ProCopyTests: XCTestCase {
             for eligible in [true, false] {
                 lines.append(ProCopy.cta(offer, eligible: eligible))
                 lines.append(ProCopy.terms(offer, eligible: eligible))
+                for step in ProCopy.trialTimeline(offer, eligible: eligible, now: now, timeZone: london) {
+                    lines.append(step.line)
+                    lines.append(step.displayText)
+                }
             }
             lines.append(ProCopy.price(offer).amount + " " + ProCopy.price(offer).unit)
             lines.append(ProCopy.monthlyEquivalent(offer) ?? "")

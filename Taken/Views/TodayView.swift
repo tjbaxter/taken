@@ -63,7 +63,12 @@ struct RootView: View {
         .onChange(of: model.tab) { _, _ in DemoProbe.record(model) }
         .onChange(of: model.sheet) { _, _ in DemoProbe.record(model) }
         .onChange(of: model.paywall?.id) { _, _ in DemoProbe.record(model) }
-        .onChange(of: TodoModel.shared.phase) { _, _ in DemoProbe.record(model) }
+        .onChange(of: model.trialAsk) { _, _ in DemoProbe.record(model) }
+        .onChange(of: TodoModel.shared.phase) { _, phase in
+            DemoProbe.record(model)
+            // A trial ask that waited for the voice note comes once it is done.
+            if phase == .idle { model.captureDidSettle() }
+        }
     }
 
     private var tabBinding: Binding<AppTab> {
@@ -105,6 +110,8 @@ struct RootView: View {
             TodoTypeSheet { text in
                 TodoModel.shared.submitTyped(text, app: model)
             }
+        case .widgetHelp:
+            WidgetHelpSheet()
         }
     }
 }
@@ -147,6 +154,12 @@ struct TodayView: View {
             }
             .padding(.top, 16)
             .transition(.opacity)
+        } else if let prompt = model.todayPrompt {
+            // One quiet row at most, never in the way of a ring: the nudge offered once, yesterday's repair, or the
+            // widget invite under the first All taken.
+            TodayPromptRow(prompt: prompt)
+                .padding(.top, 16)
+                .transition(.opacity)
         }
 
         HStack(alignment: .center, spacing: 8) {
@@ -179,11 +192,16 @@ struct TodayView: View {
 
     private func rows(_ items: [ItemDay], notDue: Bool) -> some View {
         VStack(spacing: 0) {
-            ForEach(Array(items.enumerated()), id: \.element.id) { index, row in
+            ForEach(Array(items.enumerated()), id: \.element.id) { index, entry in
                 if index > 0 { RowDivider() }
+                // Not today: a weekly item shows the week today is in (its due day, or the next one an early dose
+                // counts for), with the line that goes with it.
+                let shown = notDue ? model.notTodayRow(entry) : (row: entry, note: "")
+                let row = shown.row
                 ItemRowView(row: row, now: model.now, clock: model.clock,
                             expanded: model.expandedItemID == row.id,
-                            nextLabel: notDue ? model.nextLabel(for: row) : nil,
+                            nextLabel: notDue ? model.nextLabel(for: entry) : nil,
+                            note: notDue ? shown.note : nil,
                             locked: model.isLocked,
                             onTake: { model.tap(row) },
                             onOpen: { model.sheet = .editItem(row.item.id) })
@@ -197,23 +215,37 @@ struct TodayView: View {
     @ViewBuilder
     private func voiceOverActions(for row: ItemDay) -> some View {
         if !row.doses.isEmpty {
-            Button("Undo last dose") { model.undoLastDose(row.item) }
+            Button("Undo last dose") { model.undoLastDose(row) }
         }
-        Button("Set time") { openSetTime(row.item.id) }
+        if model.offersSetTime(row) {
+            Button("Set time") { openSetTime(row.item.id) }
+        } else {
+            Button("Open \(Fmt.weekday(row.day))") { model.sheet = .day(row.day) }
+        }
     }
 
     @ViewBuilder
     private func menu(for row: ItemDay) -> some View {
         Button {
-            model.undoLastDose(row.item)
+            model.undoLastDose(row)
         } label: {
             Label("Undo last dose", systemImage: "arrow.uturn.backward")
         }
         .disabled(row.doses.isEmpty)
-        Button {
-            openSetTime(row.item.id)
-        } label: {
-            Label("Set time\u{2026}", systemImage: "clock")
+        // Set time corrects a dose logged today. A weekly row whose dose was logged on another day, or whose week is
+        // open, opens its due day's sheet instead, where a dose can be logged at any time or removed.
+        if model.offersSetTime(row) {
+            Button {
+                openSetTime(row.item.id)
+            } label: {
+                Label("Set time\u{2026}", systemImage: "clock")
+            }
+        } else {
+            Button {
+                model.sheet = .day(row.day)
+            } label: {
+                Label("Open \(Fmt.weekday(row.day))", systemImage: "calendar")
+            }
         }
         Button {
             model.sheet = .editItem(row.item.id)

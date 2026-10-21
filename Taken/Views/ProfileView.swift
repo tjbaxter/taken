@@ -340,6 +340,20 @@ struct ProfileView: View {
                 .profileRow()
             }
 
+            if showsTrialReminder {
+                // The one reminder before a trial ends has its own switch (Apple's HIG, Managing notifications: an
+                // in-app setting for every kind of notification people agreed to). The nudge's toggle never turns it
+                // off.
+                Toggle(isOn: Binding(
+                    get: { model.settings.trialReminderEnabled },
+                    set: { enabled in model.setTrialReminder(enabled) }
+                )) {
+                    ProfileRowTitle("Trial reminder")
+                }
+                .tint(theme.signal)
+                .profileRow()
+            }
+
             if model.isLocked {
                 // No nudge is scheduled without Pro: say so here, where it is set, and let the line open the plans.
                 Button {
@@ -379,8 +393,16 @@ struct ProfileView: View {
         } header: {
             ProfileSectionTitle("Reminder")
         } footer: {
-            ProfileFootnote("If anything is still pending at this time, Taken nudges you.")
+            ProfileFootnote(showsTrialReminder ? "\(Self.nudgeFootnote) \(TrialReminder.settingFootnote)"
+                                               : Self.nudgeFootnote)
         }
+    }
+
+    private static let nudgeFootnote = "If anything is still pending at this time, Taken nudges you."
+
+    /// The Trial reminder switch shows while a trial is on and set to renew, the only time the reminder can come.
+    private var showsTrialReminder: Bool {
+        TrialReminder.isRenewingTrial(model.pro.status, now: model.now)
     }
 
     // MARK: Wake-up time
@@ -801,9 +823,16 @@ struct ItemEditorView: View {
             } header: {
                 editorTitle("Schedule")
             } footer: {
-                Text("A change applies from today. Earlier days keep the schedule they had.")
-                    .font(.sans(14, .sans, relativeTo: .footnote))
-                    .foregroundStyle(theme.fgSubtle)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("A change applies from today. Earlier days keep the schedule they had.")
+                    // Weekly: one fixed line, never a countdown or a window (App Review Guideline 1.4.1). Taken only
+                    // records doses; what to do about a missed one is for the leaflet and the pharmacist.
+                    if choice == .weekly {
+                        Text(Fmt.missedDoseNote)
+                    }
+                }
+                .font(.sans(14, .sans, relativeTo: .footnote))
+                .foregroundStyle(theme.fgSubtle)
             }
 
             Section {

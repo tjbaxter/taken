@@ -45,6 +45,11 @@ final class ProStore {
     private(set) var offersPhase: OffersPhase = .idle
     /// Whether this Apple Account can still have the introductory offer. Nil until StoreKit says.
     private(set) var introEligible: Bool?
+    /// The one notification ask after a trial started has been shown (`ProLedger.trialAskAt`).
+    private(set) var trialAskShown: Bool
+    /// Each subscription's price as StoreKit last gave it (`ProLedger.prices`), for Today's trial notice before the
+    /// plans have loaded this launch.
+    @ObservationIgnored private var cachedPrices: [String: PlanPrice] = [:]
 
     let isDemo: Bool
     /// Runs when an answer changes Pro itself (not just when it was checked): the app reloads the widgets, the
@@ -72,6 +77,8 @@ final class ProStore {
         self.legacyLog = record.legacyLog
         self.introShown = record.introShownAt != nil
         self.hasLoggedBefore = record.firstDoseAt != nil
+        self.trialAskShown = record.trialAskAt != nil
+        self.cachedPrices = record.prices
     }
 
     /// `-demo`: no StoreKit at all. Screenshots show Pro, or a locked log with the plans as StoreKit shapes them
@@ -89,6 +96,7 @@ final class ProStore {
         self.legacyLog = false
         self.introShown = true
         self.hasLoggedBefore = false
+        self.trialAskShown = false
         self.offers = offers
         self.offersPhase = .ready
         self.introEligible = true
@@ -96,6 +104,14 @@ final class ProStore {
 
     func isActive(at now: Date) -> Bool {
         status?.isActive(at: now) ?? false
+    }
+
+    /// The price the current subscription renews at: the plan it renews to when StoreKit named one, else its own plan,
+    /// from this launch's plans or the last ones StoreKit gave. Nil when neither has it.
+    var renewalPrice: PlanPrice? {
+        guard let plan = status?.renewsTo ?? status?.plan, plan.isSubscription else { return nil }
+        if let offer = offers[plan], let price = PlanPrice(offer) { return price }
+        return cachedPrices[plan.productID]
     }
 
     /// Starts listening for transactions (renewals, Ask to Buy approvals, offer codes, refunds) and asks StoreKit.
@@ -270,9 +286,26 @@ final class ProStore {
             for (plan, product) in map { loaded[plan] = PlanOffer(plan: plan, product: product) }
             offers = loaded
             offersPhase = map.isEmpty ? .failed : .ready
+            cachePrices(loaded)
             await refreshEligibility()
         } catch {
             offersPhase = .failed
+        }
+    }
+
+    /// Each subscription's price as StoreKit gave it, kept in `pro.json` for the trial reminder, which is also
+    /// scheduled where StoreKit does not run (widgets, intents). Written only when it changed.
+    private func cachePrices(_ loaded: [ProPlan: PlanOffer]) {
+        var prices: [String: PlanPrice] = [:]
+        for (plan, offer) in loaded {
+            if let price = PlanPrice(offer) { prices[plan.productID] = price }
+        }
+        guard !prices.isEmpty else { return }
+        cachedPrices.merge(prices) { _, fresh in fresh }
+        ledger.update { ledger in
+            guard var current = ledger?.prices else { return }
+            current.merge(prices) { _, fresh in fresh }
+            ledger?.prices = current
         }
     }
 
@@ -366,6 +399,17 @@ final class ProStore {
         }
     }
 
+    /// The notification ask after a trial started is on screen: it never shows again.
+    func markTrialAskShown() {
+        guard !trialAskShown else { return }
+        trialAskShown = true
+        guard !isDemo else { return }
+        let now = Date()
+        ledger.update { ledger in
+            if ledger?.trialAskAt == nil { ledger?.trialAskAt = now }
+        }
+    }
+
     /// The log a widget, the control, Siri or a nudge was refused while locked, if it was asked for recently.
     func takePendingLog(maxAge: TimeInterval, now: Date) -> PendingLog? {
         guard !isDemo, ledger.load()?.pending != nil else { return nil }
@@ -400,6 +444,9 @@ extension PurchaseFact {
             fact.willRenew = renewal.willAutoRenew
             fact.graceUntil = renewal.gracePeriodExpirationDate
             fact.inBillingRetry = renewal.isInBillingRetry
+            // A switch between yearly and monthly takes effect at the next renewal: the trial reminder names the price
+            // of the plan that renews (https://developer.apple.com/documentation/storekit/product/subscriptioninfo/renewalinfo/autorenewpreference).
+            fact.renewsTo = renewal.autoRenewPreference
         }
         return fact
     }

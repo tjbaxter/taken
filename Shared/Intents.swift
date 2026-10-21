@@ -43,6 +43,10 @@ struct TakeAllIntent: AppIntent {
 struct CheckStackIntent: AppIntent {
     static var title: LocalizedStringResource { "Did I take it?" }
     static var description: IntentDescription { IntentDescription("Answers from your log: what is taken today, and when.") }
+    /// Siri says the stack's names aloud (Birth Control, Finasteride), so a locked iPhone asks for Face ID or the passcode
+    /// first, as Get to-dos does. Apple's default lets an intent run "including when the device is locked"
+    /// (https://developer.apple.com/documentation/appintents/appintent/authenticationpolicy).
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     init() {}
 
@@ -190,21 +194,33 @@ struct StackItemQuery: EntityStringQuery {
 enum SiriAnswers {
     /// "Yes. Vitamin D3 at 7:42 AM, Fish Oil at 7:42 AM. Finasteride is not due today."
     /// "Not yet: Fish Oil is pending."
-    static func status(state: StackState, now: Date, timeZone: TimeZone = .current) -> String {
+    /// A weekly item not due today answers for its week instead of "is not due today" (SPEC 3.3, `weekSentence`).
+    static func status(state: StackState, now: Date, timeZone: TimeZone = .current, locale: Locale = .current) -> String {
         let clock = DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone)
-        let today = StackEngine(state: state, clock: clock).todaySummary(now: now)
+        let engine = StackEngine(state: state, clock: clock)
+        let today = engine.todaySummary(now: now)
         guard !today.isEmpty else { return "Your stack is empty. Open Taken to add what you take." }
+        var weeks: [String] = []
+        var weekly: Set<UUID> = []
+        for row in today.items where !row.isDue && row.doses.isEmpty {
+            guard let week = engine.weekRow(for: row.item, today: today.day) else { continue }
+            weekly.insert(row.item.id)
+            weeks.append(weekSentence(week, today: today.day, clock: clock, locale: locale))
+        }
 
+        // A dose logged on another day (an early weekly dose on its due day, SPEC 3.3) names that day: "Semaglutide taken
+        // Tuesday at 8:12 AM", so it never sounds like a dose taken today.
         let taken = today.items.filter { !$0.doses.isEmpty }.map { row -> String in
-            let times = row.doses.map { Fmt.spoken($0.takenAt) }
-            return "\(row.item.name) at \(Fmt.list(times))"
+            let sameDay = row.doses.allSatisfy { clock.day(of: $0) == today.day }
+            let times = Fmt.spokenDoses(row.doses, viewing: today.day, clock, locale: locale)
+            return sameDay ? "\(row.item.name) \(times)" : "\(row.item.name) taken \(times)"
         }
         let pending = today.items.filter { $0.isPending }.map { row -> String in
             row.dosesPerDay > 1 && !row.doses.isEmpty
                 ? "\(row.item.name) (\(row.doses.count) of \(row.dosesPerDay))"
                 : row.item.name
         }
-        let notDue = today.items.filter { !$0.isDue && $0.doses.isEmpty }.map { $0.item.name }
+        let notDue = today.items.filter { !$0.isDue && $0.doses.isEmpty && !weekly.contains($0.item.id) }.map { $0.item.name }
 
         var sentences: [String] = []
         if pending.isEmpty {
@@ -216,7 +232,20 @@ enum SiriAnswers {
         if !notDue.isEmpty {
             sentences.append("\(Fmt.list(notDue)) \(notDue.count == 1 ? "is" : "are") not due today.")
         }
+        sentences.append(contentsOf: weeks)
         return sentences.joined(separator: " ")
+    }
+
+    /// A weekly item's week, from its row (`StackEngine.weekRow`): "Semaglutide was taken Friday at 8:12 AM, for
+    /// Thursday." (logged on another day than the one it counts for), "Semaglutide was taken Thursday at 8:12 AM." (on its
+    /// day), "Semaglutide is not logged for Thursday." (the week still open). Never when, whether or how much to take.
+    static func weekSentence(_ week: ItemDay, today: DayKey, clock: DayClock, locale: Locale = .current) -> String {
+        let name = week.item.name
+        guard let dose = week.lastDose else { return "\(name) is not logged for \(Fmt.weekday(week.day))." }
+        let when = Fmt.spokenDose(dose, viewing: today, clock, locale: locale)
+        // The logged day as the engine reads it, at the dose's own UTC offset: a dose logged on time abroad is on time.
+        if clock.day(of: dose) == week.day { return "\(name) was taken \(when)." }
+        return "\(name) was taken \(when), for \(Fmt.weekday(week.day))."
     }
 
     /// Why TAKE ALL logged nothing.

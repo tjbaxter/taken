@@ -88,10 +88,15 @@ struct PurchaseFact: Hashable, Sendable {
     var inBillingRetry: Bool
     /// Replaced by an upgrade to the other plan in the group.
     var isUpgraded: Bool
+    /// Subscriptions: the product that renews at `expiresAt` (StoreKit's `RenewalInfo.autoRenewPreference`). A switch
+    /// between yearly and monthly, which sit at the same level of one group, takes effect at the next renewal, so during
+    /// a trial this can name the other plan (https://developer.apple.com/app-store/subscriptions/). Nil when StoreKit
+    /// did not say.
+    var renewsTo: String?
 
     init(productID: String, verified: Bool = true, revokedAt: Date? = nil, expiresAt: Date? = nil,
          graceUntil: Date? = nil, isIntroOffer: Bool = false, willRenew: Bool? = nil, inBillingRetry: Bool = false,
-         isUpgraded: Bool = false) {
+         isUpgraded: Bool = false, renewsTo: String? = nil) {
         self.productID = productID
         self.verified = verified
         self.revokedAt = revokedAt
@@ -101,6 +106,7 @@ struct PurchaseFact: Hashable, Sendable {
         self.willRenew = willRenew
         self.inBillingRetry = inBillingRetry
         self.isUpgraded = isUpgraded
+        self.renewsTo = renewsTo
     }
 
     /// Counts at all: verified, never refunded or revoked, and not replaced by an upgrade.
@@ -150,9 +156,17 @@ struct ProStatus: Codable, Hashable, Sendable {
     /// Lifetime and founding members: a subscription on the same Apple Account still renews, so Settings offers to
     /// manage it.
     var renewingSubscription: Bool
+    /// Subscriptions: the plan behind it, so the trial reminder names the price the trial turns into
+    /// (`ProLedger.prices`). Nil for lifetime and founding, and in files from before it was kept.
+    var plan: ProPlan?
+    /// Subscriptions: the plan that renews at `expiresAt`, when StoreKit names one other than `plan` or the same
+    /// (`PurchaseFact.renewsTo`): a trial on yearly switched to monthly in Settings renews as monthly, so the trial
+    /// reminder names the monthly price. Nil when StoreKit did not say, and in files from before it was kept.
+    var renewsTo: ProPlan?
 
     init(isPro: Bool, reason: ProReason, checkedAt: Date, expiresAt: Date? = nil, willRenew: Bool? = nil,
-         billingIssue: Bool = false, renewingSubscription: Bool = false) {
+         billingIssue: Bool = false, renewingSubscription: Bool = false, plan: ProPlan? = nil,
+         renewsTo: ProPlan? = nil) {
         self.isPro = isPro
         self.reason = reason
         self.checkedAt = checkedAt
@@ -160,6 +174,8 @@ struct ProStatus: Codable, Hashable, Sendable {
         self.willRenew = willRenew
         self.billingIssue = billingIssue
         self.renewingSubscription = renewingSubscription
+        self.plan = plan
+        self.renewsTo = renewsTo
     }
 
     static func notPro(checkedAt: Date) -> ProStatus {
@@ -208,11 +224,11 @@ struct ProStatus: Codable, Hashable, Sendable {
         guard let other else { return false }
         return isPro == other.isPro && reason == other.reason && expiresAt == other.expiresAt
             && willRenew == other.willRenew && billingIssue == other.billingIssue
-            && renewingSubscription == other.renewingSubscription
+            && renewingSubscription == other.renewingSubscription && renewsTo == other.renewsTo
     }
 
     private enum CodingKeys: String, CodingKey {
-        case isPro, reason, checkedAt, expiresAt, willRenew, billingIssue, renewingSubscription
+        case isPro, reason, checkedAt, expiresAt, willRenew, billingIssue, renewingSubscription, plan, renewsTo
     }
 
     init(from decoder: any Decoder) throws {
@@ -224,6 +240,9 @@ struct ProStatus: Codable, Hashable, Sendable {
         willRenew = try c.decodeIfPresent(Bool.self, forKey: .willRenew)
         billingIssue = try c.decodeIfPresent(Bool.self, forKey: .billingIssue) ?? false
         renewingSubscription = try c.decodeIfPresent(Bool.self, forKey: .renewingSubscription) ?? false
+        // A plan this version does not know reads as unknown and never costs the rest of the status.
+        plan = try? c.decodeIfPresent(ProPlan.self, forKey: .plan)
+        renewsTo = try? c.decodeIfPresent(ProPlan.self, forKey: .renewsTo)
     }
 }
 
@@ -254,9 +273,11 @@ enum Entitlement {
         // adds the renewal margin to a plan set to renew.
         let pastEnd = best.fact.expiresAt.map { $0 <= now } ?? true
         let inGrace = pastEnd && (best.fact.graceUntil.map { $0 > now } ?? false)
+        let renewsTo = best.fact.renewsTo.flatMap(ProPlan.init(productID:)).flatMap { $0.isSubscription ? $0 : nil }
         return ProStatus(isPro: true, reason: reason, checkedAt: now,
                          expiresAt: inGrace ? best.fact.graceUntil : best.fact.expiresAt,
-                         willRenew: best.fact.willRenew, billingIssue: inGrace || best.fact.inBillingRetry)
+                         willRenew: best.fact.willRenew, billingIssue: inGrace || best.fact.inBillingRetry,
+                         plan: best.plan, renewsTo: renewsTo)
     }
 
     /// What to keep after asking StoreKit: `fresh` is what it said, `app` the app transaction it gave (nil when it
@@ -315,18 +336,39 @@ struct ProLedger: Codable, Hashable, Sendable {
     var introShownAt: Date?
     /// A log refused while locked, offered again when the app opens.
     var pending: PendingLog?
+    /// Each subscription's recurring price as StoreKit last gave it, by product id, so the trial reminder names the
+    /// real price wherever it is scheduled (the widgets and intents never ask StoreKit).
+    var prices: [String: PlanPrice]
+    /// The one notification ask after a trial started (`TrialAsk`) has been shown. It never shows again.
+    var trialAskAt: Date?
+    /// The trial reminder handed to iOS: for which trial end, and when it fires. Once that moment has passed it has gone
+    /// out, so it is never scheduled again for that trial, even after it was cleared from Notification Center.
+    var trialReminder: TrialReminderMark?
 
     init(status: ProStatus? = nil, firstSeenAt: Date, legacyLog: Bool, firstDoseAt: Date? = nil,
-         introShownAt: Date? = nil, pending: PendingLog? = nil) {
+         introShownAt: Date? = nil, pending: PendingLog? = nil, prices: [String: PlanPrice] = [:],
+         trialAskAt: Date? = nil, trialReminder: TrialReminderMark? = nil) {
         self.status = status
         self.firstSeenAt = firstSeenAt
         self.legacyLog = legacyLog
         self.firstDoseAt = firstDoseAt
         self.introShownAt = introShownAt
         self.pending = pending
+        self.prices = prices
+        self.trialAskAt = trialAskAt
+        self.trialReminder = trialReminder
     }
 
-    private enum CodingKeys: String, CodingKey { case status, firstSeenAt, legacyLog, firstDoseAt, introShownAt, pending }
+    /// The price the cached subscription renews at, if StoreKit has given it: the plan it renews to when StoreKit
+    /// named one (`ProStatus.renewsTo`), else its own plan.
+    var renewalPrice: PlanPrice? {
+        guard let plan = status?.renewsTo ?? status?.plan, plan.isSubscription else { return nil }
+        return prices[plan.productID]
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status, firstSeenAt, legacyLog, firstDoseAt, introShownAt, pending, prices, trialAskAt, trialReminder
+    }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -336,6 +378,9 @@ struct ProLedger: Codable, Hashable, Sendable {
         firstDoseAt = try? c.decodeIfPresent(Date.self, forKey: .firstDoseAt)
         introShownAt = try c.decodeIfPresent(Date.self, forKey: .introShownAt)
         pending = try? c.decodeIfPresent(PendingLog.self, forKey: .pending)
+        prices = (try? c.decodeIfPresent([String: PlanPrice].self, forKey: .prices)) ?? [:]
+        trialAskAt = try? c.decodeIfPresent(Date.self, forKey: .trialAskAt)
+        trialReminder = try? c.decodeIfPresent(TrialReminderMark.self, forKey: .trialReminder)
     }
 }
 

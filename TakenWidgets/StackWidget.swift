@@ -57,7 +57,7 @@ struct StackProvider: TimelineProvider {
 // MARK: - Widget
 
 struct StackWidget: Widget {
-    static let kind = "TakenStack"
+    static let kind = TakenWidgetKind.stack
 
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: Self.kind, provider: StackProvider()) { entry in

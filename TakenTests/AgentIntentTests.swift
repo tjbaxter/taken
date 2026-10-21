@@ -289,6 +289,14 @@ final class AgentIntentTests: XCTestCase {
         }
     }
 
+    /// "Did I take it?" says the stack's names (Birth Control, Finasteride): a locked iPhone asks to unlock first, so
+    /// Siri never reads them to whoever holds it.
+    func testDidITakeItAsksALockedIPhoneToUnlock() {
+        guard case .requiresAuthentication = CheckStackIntent.authenticationPolicy else {
+            return XCTFail("\(CheckStackIntent.authenticationPolicy)")
+        }
+    }
+
     /// The App Intents metadata the build extracts is what Siri and Shortcuts read. The Release device build checks the
     /// file is there; this checks the new actions and types made it in.
     func testTheActionsAreInTheAppIntentsMetadata() throws {

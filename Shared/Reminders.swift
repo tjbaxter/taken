@@ -25,7 +25,9 @@ enum Reminders {
     }
 
     /// Pure planning, unit tested: which nudges should exist right now. Without Taken Pro there are none, and a
-    /// plan set not to renew is nudged only until it ends (PRO.md).
+    /// plan set not to renew is nudged only until it ends (PRO.md). A weekly item is nudged on its due day only: never
+    /// on the six days after it while its week is open (how late a dose may still be taken differs by medicine, so a
+    /// later prompt would be dosing advice), and never on a due day an early dose already counts for (SPEC 3.3, R4).
     static func plan(state: StackState, now: Date, timeZone: TimeZone = .current, window: NudgeWindow = .open) -> [Plan] {
         guard window != .closed, state.settings.reminderEnabled, !state.items.isEmpty else { return [] }
         let clock = DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone)
@@ -119,21 +121,56 @@ enum Reminders {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .denied
     }
 
-    /// Replace every pending nudge with a fresh plan, and withdraw delivered nudges that no longer apply.
+    /// Whether iOS has asked yet, and what it was told. Provisional and ephemeral count as allowed; Taken never asks
+    /// for provisional (it delivers quietly).
+    static func permission() async -> NotificationPermission {
+        switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
+        case .notDetermined: return .notDetermined
+        case .denied: return .denied
+        default: return .allowed
+        }
+    }
+
+    /// Replace every pending nudge with a fresh plan, and withdraw delivered nudges that no longer apply. The trial
+    /// reminder (`TrialReminder`) is rebuilt with them, so its count stays current, and it goes, delivered or not, once
+    /// the trial is cancelled, converts, hits a billing issue, Pro is for good or Profile's Trial reminder is off. Once
+    /// it has gone out it is never scheduled again (`ProLedger.trialReminder`). None of this asks for permission.
     static func reschedule(state: StackState, now: Date) async {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
-        let ours = pending.map(\.identifier).filter { $0.hasPrefix(requestPrefix) }
+        let ours = pending.map(\.identifier).filter { $0.hasPrefix(requestPrefix) || $0 == TrialReminder.identifier }
         if !ours.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ours) }
 
+        let ledger = ProLedgerStore.shared.load()
         let delivered = await center.deliveredNotifications().map(\.request.identifier)
-        let stale = staleDelivered(delivered, state: state, now: now)
+        var stale = staleDelivered(delivered, state: state, now: now)
+        let trialDelivered = delivered.contains(TrialReminder.identifier)
+        if trialDelivered, !TrialReminder.isRenewingTrial(ledger?.status, now: now) || !state.settings.trialReminderEnabled {
+            stale.append(TrialReminder.identifier)
+        }
         if !stale.isEmpty { center.removeDeliveredNotifications(withIdentifiers: stale) }
 
-        let ledger = ProLedgerStore.shared.load()
         let window = ProGate.nudgeWindow(access: ProGate.access(ledger: ledger, state: state, now: now), status: ledger?.status)
         let plans = plan(state: state, now: now, window: window)
-        guard !plans.isEmpty, await isAuthorized() else { return }
+        // At most one: a reminder still in Notification Center, or one whose moment has passed, has gone out.
+        let trial = trialDelivered ? nil : TrialReminder.plan(status: ledger?.status, price: ledger?.renewalPrice,
+                                                              state: state, now: now, sent: ledger?.trialReminder)
+        let authorized = await isAuthorized()
+        noteTrialReminder(trial: authorized ? trial : nil, end: ledger?.status?.expiresAt, previous: ledger?.trialReminder,
+                          now: now)
+        guard !plans.isEmpty || trial != nil, authorized else { return }
+
+        if let trial {
+            let content = UNMutableNotificationContent()
+            content.body = trial.body
+            content.sound = .default
+            content.threadIdentifier = "taken.pro"
+            // Informational, never Time Sensitive (Apple's HIG, Managing notifications).
+            content.interruptionLevel = .active
+            let trigger = UNCalendarNotificationTrigger(dateMatching: trial.components, repeats: false)
+            try? await center.add(UNNotificationRequest(identifier: TrialReminder.identifier, content: content,
+                                                        trigger: trigger))
+        }
 
         for plan in plans {
             let content = UNMutableNotificationContent()
@@ -145,6 +182,17 @@ enum Reminders {
             let trigger = UNCalendarNotificationTrigger(dateMatching: plan.components, repeats: false)
             let request = UNNotificationRequest(identifier: plan.identifier, content: content, trigger: trigger)
             try? await center.add(request)
+        }
+    }
+
+    /// Keeps `ProLedger.trialReminder` matching what iOS holds: the reminder about to be added, with its moment. One
+    /// that was pending, and was just removed without a replacement, is forgotten; one whose moment has passed has gone
+    /// out and stays, so it never comes again for that trial. Written only when it changes.
+    static func noteTrialReminder(trial: TrialReminder.Plan?, end: Date?, previous: TrialReminderMark?, now: Date) {
+        let next = TrialReminder.nextMark(trial: trial, end: end, previous: previous, now: now)
+        guard next != previous else { return }
+        ProLedgerStore.shared.update { ledger in
+            ledger?.trialReminder = next
         }
     }
 

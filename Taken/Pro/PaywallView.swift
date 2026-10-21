@@ -16,6 +16,9 @@ struct PaywallView: View {
     @State private var note: Note?
     @State private var unlocked = false
     @State private var redeeming = false
+    /// Notifications are not turned off for Taken, so the reminder the timeline promises can come. Read when the sheet
+    /// appears.
+    @State private var remindable = true
 
     init(request: PaywallRequest) {
         self.request = request
@@ -35,6 +38,12 @@ struct PaywallView: View {
     private var eligible: Bool { pro.introEligible == true }
     private var offer: PlanOffer? { pro.offers[selected] }
 
+    /// The trial promise under the yearly plan (`ProCopy.trialTimeline`), while this Apple Account can still have its
+    /// introductory offer. Empty otherwise. With notifications already off for Taken it promises no reminder.
+    private var timeline: [TrialStep] {
+        ProCopy.trialTimeline(pro.offers[.yearly], eligible: eligible, now: Date(), remindable: remindable)
+    }
+
     /// StoreKit has answered, so a plan it did not return is missing, not loading.
     private var plansAnswered: Bool { pro.offersPhase == .ready || pro.offersPhase == .failed }
 
@@ -53,21 +62,27 @@ struct PaywallView: View {
             // Every plan sits above the button: with room to spare on a 6.9 inch iPhone, tighter on 6.1 and 6.3 inch
             // ones, where the smallest scroll, with the button and terms always in view.
             let compact = geo.size.height < 820
+            // The trial timeline takes about 40 pt: on a 6.1 inch iPhone the gaps above the plans give it that room, so
+            // the sheet still fits without scrolling (CI measures it, DemoProbe.recordPaywallFit).
+            let tight = compact && !timeline.isEmpty
             VStack(spacing: 0) {
                 topBar
                 GeometryReader { area in
                     ScrollView {
                         VStack(alignment: .leading, spacing: 0) {
                             header(compact: compact)
-                            features(compact: compact)
-                                .padding(.top, compact ? 18 : 26)
+                            features(compact: compact, tight: tight)
+                                .padding(.top, compact ? (tight ? 14 : 18) : 26)
                             // Spare height goes here, so the plans sit right above the button.
-                            Spacer(minLength: compact ? 18 : 26)
+                            Spacer(minLength: compact ? (tight ? 12 : 18) : 26)
                             plans(compact: compact)
                         }
                         .padding(.horizontal, 20)
                         .padding(.bottom, compact ? 10 : 14)
                         .frame(minHeight: area.size.height, alignment: .top)
+                        .background {
+                            if model.isDemo { fitProbe(area: area.size.height) }
+                        }
                     }
                     .scrollIndicators(.hidden)
                     .scrollBounceBehavior(.basedOnSize)
@@ -89,8 +104,25 @@ struct PaywallView: View {
         .onChange(of: pro.offersPhase) { _, _ in preselect() }
         .task {
             preselect()
+            remindable = await model.notificationPermission() != .denied
             await pro.loadOffers()
             preselect()
+        }
+    }
+
+    /// `-demo` only: the scrolling content's height against its area, for CI's check that the paywall fits a 6.1 inch
+    /// iPhone without scrolling. The content is never shorter than the area (the spacer takes the rest), so it fits
+    /// exactly when the two are equal.
+    private func fitProbe(area: CGFloat) -> some View {
+        GeometryReader { content in
+            Color.clear
+                .onAppear { DemoProbe.recordPaywallFit(content: content.size.height, area: area) }
+                .onChange(of: content.size.height) { _, height in
+                    DemoProbe.recordPaywallFit(content: height, area: area)
+                }
+                .onChange(of: area) { _, room in
+                    DemoProbe.recordPaywallFit(content: content.size.height, area: room)
+                }
         }
     }
 
@@ -144,8 +176,8 @@ struct PaywallView: View {
         .accessibilityLabel("\(ProCopy.headline) \(ProCopy.subline)")
     }
 
-    private func features(compact: Bool) -> some View {
-        VStack(alignment: .leading, spacing: compact ? 12 : 14) {
+    private func features(compact: Bool, tight: Bool) -> some View {
+        VStack(alignment: .leading, spacing: compact ? (tight ? 10 : 12) : 14) {
             ForEach(ProCopy.features, id: \.self) { line in
                 HStack(spacing: 12) {
                     Image(systemName: "checkmark")
@@ -167,11 +199,79 @@ struct PaywallView: View {
     // MARK: Plans
 
     private func plans(compact: Bool) -> some View {
-        VStack(spacing: compact ? 8 : 10) {
+        let steps = timeline
+        return VStack(spacing: compact ? 8 : 10) {
             ForEach(ProPlan.allCases) { plan in
                 planCard(plan, compact: compact)
+                if plan == .yearly, !steps.isEmpty {
+                    trialTimeline(steps)
+                }
             }
         }
+    }
+
+    /// The trial promise under the yearly plan, left to right: "Today" (its dot lit), "Day 4", "Day 7", each with its line
+    /// under it. Calm: the look's own tokens and Geist, no icons, nothing that moves, and no rules between the steps,
+    /// which would read as dashes. When the steps do not fit side by side at full size (larger Dynamic Type, a longer
+    /// price), they stack, one step to a line, and wrap rather than cut the price off.
+    private func trialTimeline(_ steps: [TrialStep]) -> some View {
+        ViewThatFits(in: .horizontal) {
+            timelineRow(steps)
+            timelineColumn(steps)
+        }
+        .padding(.horizontal, 4)
+        .padding(.vertical, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(steps.map(\.line).joined(separator: ". "))
+    }
+
+    private func timelineRow(_ steps: [TrialStep]) -> some View {
+        HStack(alignment: .top, spacing: 0) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                if index > 0 { Spacer(minLength: 10) }
+                VStack(alignment: .leading, spacing: 2) {
+                    HStack(spacing: 6) {
+                        timelineDot(lit: index == 0)
+                        Text(step.day)
+                            .font(.sans(12.5, .sansSemibold, relativeTo: .footnote))
+                            .foregroundStyle(theme.fg)
+                    }
+                    Text(step.displayText)
+                        .font(.sans(12.5, .sans, relativeTo: .footnote))
+                        .foregroundStyle(theme.fgMuted)
+                        .padding(.leading, 14)
+                }
+                .lineLimit(1)
+                .fixedSize()
+            }
+        }
+    }
+
+    private func timelineColumn(_ steps: [TrialStep]) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    timelineDot(lit: index == 0)
+                        .alignmentGuide(.firstTextBaseline) { d in d[VerticalAlignment.center] + 4 }
+                    Text(step.day)
+                        .font(.sans(12.5, .sansSemibold, relativeTo: .footnote))
+                        .foregroundStyle(theme.fg)
+                        .fixedSize()
+                    Text(step.displayText)
+                        .font(.sans(12.5, .sans, relativeTo: .footnote))
+                        .foregroundStyle(theme.fgMuted)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    private func timelineDot(lit: Bool) -> some View {
+        Circle()
+            .fill(lit ? theme.signal : theme.bg)
+            .overlay(Circle().strokeBorder(lit ? theme.signal : theme.lineStrong, lineWidth: 1.5))
+            .frame(width: 8, height: 8)
     }
 
     private func planCard(_ plan: ProPlan, compact: Bool) -> some View {
@@ -499,7 +599,8 @@ struct PaywallView: View {
     /// is applied.
     private func celebrate() {
         guard !unlocked else { return }
-        model.paywallUnlocked()
+        // A trial that just started here gets the one notification ask once the sheet has gone (TrialAsk).
+        model.paywallUnlocked(trialStarted: pro.status?.reason == .trial)
         note = nil
         Haptics.success(model.hapticsOn)
         withAnimation(reduceMotion ? .easeOut(duration: 0.2) : .spring(response: 0.32, dampingFraction: 0.62)) {

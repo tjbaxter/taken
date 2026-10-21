@@ -1,6 +1,12 @@
 import Foundation
 import WidgetKit
 
+/// Widget kinds the app reads back from WidgetKit as well as the widget extension declaring them.
+enum TakenWidgetKind {
+    /// The stack widget: the Home Screen sizes and the three Lock Screen families.
+    static let stack = "TakenStack"
+}
+
 /// What happens after any write, from any process (app, widget, intent, notification action).
 enum Sync {
     static let darwinNotificationName = "com.tombaxter.taken.didChange"

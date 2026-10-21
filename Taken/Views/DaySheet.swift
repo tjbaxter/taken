@@ -21,8 +21,8 @@ struct DaySheet: View {
         let summary = model.sheetSummary(for: day)
         let future = isFuture
         VStack(spacing: 0) {
-            SheetHeader(title: Fmt.longDay(day), subtitle: Fmt.daySheetStatus(summary, isToday: isToday),
-                        subtitleColor: summary.allTaken ? theme.signalInk : theme.fgSubtle) {
+            SheetHeader(title: Fmt.longDay(day), subtitle: Fmt.daySheetStatus(summary, isToday: isLive),
+                        subtitleColor: summary.allTaken && summary.openCount == 0 ? theme.signalInk : theme.fgSubtle) {
                 dismiss()
             }
             ScrollView {
@@ -39,7 +39,7 @@ struct DaySheet: View {
                             VStack(spacing: 0) {
                                 ForEach(Array(summary.items.enumerated()), id: \.element.id) { index, row in
                                     if index > 0 { RowDivider() }
-                                    DayItemRow(row: row, clock: model.clock, isToday: isToday,
+                                    DayItemRow(row: row, day: day, clock: model.clock, isToday: isLive,
                                                logLabel: Fmt.minutes(logMinutes), canLog: !future,
                                                onLog: { backfill(row.item) },
                                                onRemove: { removing = $0 })
@@ -74,6 +74,13 @@ struct DaySheet: View {
 
     private var isToday: Bool { day == model.today.day }
 
+    /// Today, or a day still to come: what is not taken yet reads as pending, never missed.
+    private var isLive: Bool { Self.isLive(day, today: model.today.day) }
+
+    /// A day sheet for a day after today opens only from a weekly row whose early dose counts for its next due day
+    /// ("Open Thursday", SPEC 3.3). Nothing on it can have been missed yet, so it reads like today.
+    nonisolated static func isLive(_ day: DayKey, today: DayKey) -> Bool { day >= today }
+
     /// Backfill logs a dose, so in locked mode it opens the paywall over this sheet; the log stays readable.
     private func backfill(_ item: Item) {
         let minutes = logMinutes
@@ -91,7 +98,7 @@ struct DaySheet: View {
     private var removalTitle: String {
         guard let removing else { return "Remove dose?" }
         let name = model.state.item(removing.itemId)?.name ?? "this item"
-        return "Remove the \(Fmt.clock(removing.takenAt, model.clock)) dose of \(name)?"
+        return "Remove the \(Fmt.doseClock(removing, viewing: day, model.clock)) dose of \(name)?"
     }
 
     private func logTimeRow(isFuture: Bool) -> some View {
@@ -120,6 +127,8 @@ struct DaySheet: View {
 private struct DayItemRow: View {
     @Environment(\.theme) private var theme
     let row: ItemDay
+    /// The sheet's day: a dose logged on another day (a weekly dose that counts for it) shows that day, "Fri 08:12".
+    let day: DayKey
     let clock: DayClock
     let isToday: Bool
     let logLabel: String
@@ -127,9 +136,10 @@ private struct DayItemRow: View {
     let onLog: () -> Void
     let onRemove: (Dose) -> Void
 
-    init(row: ItemDay, clock: DayClock, isToday: Bool, logLabel: String, canLog: Bool, onLog: @escaping () -> Void,
-         onRemove: @escaping (Dose) -> Void) {
+    init(row: ItemDay, day: DayKey, clock: DayClock, isToday: Bool, logLabel: String, canLog: Bool,
+         onLog: @escaping () -> Void, onRemove: @escaping (Dose) -> Void) {
         self.row = row
+        self.day = day
         self.clock = clock
         self.isToday = isToday
         self.logLabel = logLabel
@@ -179,7 +189,7 @@ private struct DayItemRow: View {
                 onRemove(dose)
             } label: {
                 HStack(spacing: 6) {
-                    Text(Fmt.clock(dose.takenAt, clock))
+                    Text(Fmt.doseClock(dose, viewing: day, clock))
                         .font(.monoFixed(14, .monoMedium))
                         .foregroundStyle(theme.signalInk)
                         .fixedSize()
@@ -195,7 +205,7 @@ private struct DayItemRow: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(PressStyle())
-            .accessibilityLabel("Taken at \(Fmt.spoken(dose.takenAt)). Remove.")
+            .accessibilityLabel("Taken \(Fmt.spokenDose(dose, viewing: day, clock)). Remove.")
         }
         if showsLog {
             Button(action: onLog) {
@@ -235,8 +245,9 @@ struct SetTimeSheet: View {
         self.item = item
     }
 
+    /// The dose this corrects: the item's latest logged today, whichever day it counts for.
     private var lastDose: Dose? {
-        model.today.items.first { $0.id == item.id }?.lastDose
+        model.setTimeDose(for: item)
     }
 
     /// The wheel's time on today's logical day has not come yet (an hour before the day start means

@@ -14,7 +14,9 @@ enum DemoData {
     /// The demo's settings: the nudge on, waking at 07:00 (the default), so the day rolls over at 03:00.
     static let settings = StackSettings(reminderEnabled: true)
 
-    static func state(now: Date, allTaken: Bool, timeZone: TimeZone = .current) -> StackState {
+    /// `yesterdayPartial` leaves last night's Magnesium out, for the `-screen today-repair` capture.
+    static func state(now: Date, allTaken: Bool, yesterdayPartial: Bool = false,
+                      timeZone: TimeZone = .current) -> StackState {
         let clock = DayClock(dayStartHour: settings.dayStartHour, timeZone: timeZone)
         let today = clock.day(for: now)
         let created = clock.start(of: today.adding(-60))
@@ -40,7 +42,9 @@ enum DemoData {
             log(fsh, day, 7, morning + 1)
             if offset != 27 { log(cre, day, 7, morning + 2) }
             if offset != 22 { log(fsh, day, 18 + Int(random.next() % 2), Int(random.next() % 55)) }
-            if offset != 15 && offset != 27 { log(mag, day, 21, 2 + Int(random.next() % 40)) }
+            if offset != 15 && offset != 27 && !(yesterdayPartial && offset == 1) {
+                log(mag, day, 21, 2 + Int(random.next() % 40))
+            }
             if offset % 2 == 1 { log(znc, day, 7, morning + 3) }
         }
 

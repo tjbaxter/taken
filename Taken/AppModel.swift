@@ -1,6 +1,7 @@
 import SwiftUI
 import Observation
 import AppIntents
+import WidgetKit
 
 /// The tab bar's three tabs (REDESIGN.md).
 enum AppTab: String, Hashable, Sendable {
@@ -22,6 +23,8 @@ enum SheetRoute: Identifiable, Hashable {
     case todoEdit(UUID)
     /// Typing to-dos instead of saying them.
     case todoType
+    /// How to add the Lock Screen widget, from Today's one-time invite.
+    case widgetHelp
 
     var id: String {
         switch self {
@@ -32,6 +35,7 @@ enum SheetRoute: Identifiable, Hashable {
         case .editItem(let id): return "edit-\(id.uuidString)"
         case .todoEdit(let id): return "todo-\(id.uuidString)"
         case .todoType: return "todo-type"
+        case .widgetHelp: return "widget-help"
         }
     }
 }
@@ -80,6 +84,16 @@ final class AppModel {
     var expandedItemID: UUID?
     /// The Taken Pro sheet, and which presentation level shows it.
     var paywall: PaywallRequest?
+    /// The one notification ask after a trial starts (`TrialAsk`): the presentation level it is on, once nothing else
+    /// holds the screen (`presentTrialAskIfClear`).
+    var trialAsk: PaywallAnchor?
+    /// How iOS's notification permission is read (`Reminders.permission`); tests and `-demo` give their own answer.
+    @ObservationIgnored var notificationPermission: @MainActor () async -> NotificationPermission = {
+        await Reminders.permission()
+    }
+    /// A voice note is starting, being heard or being sorted: the trial ask waits for it (`TodoModel.phase`). Tests
+    /// give their own answer.
+    @ObservationIgnored var captureBusy: @MainActor () -> Bool = { TodoModel.shared.phase != .idle }
     /// Chips pre-selected in the Add sheet for the `-demo -screen add` screenshot, and how often each is taken.
     let demoPreselect: [String]
     let demoChoices: [String: FrequencyChoice]
@@ -92,6 +106,16 @@ final class AppModel {
     /// Increments each time a tap finishes the day (All taken), to run its check animation once.
     private(set) var lockInCount = 0
     private(set) var notificationsDenied = false
+    /// iOS allows Taken's notifications, as last read (on every return to the foreground). Nil until read. While it is
+    /// false, Today carries the trial reminder's words itself (`TrialReminder.notice`).
+    private(set) var notificationsAllowed: Bool?
+    /// Yesterday, while Today offers to fill it in (`TodayPrompts.repairDay`); worked out with the stats.
+    private(set) var repairDay: DayKey?
+    /// `-demo` shows a one-time row only when its `-screen` asks: today-nudge-offer, today-repair, today-widget-invite.
+    private(set) var demoPrompt: TodayPrompt?
+    /// Whether the Taken widget is on the Lock Screen already, as WidgetKit last said; nil until it has answered, and the
+    /// widget invite waits for that answer.
+    private(set) var lockScreenWidget: Bool?
 
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var ticker: Task<Void, Never>?
@@ -103,6 +127,26 @@ final class AppModel {
     @ObservationIgnored private var iconWaitsForSettings = false
     /// What the paywall was opened for, run once Pro is on and the sheet has closed.
     @ObservationIgnored private var afterPaywall: (@MainActor () -> Void)?
+    /// A trial started in the paywall: the notification ask follows once the sheet has gone.
+    @ObservationIgnored private var trialAskAfterPaywall = false
+    /// The ask is due and waits until nothing else holds the screen: no paywall, no iOS prompt, no voice note, no
+    /// sheet opened since the paywall (`trialAskLevel`). Nothing is used up until it is on screen (`trialAskDidAppear`).
+    @ObservationIgnored private var trialAskDue = false
+    /// The sheet the paywall was over when the trial started: the ask may show over it while it is still up.
+    @ObservationIgnored private var trialAskSheet: SheetRoute?
+    /// Continue was tapped. The ask has no other way out (Apple's HIG), so closing without it means something else
+    /// closed it (a voice to-do request), and it comes back once nothing else holds the screen.
+    @ObservationIgnored private var trialAskAnswered = false
+    /// How many sheets are on screen at each level above TODAY (`PaywallHost`): a sheet still closing counts until
+    /// it has gone.
+    @ObservationIgnored private var levelsOnScreen: [PaywallAnchor: Int] = [:]
+    @ObservationIgnored private var trialAskRetry: Task<Void, Never>?
+    /// A voice to-do request holds the ask back this long, so the recording it asked for starts first (it starts about
+    /// half a second after the To-do tab comes to the front, `TodoRootView.consumeRequest`). Tests shorten it.
+    @ObservationIgnored var trialAskVoiceHold: TimeInterval = 3
+    @ObservationIgnored private var trialAskHeldUntil: Date?
+    /// iOS's notification prompt is up (the nudge's Turn on or toggle): the trial ask then stays away.
+    @ObservationIgnored private var askingPermission = false
 
     init(store: TakenStore, pro: ProStore? = nil, profileStore: ProfileStore = .shared, isDemo: Bool,
          launchScreen: String?, clockNow: @escaping @Sendable () -> Date) {
@@ -121,6 +165,8 @@ final class AppModel {
         let state = store.load()
         let now = clockNow()
         let engine = StackEngine(state: state, clock: DayClock(dayStartHour: state.settings.dayStartHour))
+        self.demoPrompt = isDemo ? Self.demoRow(forScreen: launchScreen, settings: state.settings,
+                                                today: engine.today(now: now)) : nil
         self.pro = pro ?? ProStore(ledger: .shared, hasLogged: !state.doses.isEmpty)
         self.state = state
         self.theme = Theme.look(state.settings.theme)
@@ -143,6 +189,8 @@ final class AppModel {
             // Siri and the nudge run in this process: before refusing a log on a renewing plan's lapsed cache, they
             // ask the App Store again through this store.
             ProRecheck.handler = { [weak self] in _ = await self?.pro.refresh() }
+        } else {
+            notificationPermission = { .notDetermined }
         }
     }
 
@@ -164,7 +212,8 @@ final class AppModel {
         let store = TakenStore(fileURL: url, postsChangeNotifications: false)
         var seeded = screen == "add" || screen == "add-search" || screen == "empty"
             ? StackState(settings: StackSettings(reminderEnabled: true))
-            : DemoData.state(now: demoNow, allTaken: screen == "today-done")
+            : DemoData.state(now: demoNow, allTaken: screen == "today-done" || screen == "today-widget-invite",
+                             yesterdayPartial: screen == "today-repair")
         seeded.settings.theme = look
         try? store.replace(with: seeded)
         // Store screenshots show Taken with Pro; -screen paywall, locked and settings-locked show it without, and
@@ -218,11 +267,139 @@ final class AppModel {
         ProCopy.lockedBar(eligible: pro.introEligible, intro: pro.offers[.yearly]?.intro)
     }
 
+    // MARK: One-time rows (the 1.1 retention build, SPEC 3.1)
+
+    /// The one quiet row under Today's progress line, if any. Never in `-demo` unless its `-screen` asks for it.
+    var todayPrompt: TodayPrompt? {
+        if isDemo { return demoPrompt }
+        return TodayPrompts.pick(settings: settings, hasStack: hasStack, today: today, repairDay: repairDay,
+                                 locked: isLocked, lockScreenWidget: lockScreenWidget ?? true, trialNotice: trialNotice)
+    }
+
+    /// The trial reminder's words for Today while notifications cannot carry them (`TrialReminder.notice`).
+    var trialNotice: String? {
+        guard notificationsAllowed == false else { return nil }
+        return TrialReminder.notice(status: pro.status, price: pro.renewalPrice, state: state, now: now)
+    }
+
+    static func demoRow(forScreen screen: String?, settings: StackSettings, today: DayKey) -> TodayPrompt? {
+        switch screen {
+        case "today-nudge-offer": return .nudgeOffer(minutes: settings.reminderMinutes)
+        case "today-repair": return .repair(today.adding(-1))
+        case "today-widget-invite": return .widgetInvite
+        default: return nil
+        }
+    }
+
+    /// Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. Turn on is
+    /// the only place, with Profile's toggle, where iOS asks for notification permission.
+    func answerNudgeOffer(turnOn: Bool) {
+        withAnimation(.snappy(duration: 0.22)) {
+            if isDemo { demoPrompt = nil }
+            _ = write { $0.settings.nudgeOfferDone = true }
+        }
+        guard turnOn else { return }
+        requirePro { [weak self] in
+            guard let self else { return }
+            Task { await self.turnOnNudgeFromOffer() }
+        }
+    }
+
+    private func turnOnNudgeFromOffer() async {
+        await setReminderEnabled(true)
+        if settings.reminderEnabled {
+            show(Toast(message: RetentionCopy.nudgeOn, time: Fmt.minutes(settings.reminderMinutes)))
+        } else if notificationsDenied {
+            show(Toast(message: RetentionCopy.notificationsOff))
+        }
+    }
+
+    /// The widget invite is on screen: the day it first showed is kept, so it shows on that day only.
+    func noteWidgetInviteShown() {
+        guard !isDemo, settings.widgetInviteDay == nil else { return }
+        let day = today.day.ordinal
+        write { $0.settings.widgetInviteDay = day }
+    }
+
+    /// A tap on the widget invite (it opens how to add the widget) or its close: either way it is gone for good.
+    func closeWidgetInvite(openHelp: Bool) {
+        withAnimation(.snappy(duration: 0.22)) {
+            if isDemo {
+                demoPrompt = nil
+            } else {
+                _ = write { $0.settings.widgetInviteDone = true }
+            }
+        }
+        if openHelp { sheet = .widgetHelp }
+    }
+
+    /// Someone who already has the Taken widget on the Lock Screen never gets the invite: WidgetKit lists the widgets the
+    /// person configured (https://developer.apple.com/documentation/widgetkit/widgetcenter/getcurrentconfigurations(_:)),
+    /// and one in a Lock Screen family counts as the invite answered. Asked each time Taken comes to the front.
+    private func checkLockScreenWidget() async {
+        guard !isDemo else { return }
+        guard !settings.widgetInviteDone else {
+            lockScreenWidget = false
+            return
+        }
+        let found = await Self.lockScreenWidgetConfigured()
+        lockScreenWidget = found
+        if found && !settings.widgetInviteDone { write { $0.settings.widgetInviteDone = true } }
+    }
+
+    private static func lockScreenWidgetConfigured() async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            WidgetCenter.shared.getCurrentConfigurations { result in
+                // An error reads as none, so the invite still shows once.
+                let widgets = ((try? result.get()) ?? []).map { (kind: $0.kind, family: $0.family) }
+                continuation.resume(returning: TodayPrompts.hasLockScreenWidget(widgets))
+            }
+        }
+    }
+
+    /// The repair line's close: hidden for the day it was about, so nobody who really missed a dose is pushed to record
+    /// one. It never says the streak broke.
+    func closeRepair(_ day: DayKey) {
+        withAnimation(.snappy(duration: 0.22)) {
+            if isDemo {
+                demoPrompt = nil
+            } else {
+                _ = write { $0.settings.repairClosedDay = day.ordinal }
+            }
+        }
+    }
+
     func nextLabel(for row: ItemDay) -> String {
         Fmt.next(engine.nextDueDay(for: row.item, after: today.day), today: today.day)
     }
 
-    func sheetSummary(for day: DayKey) -> DaySummary { engine.sheetSummary(for: day) }
+    /// A row in Not today and the line under its name. A weekly item shows the week today is in (SPEC 3.3): its due day,
+    /// open ("Weekly · Thu · Not logged") or logged ("Weekly · Next: Thursday"), or the next due day an early dose
+    /// already counts for ("Weekly · Counts for Thursday"). In the 1 to 3 days before the next due day, with this week
+    /// logged, it is today's quiet ring instead ("Weekly · Next: Thursday"), so an early dose is one tap, as before this
+    /// build, and counts for the next due day (R1 b). Anything else is today's row, as before.
+    func notTodayRow(_ row: ItemDay) -> (row: ItemDay, note: String) {
+        if !engine.takesEarlyDose(row.item, today: today.day),
+           let week = engine.weekRow(for: row.item, today: today.day) {
+            return (week, Fmt.weekNote(week, today: today.day))
+        }
+        let note = row.doses.isEmpty ? Fmt.notDue(row.frequency, next: nextLabel(for: row)) : Fmt.frequency(row.frequency)
+        return (row, note)
+    }
+
+    func sheetSummary(for day: DayKey) -> DaySummary { engine.sheetSummary(for: day, asOf: today.day) }
+
+    /// The dose Set time corrects: the item's latest dose logged today, whichever day it counts for. Nil logs a new one.
+    func setTimeDose(for item: Item) -> Dose? {
+        state.doses.filter { $0.itemId == item.id && clock.day(of: $0) == today.day }.max(by: { $0.takenAt < $1.takenAt })
+    }
+
+    /// Set time belongs on a row whose last dose was logged today, or that has none and is today's. Otherwise (a weekly
+    /// row whose dose was logged another day, or whose week is open) the row offers its day's sheet instead.
+    func offersSetTime(_ row: ItemDay) -> Bool {
+        guard let last = row.lastDose else { return row.day == today.day }
+        return clock.day(of: last) == today.day
+    }
 
     func csv() -> String { CSVExport.make(state: state) }
 
@@ -261,14 +438,18 @@ final class AppModel {
         apply(store.load())
         guard !isDemo else { return }
         let snapshot = state
+        // A Taken widget added to the Lock Screen while Taken was away ends the widget invite before it shows. Its own
+        // task, so a slow answer from WidgetKit never holds up the renewal check or the nudges below.
+        Task { await checkLockScreenWidget() }
         Task {
             // Renewals, refunds and purchases made elsewhere land here (PRO.md: refresh on foreground).
             await pro.foreground()
             await Reminders.reschedule(state: snapshot, now: Date())
             // Due-time notifications too: tasks saved before notifications were allowed get theirs now.
             await TodoNotificationScheduler.shared.reschedule(TodoStore.shared.load().tasks)
-            let denied = await Reminders.isDenied()
-            self.notificationsDenied = denied && snapshot.settings.reminderEnabled
+            let permission = await self.notificationPermission()
+            self.notificationsDenied = permission == .denied && snapshot.settings.reminderEnabled
+            self.notificationsAllowed = permission == .allowed
         }
         consumePendingLog()
         // A first dose logged from a widget, or an app closed before the sheet came up, still gets its one paywall.
@@ -287,6 +468,8 @@ final class AppModel {
         case "item":
             if let item = state.items.first(where: { $0.name == "Finasteride" }) { sheet = .editItem(item.id) }
         case "paywall", "paywall-no-yearly": presentPaywall(origin: .intro)
+        case "widget-help": sheet = .widgetHelp
+        case "trial-ask": trialAsk = .root
         default: break
         }
     }
@@ -297,11 +480,20 @@ final class AppModel {
     /// action): the To-do tab comes to the front and any sheet over it closes, so Listening and the stop button show.
     func openTodoTab() {
         if sheet != nil { sheet = nil }
+        // The trial ask steps aside for the recording, held back until it has started, and comes back once it is done.
+        if trialAsk != nil {
+            trialAsk = nil
+            if !trialAskAnswered { trialAskDue = true }
+        }
+        if trialAskDue {
+            trialAskHeldUntil = Date().addingTimeInterval(trialAskVoiceHold)
+            retryTrialAsk()
+        }
         tab = .todo
     }
 
-    /// The To-do tab is in front with no sheet or paywall over it: the mic may open.
-    var showsTodoTabUncovered: Bool { tab == .todo && sheet == nil && paywall == nil }
+    /// The To-do tab is in front with no sheet, paywall or trial ask over it: the mic may open.
+    var showsTodoTabUncovered: Bool { tab == .todo && sheet == nil && paywall == nil && trialAsk == nil }
 
     func handle(url: URL) {
         guard url.scheme == "taken" else { return }
@@ -354,6 +546,7 @@ final class AppModel {
         history = engine.history(today: today.day)
         streak = engine.streak(today: today.day)
         adherence = engine.adherence(today: today.day)
+        repairDay = TodayPrompts.repairDay(engine: engine, today: today.day)
     }
 
     /// Every write goes through here: coordinated store write, then widgets, controls, nudges.
@@ -418,17 +611,151 @@ final class AppModel {
         paywall = nil
     }
 
-    /// Pro just came on in the paywall: what opened it runs once the sheet has gone.
-    func paywallUnlocked() {
+    /// Pro just came on in the paywall: what opened it runs once the sheet has gone. A trial that started there gets the
+    /// one notification ask after it (`TrialAsk`).
+    func paywallUnlocked(trialStarted: Bool = false) {
         if let pending = paywall?.pending { afterPaywall = pending }
+        if trialStarted, paywall != nil { trialAskAfterPaywall = true }
     }
 
     /// The paywall sheet finished closing.
     func paywallDidDismiss() {
         let action = afterPaywall
         afterPaywall = nil
+        if trialAskAfterPaywall {
+            trialAskAfterPaywall = false
+            // The sheet the paywall was over, before the tap that opened it runs (it may close that sheet or open one).
+            let over = sheet
+            Task { [weak self] in await self?.offerTrialAsk(over: over) }
+        } else if trialAskDue {
+            retryTrialAsk()
+        }
         guard let action, access.allowsLogging else { return }
         action()
+    }
+
+    // MARK: The trial promise (SPEC 3.9, 2026-10-21)
+
+    /// Right after a trial starts: the one short sheet asking for notifications, for the evening nudge and the reminder
+    /// before the trial ends, only while iOS has not asked yet and only once. When iOS already has an answer, the
+    /// reminder follows it (scheduled only when allowed). The ask never takes the screen from the person: while the
+    /// tap that opened the paywall has opened a sheet, started a voice note or brought up iOS's prompt, it waits, and
+    /// it comes when nothing else holds the screen, on TODAY or over the sheet the paywall was over if that is still
+    /// up. `over` is that sheet (nil on TODAY).
+    func offerTrialAsk(over route: SheetRoute?) async {
+        // The paywall has gone and the tap that opened it has run (it may be the nudge's own Turn on).
+        try? await Task.sleep(for: .milliseconds(400))
+        let permission = await notificationPermission()
+        guard TrialAsk.shows(trialStarted: true, permission: permission, alreadyShown: pro.trialAskShown) else {
+            await rescheduleReminders()
+            return
+        }
+        trialAskDue = true
+        trialAskSheet = route
+        presentTrialAskIfClear()
+    }
+
+    /// Shows the waiting ask where the person is, once nothing else holds the screen (`trialAskLevel`). Returns the
+    /// level it went to, or nil while it still waits.
+    @discardableResult
+    func presentTrialAskIfClear() -> PaywallAnchor? {
+        guard trialAskDue, trialAsk == nil, let level = trialAskLevel() else { return nil }
+        trialAskDue = false
+        trialAskAnswered = false
+        trialAsk = level
+        return level
+    }
+
+    /// Where the ask may show right now, or nil while the person is busy: a paywall or iOS's prompt is up, a voice note
+    /// is starting, being heard or sorted, a sheet inside a sheet is up, a sheet opened since the paywall (the Add sheet
+    /// a locked "+" asked for) is up, or a sheet is still opening or closing. Over the sheet the paywall was over while
+    /// it is still up; otherwise on TODAY.
+    private func trialAskLevel() -> PaywallAnchor? {
+        if let held = trialAskHeldUntil, Date() < held { return nil }
+        guard paywall == nil, !askingPermission, !captureBusy(), (levelsOnScreen[.nested] ?? 0) == 0 else { return nil }
+        let sheetOnScreen = (levelsOnScreen[.sheet] ?? 0) > 0
+        if let sheet {
+            return sheetOnScreen && sheet == trialAskSheet ? .sheet : nil
+        }
+        return sheetOnScreen ? nil : .root
+    }
+
+    /// Tries the waiting ask again after a moment, so a sheet that just closed has finished: iOS's prompt may have
+    /// answered it meanwhile, and then it is dropped and the reminder follows that answer.
+    func retryTrialAsk(after delay: Duration = .milliseconds(350)) {
+        guard trialAskDue else { return }
+        // Held back for a voice to-do request: not before the hold ends.
+        let heldFor = max(trialAskHeldUntil?.timeIntervalSinceNow ?? 0, 0)
+        let wait = heldFor > 0 ? max(delay, .milliseconds(Int(heldFor * 1000) + 200)) : delay
+        trialAskRetry?.cancel()
+        trialAskRetry = Task { [weak self] in
+            try? await Task.sleep(for: wait)
+            guard let self, !Task.isCancelled, self.trialAskDue, self.trialAsk == nil else { return }
+            guard await self.notificationPermission() == .notDetermined else {
+                self.trialAskDue = false
+                await self.rescheduleReminders()
+                return
+            }
+            self.presentTrialAskIfClear()
+        }
+    }
+
+    /// A sheet above TODAY came on screen (`PaywallHost`), at `.sheet` or `.nested`.
+    func levelDidAppear(_ level: PaywallAnchor) {
+        guard level != .root else { return }
+        levelsOnScreen[level, default: 0] += 1
+    }
+
+    /// A sheet above TODAY has gone: the waiting ask may come now.
+    func levelDidDisappear(_ level: PaywallAnchor) {
+        guard level != .root else { return }
+        levelsOnScreen[level] = max((levelsOnScreen[level] ?? 0) - 1, 0)
+        // An ask over a sheet that something else closed went with it: it comes back on TODAY.
+        if trialAsk == level, (levelsOnScreen[level] ?? 0) == 0 {
+            trialAsk = nil
+            if !trialAskAnswered { trialAskDue = true }
+        }
+        retryTrialAsk()
+    }
+
+    /// A voice note finished (the To-do tab's phase is back to idle): the waiting ask may come now.
+    func captureDidSettle() {
+        retryTrialAsk()
+    }
+
+    /// The ask is on screen: only now is the one ask used up (`ProLedger.trialAskAt`).
+    func trialAskDidAppear() {
+        pro.markTrialAskShown()
+    }
+
+    /// Continue, the ask's one button: iOS's prompt follows, and iOS's alert carries the no. Allowed: the evening nudge
+    /// comes on at its time, which answers Today's nudge offer, and the trial reminder is scheduled with it. Either answer
+    /// to iOS answers Today's nudge offer too, so there is never a second ask (own choice).
+    func answerTrialAsk() async {
+        trialAskAnswered = true
+        await setReminderEnabled(true)
+        if !settings.nudgeOfferDone { write { $0.settings.nudgeOfferDone = true } }
+        trialAsk = nil
+        if settings.reminderEnabled {
+            show(Toast(message: RetentionCopy.nudgeOn, time: Fmt.minutes(settings.reminderMinutes)))
+        } else if notificationsDenied {
+            show(Toast(message: RetentionCopy.notificationsOff))
+        }
+    }
+
+    /// The ask has gone. It cannot be swiped away, so without Continue something else closed it (a voice to-do
+    /// request): it comes back once nothing else holds the screen.
+    func trialAskDidDismiss() {
+        trialAsk = nil
+        guard !trialAskAnswered else { return }
+        trialAskDue = true
+        retryTrialAsk()
+    }
+
+    private func rescheduleReminders() async {
+        guard !isDemo else { return }
+        let snapshot = state
+        await Reminders.reschedule(state: snapshot, now: Date())
     }
 
     /// About 1.5 s after the first dose the paywall slides up, once.
@@ -459,6 +786,8 @@ final class AppModel {
             iconWaitsForSettings = false
             scheduleIconSync(after: .milliseconds(350))
         }
+        // The trial ask waiting for this sheet to close comes now (`presentTrialAskIfClear`).
+        retryTrialAsk()
         guard introWaitsForSheet else { return }
         introWaitsForSheet = false
         scheduleIntro(after: .milliseconds(500))
@@ -493,9 +822,12 @@ final class AppModel {
 
     // MARK: Taking
 
-    /// Tap on a row: pending logs a dose, taken shows the detail. Never un-takes.
+    /// Tap on a row: pending logs a dose, taken shows the detail. Never un-takes. A weekly item's open week logs from
+    /// its ring (it counts for the due day, at the real time); once the week is logged a tap only shows the detail, until
+    /// the 1 to 3 days before the next due day, when the row is today's quiet ring and logs an early dose
+    /// (`notTodayRow`).
     func tap(_ row: ItemDay) {
-        if row.isPending || (!row.isDue && row.doses.isEmpty) {
+        if row.isPending || row.isOpen || (!row.isDue && row.doses.isEmpty) {
             let item = row.item
             requirePro { [weak self] in self?.log(item) }
         } else {
@@ -561,13 +893,14 @@ final class AppModel {
         announce("Undone.")
     }
 
-    /// Removes today's latest dose of an item. The toast's UNDO puts it back with its original time.
-    func undoLastDose(_ item: Item) {
-        let day = today.day
-        let clock = self.clock
-        guard let removed = write({ $0.undoLastDose(itemId: item.id, on: day, clock: clock) }) ?? nil else { return }
+    /// Removes the row's latest dose: today's on a Stack row, and on a weekly row the one that counts for its week,
+    /// whatever day it was logged. The toast's UNDO puts it back with its original time.
+    func undoLastDose(_ row: ItemDay) {
+        guard let last = row.lastDose else { return }
+        let item = row.item
+        write { $0.removeDoses([last.id]) }
         Haptics.soft(hapticsOn)
-        show(Toast(message: "\(item.name): last dose removed", undo: .restore([removed])))
+        show(Toast(message: "\(item.name): last dose removed", undo: .restore([last])))
         announce("\(item.name), last dose removed.")
     }
 
@@ -584,7 +917,7 @@ final class AppModel {
         let (at, isFuture) = moment(on: today.day, minutes: hour * 60 + minute)
         guard !isFuture else { return }
         let zone = clock.calendar.timeZone
-        let existing = today.items.first { $0.id == item.id }?.lastDose
+        let existing = setTimeDose(for: item)
         let wasLocked = today.allTaken
         if let existing {
             write { $0.setDoseTime(doseId: existing.id, to: at, timeZone: zone) }
@@ -668,18 +1001,30 @@ final class AppModel {
 
     func setReminderEnabled(_ enabled: Bool) async {
         if enabled && !isDemo {
+            askingPermission = true
             let granted = await Reminders.requestPermission()
+            askingPermission = false
             notificationsDenied = !granted
+            notificationsAllowed = granted
+            // A trial ask waiting for this prompt: iOS has its answer now, so it is dropped (`retryTrialAsk`).
+            retryTrialAsk()
             guard granted else { return }
             // Notifications are allowed now: to-dos with a time get theirs too.
             await TodoNotificationScheduler.shared.reschedule(TodoStore.shared.load().tasks)
         }
         if !enabled { notificationsDenied = false }
-        write { $0.settings.reminderEnabled = enabled }
+        // Profile's toggle answers Today's nudge offer too, so the offer never comes back after it is turned off.
+        write { $0.settings.setReminder(enabled) }
     }
 
     func setReminderMinutes(_ minutes: Int) {
         write { $0.settings.reminderMinutes = minutes }
+    }
+
+    /// Profile > Reminder > Trial reminder. Off withdraws it, pending or delivered, and Today's line with it; the write
+    /// reschedules (`Sync.afterWrite`).
+    func setTrialReminder(_ enabled: Bool) {
+        write { $0.settings.trialReminderEnabled = enabled }
     }
 
     /// Profile > Wake-up time. The day rolls over 4 hours before it (never seen or set), so every view, widget, Siri

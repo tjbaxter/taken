@@ -21,10 +21,25 @@ struct ItemDay: Identifiable, Sendable {
     /// True when the item sat archived on this day, rather than not being added yet.
     let isPaused: Bool
     let doses: [Dose]
+    /// A weekly item's due day whose week is still open (SPEC 3.3, R2): nothing counts for it yet and the day being
+    /// lived is 1 to 6 days after it. It neither counts as due nor as missed until the next due day closes it.
+    let isOpen: Bool
+
+    init(item: Item, day: DayKey, frequency: Frequency, isDue: Bool, isActive: Bool, isPaused: Bool, doses: [Dose],
+         isOpen: Bool = false) {
+        self.item = item
+        self.day = day
+        self.frequency = frequency
+        self.isDue = isDue
+        self.isActive = isActive
+        self.isPaused = isPaused
+        self.doses = doses
+        self.isOpen = isOpen
+    }
 
     var id: UUID { item.id }
     var dosesPerDay: Int { frequency.dosesPerDay }
-    var dueCount: Int { isDue && isActive ? dosesPerDay : 0 }
+    var dueCount: Int { isDue && isActive && !isOpen ? dosesPerDay : 0 }
     var takenCount: Int { doses.count }
     var takenDueCount: Int { min(doses.count, dueCount) }
     var pendingCount: Int { max(0, dueCount - doses.count) }
@@ -49,6 +64,8 @@ struct DaySummary: Sendable {
     var isEmpty: Bool { items.isEmpty }
     var allDoses: [Dose] { items.flatMap { $0.doses }.sorted { $0.takenAt < $1.takenAt } }
     var lastDose: Dose? { allDoses.last }
+    /// Weekly items whose week is still open on this day: not logged yet, and neither due nor missed.
+    var openCount: Int { items.filter(\.isOpen).count }
 
     var status: DayStatus {
         if dueDoses == 0 { return .nothingDue }
@@ -88,7 +105,11 @@ struct StackEngine: Sendable {
     let orderedItems: [Item]
 
     private let doseDays: [UUID: [DayKey: [Dose]]]
+    /// The days doses count for (R1), sorted.
     private let sortedDoseDays: [UUID: [DayKey]]
+    /// The days doses were logged, sorted. Every other day reads these, so a weekly dose credited to its due day never
+    /// moves the item's alternate days after a schedule change (only the day a weekly dose counts for changes).
+    private let sortedLoggedDays: [UUID: [DayKey]]
     private let latestDoseAt: [UUID: Date]
     private let activeFrom: [UUID: DayKey]
     private let archivedFrom: [UUID: DayKey]
@@ -103,40 +124,42 @@ struct StackEngine: Sendable {
         var grouped: [UUID: [Dose]] = [:]
         for dose in state.doses { grouped[dose.itemId, default: []].append(dose) }
 
+        // Each dose's logged day, in time order: the day that was being lived where it was logged.
         var fixedClocks: [Int: DayClock] = [:]
-        var byDay: [UUID: [DayKey: [Dose]]] = [:]
-        var days: [UUID: [DayKey]] = [:]
+        var logged: [UUID: [(dose: Dose, day: DayKey)]] = [:]
+        var loggedDays: [UUID: [DayKey]] = [:]
         var latest: [UUID: Date] = [:]
         for (itemId, list) in grouped {
             let sorted = list.sorted(by: { $0.takenAt < $1.takenAt })
-            var map: [DayKey: [Dose]] = [:]
+            var entries: [(dose: Dose, day: DayKey)] = []
             for dose in sorted {
                 let day: DayKey
                 if let offset = dose.utcOffset, offset != clock.utcOffset(at: dose.takenAt) {
                     // Logged in another time zone: it keeps the day that was being lived there.
-                    let logged = fixedClocks[offset] ?? clock.fixed(utcOffset: offset)
-                    fixedClocks[offset] = logged
-                    day = logged.day(for: dose.takenAt)
+                    let fixed = fixedClocks[offset] ?? clock.fixed(utcOffset: offset)
+                    fixedClocks[offset] = fixed
+                    day = fixed.day(for: dose.takenAt)
                 } else {
                     day = clock.day(for: dose.takenAt)
                 }
-                map[day, default: []].append(dose)
+                entries.append((dose, day))
             }
-            byDay[itemId] = map
-            days[itemId] = map.keys.sorted()
+            logged[itemId] = entries
+            loggedDays[itemId] = Set(entries.map(\.day)).sorted()
             latest[itemId] = sorted.last?.takenAt
         }
-        self.doseDays = byDay
-        self.sortedDoseDays = days
         self.latestDoseAt = latest
+        self.sortedLoggedDays = loggedDays
 
+        // Frequency eras, archived stretches and each item's start come before the doses: a weekly dose's credit
+        // (R1) reads all three.
         var from: [UUID: DayKey] = [:]
         var archived: [UUID: DayKey] = [:]
         var eras: [UUID: [DayEra]] = [:]
         var paused: [UUID: [DayRange]] = [:]
         for item in state.items {
             var start = clock.day(for: item.createdAt)
-            if let first = days[item.id]?.first, first < start { start = first }
+            if let first = logged[item.id]?.map(\.day).min(), first < start { start = first }
             from[item.id] = start
             if item.archived {
                 archived[item.id] = item.archivedAt.map { clock.day(for: $0) } ?? start
@@ -154,6 +177,63 @@ struct StackEngine: Sendable {
         self.archivedFrom = archived
         self.frequencyEras = eras
         self.pausedDays = paused
+
+        // The day each dose counts for. Only a weekly item's can differ from the day it was logged (R1); the dose keeps
+        // its real time either way.
+        let items = Dictionary(state.items.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        var byDay: [UUID: [DayKey: [Dose]]] = [:]
+        var days: [UUID: [DayKey]] = [:]
+        for (itemId, entries) in logged {
+            var map: [DayKey: [Dose]] = [:]
+            for entry in entries {
+                var day = entry.day
+                if let item = items[itemId] {
+                    day = Self.creditedDay(
+                        logged: entry.day, start: from[itemId], counted: map,
+                        frequency: { Self.frequency(of: item, on: $0, eras: eras[itemId]) },
+                        paused: { Self.isPaused(on: $0, archivedFrom: archived[itemId], pauses: paused[itemId]) })
+                }
+                map[day, default: []].append(entry.dose)
+            }
+            byDay[itemId] = map
+            days[itemId] = map.keys.sorted()
+        }
+        self.doseDays = byDay
+        self.sortedDoseDays = days
+    }
+
+    /// R1, a weekly dose counts for its week. `logged` is the day the dose was logged, `counted` what already counts
+    /// for each day (the item's earlier doses, in time order). Any other schedule keeps the logged day.
+    /// a) It counts for the latest due day on or before it (P, 0 to 6 days back) when P is on or after the start, not
+    ///    archived, has the same Weekly schedule, and nothing counts for P yet.
+    /// b) Otherwise, when P already has its dose, a dose 1 to 3 days before the next due day (N) counts for N, if N has
+    ///    the same schedule, is not archived and has nothing yet. The 3 days is our own choice: the smallest window
+    ///    that covers "a day or two early"; no label sets it and nothing on screen shows it.
+    /// c) Otherwise it stays on the day it was logged: a second dose on the shot day, an extra one mid-week, or one
+    ///    before the item's first due day.
+    private static func creditedDay(logged x: DayKey, start: DayKey?, counted: [DayKey: [Dose]],
+                                    frequency: (DayKey) -> Frequency, paused: (DayKey) -> Bool) -> DayKey {
+        let schedule = frequency(x)
+        guard case .weekdays(let set) = schedule, set.count == 1, let weekday = set.first else { return x }
+        let due = x.adding(-((x.weekday - weekday + 7) % 7))
+        let dueHasDose = !(counted[due]?.isEmpty ?? true)
+        if !dueHasDose, let start, due >= start, !paused(due), frequency(due) == schedule { return due }
+        let next = due.adding(7)
+        if dueHasDose, (1...3).contains(x.distance(to: next)), frequency(next) == schedule, !paused(next),
+           counted[next]?.isEmpty ?? true {
+            return next
+        }
+        return x
+    }
+
+    private static func frequency(of item: Item, on day: DayKey, eras: [DayEra]?) -> Frequency {
+        if let era = eras?.first(where: { day < $0.until }) { return era.frequency }
+        return item.frequency
+    }
+
+    private static func isPaused(on day: DayKey, archivedFrom: DayKey?, pauses: [DayRange]?) -> Bool {
+        if let end = archivedFrom, day >= end { return true }
+        return pauses?.contains(where: { $0.contains(day) }) ?? false
     }
 
     // MARK: Days
@@ -173,23 +253,28 @@ struct StackEngine: Sendable {
 
     /// True if the item sat archived on that day.
     func isPaused(_ item: Item, on day: DayKey) -> Bool {
-        if let end = archivedFrom[item.id], day >= end { return true }
-        return pausedDays[item.id]?.contains(where: { $0.contains(day) }) ?? false
+        Self.isPaused(on: day, archivedFrom: archivedFrom[item.id], pauses: pausedDays[item.id])
     }
 
     /// The frequency in force on a day, so changing it in settings never rewrites earlier days.
     func frequency(of item: Item, on day: DayKey) -> Frequency {
-        if let era = frequencyEras[item.id]?.first(where: { day < $0.until }) { return era.frequency }
-        return item.frequency
+        Self.frequency(of: item, on: day, eras: frequencyEras[item.id])
+    }
+
+    /// Weekly: a one-day Days set on that day. Only these get a week (SPEC 3.3, R1 to R5).
+    func isWeekly(_ item: Item, on day: DayKey) -> Bool {
+        if case .weekdays(let set) = frequency(of: item, on: day) { return set.count == 1 }
+        return false
     }
 
     func doses(of itemId: UUID, on day: DayKey) -> [Dose] {
         doseDays[itemId]?[day] ?? []
     }
 
-    /// The last day with a dose strictly before `day`.
+    /// The last day a dose was logged strictly before `day`, for Every other day. It reads the logged day, not the day a
+    /// weekly dose counts for (R1), so switching from Weekly to Every other day after a late dose keeps the real gap.
     func lastDoseDay(of itemId: UUID, before day: DayKey) -> DayKey? {
-        guard let days = sortedDoseDays[itemId], !days.isEmpty else { return nil }
+        guard let days = sortedLoggedDays[itemId], !days.isEmpty else { return nil }
         var lo = 0
         var hi = days.count
         while lo < hi {
@@ -211,10 +296,50 @@ struct StackEngine: Sendable {
         }
     }
 
-    func itemDay(_ item: Item, on day: DayKey) -> ItemDay {
-        ItemDay(item: item, day: day, frequency: frequency(of: item, on: day), isDue: isDue(item, on: day),
-                isActive: isActive(item, on: day), isPaused: isPaused(item, on: day),
-                doses: doses(of: item.id, on: day))
+    /// One item on one day. `today`, the day being lived, turns on the open week (R2): a weekly due day with nothing
+    /// for it, 1 to 6 days before `today`, is open, so it is neither due nor missed. Nil turns the rule off (the nudge
+    /// plan and the widgets, which only look at today and later).
+    func itemDay(_ item: Item, on day: DayKey, asOf today: DayKey? = nil) -> ItemDay {
+        let due = isDue(item, on: day)
+        let active = isActive(item, on: day)
+        let doses = doses(of: item.id, on: day)
+        var open = false
+        if let today, due, active, doses.isEmpty, isWeekly(item, on: day) {
+            open = (1...6).contains(day.distance(to: today))
+        }
+        return ItemDay(item: item, day: day, frequency: frequency(of: item, on: day), isDue: due, isActive: active,
+                       isPaused: isPaused(item, on: day), doses: doses, isOpen: open)
+    }
+
+    /// Today's Not today row for a weekly item on a day that is not its due day: the week today is in (SPEC 3.3).
+    /// The next due day when an early dose already counts for it (R1 b), otherwise the due day of this week, open or
+    /// logged. Nil when the item is not weekly today, is due today, or this week's due day is not one of its days
+    /// (before it was added, archived then, or on another schedule): the row then reads as before.
+    func weekRow(for item: Item, today: DayKey) -> ItemDay? {
+        guard !isDue(item, on: today), case .weekdays(let set) = frequency(of: item, on: today), set.count == 1,
+              let weekday = set.first else { return nil }
+        let due = today.adding(-((today.weekday - weekday + 7) % 7))
+        let next = due.adding(7)
+        if !doses(of: item.id, on: next).isEmpty { return itemDay(item, on: next, asOf: today) }
+        guard frequency(of: item, on: due) == frequency(of: item, on: today), isDue(item, on: due),
+              isActive(item, on: due) else { return nil }
+        return itemDay(item, on: due, asOf: today)
+    }
+
+    /// R1 b from Today: this week's due day already has its dose, nothing counts for the next due day yet, and today is 1
+    /// to 3 days before it, so a dose logged now counts for the next due day. Today's Not today row is then today's quiet
+    /// ring, which logs with one tap, rather than last week's lit one, which only shows its time (SPEC 3.3). On the 3 days
+    /// after the due day it is false: the lit ring stays, and a tap never logs a second dose.
+    func takesEarlyDose(_ item: Item, today: DayKey) -> Bool {
+        guard let week = weekRow(for: item, today: today), week.day < today, !week.doses.isEmpty else { return false }
+        return (1...3).contains(today.distance(to: week.day.adding(7)))
+    }
+
+    /// Whether anything at all counts for a day in this span: the honest repair asks it of the week before yesterday.
+    func loggedAnything(from first: DayKey, through last: DayKey) -> Bool {
+        guard first <= last else { return false }
+        for days in sortedDoseDays.values where days.contains(where: { $0 >= first && $0 <= last }) { return true }
+        return false
     }
 
     // MARK: Quick logging
@@ -244,21 +369,22 @@ struct StackEngine: Sendable {
         return resumes > now ? resumes : nil
     }
 
-    /// A day as history sees it: only items that were in the stack that day.
-    func summary(for day: DayKey) -> DaySummary {
-        DaySummary(day: day, items: orderedItems.filter { isActive($0, on: day) }.map { itemDay($0, on: day) })
+    /// A day as history sees it: only items that were in the stack that day. With `today`, a weekly item whose week is
+    /// still open counts neither way (R2); nil turns that off.
+    func summary(for day: DayKey, asOf today: DayKey? = nil) -> DaySummary {
+        DaySummary(day: day, items: orderedItems.filter { isActive($0, on: day) }.map { itemDay($0, on: day, asOf: today) })
     }
 
     /// TODAY: every item that is not archived, in the user's order.
     func todaySummary(now: Date) -> DaySummary {
         let day = clock.day(for: now)
-        return DaySummary(day: day, items: orderedItems.filter { !$0.archived }.map { itemDay($0, on: day) })
+        return DaySummary(day: day, items: orderedItems.filter { !$0.archived }.map { itemDay($0, on: day, asOf: day) })
     }
 
     /// The day sheet: items in the stack that day plus current items, so a missed day can be backfilled.
-    func sheetSummary(for day: DayKey) -> DaySummary {
+    func sheetSummary(for day: DayKey, asOf today: DayKey? = nil) -> DaySummary {
         let items = orderedItems.filter { isActive($0, on: day) || !$0.archived }
-        return DaySummary(day: day, items: items.map { itemDay($0, on: day) })
+        return DaySummary(day: day, items: items.map { itemDay($0, on: day, asOf: today) })
     }
 
     /// The next day after `day` on which the item is due, assuming nothing else gets logged.
@@ -282,13 +408,14 @@ struct StackEngine: Sendable {
 
     // MARK: Stats
 
-    /// Consecutive complete days ending today (today counts once complete; days with nothing due are skipped).
+    /// Consecutive complete days ending today (today counts once complete; days with nothing due are skipped). A weekly
+    /// item's open week neither breaks nor grows it, and a week nothing was logged for breaks it on the next due day.
     func streak(today: DayKey) -> Int {
         guard let earliest = activeFrom.values.min() else { return 0 }
-        var count = summary(for: today).status == .complete ? 1 : 0
+        var count = summary(for: today, asOf: today).status == .complete ? 1 : 0
         var day = today.adding(-1)
         while day >= earliest {
-            switch summary(for: day).status {
+            switch summary(for: day, asOf: today).status {
             case .complete:
                 count += 1
             case .nothingDue, .future:
@@ -307,7 +434,7 @@ struct StackEngine: Sendable {
         var taken = 0
         var due = 0
         for offset in 0..<max(days, 1) {
-            let summary = summary(for: today.adding(-offset))
+            let summary = summary(for: today.adding(-offset), asOf: today)
             taken += summary.takenDueDoses
             due += offset == 0 ? summary.takenDueDoses : summary.dueDoses
         }
@@ -322,7 +449,7 @@ struct StackEngine: Sendable {
             (0..<7).map { offset in
                 let day = start.adding(week * 7 + offset)
                 if day > today { return HistoryCell(day: day, status: .future, isToday: false) }
-                return HistoryCell(day: day, status: summary(for: day).status, isToday: day == today)
+                return HistoryCell(day: day, status: summary(for: day, asOf: today).status, isToday: day == today)
             }
         }
     }
@@ -492,11 +619,16 @@ extension StackState {
         }
     }
 
-    /// Removes the stack, every dose and the settings. The look stays: it is how the phone shows Taken, not data.
+    /// Removes the stack, every dose and the settings. The look stays: it is how the phone shows Taken, not data. So do
+    /// whether Today's one-time offers were answered (the nudge offer, the widget invite), as two yes or no answers, so
+    /// neither comes back. The day the widget invite first showed is a date from the log, so it goes: an invite already
+    /// shown counts as answered, which is what that day meant (it never showed again after it).
     mutating func eraseAll() {
-        let look = settings.theme
+        let kept = settings
         self = StackState()
-        settings.theme = look
+        settings.theme = kept.theme
+        settings.nudgeOfferDone = kept.nudgeOfferDone
+        settings.widgetInviteDone = kept.widgetInviteDone || kept.widgetInviteDay != nil
     }
 }
 
