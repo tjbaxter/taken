@@ -39,6 +39,8 @@ A StoreKit answer only takes Pro away when it proves something: with no app tran
 - **Reminders when locked**: do not schedule nudges. Profile > Reminder says "The nudge needs Taken Pro" (a tap opens the paywall), and turning Nudge on opens the paywall; the notification permission prompt comes once Pro is on.
 - **Profile > Taken Pro section**: status line ("Founding member · Pro for life", "Pro yearly · renews 12 Oct 2027", "Pro yearly · renewing" while a renewal is on its way, "Pro lifetime", "Trial · ends 19 Oct", "Not active"), "Restore purchases", "Redeem code" (StoreKit `offerCodeRedemption`), "Manage subscription" (`manageSubscriptionsSheet`; for a lifetime or founding member only while a subscription still renews, with the line "Your subscription still renews. Taken Pro is yours for good, so you can cancel it."), and the Terms/Privacy links. Restore that finds nothing says "No active Taken Pro on this Apple Account." (true for a new customer and for a plan that ended).
 
+- **Trial reminder (1.1 retention build, SPEC 3.9)**: while Pro is an introductory trial set to renew, one local notification two days before it ends, at the nudge time when the nudge is on and 10:00 otherwise: "Your Taken trial ends Sunday. 12 doses logged so far." Only when notifications are already allowed, and withdrawn on cancel or conversion. 39.8% of 7-day trial cancellations happen on day 0 (https://www.revenuecat.com/state-of-subscription-apps), and RevenueCat warns against hiding the upcoming charge (https://www.revenuecat.com/blog/growth/first-renewal-churn.md).
+
 ## Paywall design (Taken visual language, SPEC section 4)
 
 One sheet, no carousel, no fake urgency, no countdowns, no dark patterns.
