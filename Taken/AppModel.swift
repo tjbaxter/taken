@@ -128,8 +128,8 @@ final class AppModel {
         let state = store.load()
         let now = clockNow()
         let engine = StackEngine(state: state, clock: DayClock(dayStartHour: state.settings.dayStartHour))
-        self.demoPrompt = isDemo ? Self.demoPrompt(forScreen: launchScreen, settings: state.settings,
-                                                   today: engine.today(now: now)) : nil
+        self.demoPrompt = isDemo ? Self.demoRow(forScreen: launchScreen, settings: state.settings,
+                                                today: engine.today(now: now)) : nil
         self.pro = pro ?? ProStore(ledger: .shared, hasLogged: !state.doses.isEmpty)
         self.state = state
         self.theme = Theme.look(state.settings.theme)
@@ -237,7 +237,7 @@ final class AppModel {
                                  locked: isLocked)
     }
 
-    static func demoPrompt(forScreen screen: String?, settings: StackSettings, today: DayKey) -> TodayPrompt? {
+    static func demoRow(forScreen screen: String?, settings: StackSettings, today: DayKey) -> TodayPrompt? {
         switch screen {
         case "today-nudge-offer": return .nudgeOffer(minutes: settings.reminderMinutes)
         case "today-repair": return .repair(today.adding(-1))
