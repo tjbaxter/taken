@@ -186,6 +186,7 @@ final class TodoOneListTests: XCTestCase {
     }
 
     /// One list with a Done today group, in every listening screen too.
+    @MainActor
     func testTheDemoSeedsOneListWithDoneToday() {
         let now = at(2026, 10, 19, 21, 41)
         let clock = londonClock(4)
