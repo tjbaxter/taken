@@ -43,7 +43,7 @@ LOG IT FROM ANYWHERE
 VOICE TO-DOS
 • Tap the mic and say it the way it comes out: "Today by 4 I need to call the dentist, pick up the dry cleaning and email Sam."
 • Taken turns the ramble into a tidy list, with the times you said, and Keep as one puts a note back together with a tap.
-• Personal and Work are headed sections of one list. A note goes to the list on top, and a chip on the Listening card sends it to the other.
+• Nothing to choose: every note goes onto one list, soonest due first, with Done today under it.
 • Tap the circle when one is done. Yesterday's open to-dos stay until they are.
 • Start a note from Siri ("Add to-dos in Taken"), the Action button, Control Center, the Lock Screen or the app icon.
 • Speech and sorting happen on your iPhone. The audio is never stored or sent. Sorting into separate to-dos uses Apple Intelligence where your iPhone has it.
@@ -106,8 +106,7 @@ WHATS_NEW = (
     "Your profile holds a name, a photo and every setting, and a wake-up time now decides which day a late dose counts "
     "for.\n\n"
     "Voice to-dos: tap the mic, say what you need to do, and Taken sorts it into a list on your iPhone. Keep as one "
-    "puts a note back together with a tap. Personal and Work are headed sections of one list; a note goes to the list "
-    "on top, and a chip on the Listening card sends it to the other.\n\n"
+    "puts a note back together with a tap. Every note goes onto one list, with nothing to choose.\n\n"
     "Adding is quicker: type the first letters of a name and pick it from the suggestions, spelled right for you. A "
     "Weekly schedule puts a once-a-week dose on its day, and there are three more quick-pick chips.\n\n"
     "Shortcuts: Did I take it? now hands its answer on, and Get to-dos and Add to-do let a shortcut you build read "
