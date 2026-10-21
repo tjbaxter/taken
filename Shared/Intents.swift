@@ -43,6 +43,10 @@ struct TakeAllIntent: AppIntent {
 struct CheckStackIntent: AppIntent {
     static var title: LocalizedStringResource { "Did I take it?" }
     static var description: IntentDescription { IntentDescription("Answers from your log: what is taken today, and when.") }
+    /// Siri says the stack's names aloud (Birth Control, Finasteride), so a locked iPhone asks for Face ID or the passcode
+    /// first, as Get to-dos does. Apple's default lets an intent run "including when the device is locked"
+    /// (https://developer.apple.com/documentation/appintents/appintent/authenticationpolicy).
+    static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     init() {}
 
