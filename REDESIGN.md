@@ -231,7 +231,7 @@ Nothing here has run on a device yet. CI proves the build, the unit tests and th
 
 ## 1.1 feedback build 3 (Tom's feedback 2026-10-21)
 
-Tom used internal 1.1.0 (20). His voice note, verbatim:
+Tom used internal 1.1.0 (20). His voice note, verbatim but for the expletives, left out as "..." (this repository is public):
 - "So the transcription is much, much better, and it's much cleaner in terms of like getting my intentions correct, which is good. But one thing I don't like, actually, and I think I'm kind of going back on that, I think it's become a bit too complicated to record a voice note."
 - "I prefer the original UI design where it was just like the text box and I could speak. Also, I don't like the little volume bars next to the timer. It kind of puts pressure on me. And it also moves at like 1 FPS. It's really low frame rate, and it just looks kind of ... So get rid of that. Have whatever was the original one, have that."
 - "And I think, yes, again, it's decision fatigue. Having going into work or personal takes all the ... point away of I need to like click voice, speak, end it. ... So I think actually let's get rid of work and personal. Get rid of both of those. I guess it can be done manually if someone wants to create their own folder and organize their to-do list."
