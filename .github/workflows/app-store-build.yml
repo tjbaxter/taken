@@ -1,0 +1,98 @@
+name: App Store build
+
+# Taken's App Store build (eas.json profile "production", .eas/build/build-ios.yml) without an EAS cloud build, the way
+# internal-testflight.yml makes the internal one: `eas build --local` runs the production profile's custom steps
+# unchanged on this macOS runner (generated from project.yml, then check-xcode.sh and check-app-store-build.sh on the
+# .ipa), so no build is sent to EAS's servers and none counts against the plan's quota
+# (https://docs.expo.dev/build-reference/local-builds/, https://docs.expo.dev/billing/faq/). Signing uses EAS's managed
+# App Store credentials (--freeze-credentials never changes them) and the build number EAS's remote autoIncrement keeps.
+# Before `eas submit` uploads the .ipa, scripts/check-ipa.sh unpacks it and refuses unless every check passes, one OK or
+# FAIL line each: the App Store shape (no internal-only code, TakenInternalPro or TFInternalTestingOnly), iPhone only
+# (UIDeviceFamily [1] in the app and the widgets), the App Group in both signed entitlements, project.yml's version and
+# a build number above the founding member cutoff, the Xcode in .xcode-version, and App Store distribution profiles.
+#
+# Run by hand, from main only, once a green ci.yml run covers the code (the gate in .github/actions/ship-setup, shared
+# with internal-testflight.yml, as are the Xcode and the EAS image's Node and fastlane). The .ipa goes nowhere but EAS
+# Submit and App Store Connect: never a workflow artifact, since anyone signed in to GitHub can download a public
+# repository's artifacts (https://docs.github.com/en/actions/how-tos/manage-workflow-runs/download-workflow-artifacts).
+# Default log levels only (never --verbose-logs), and EXPO_TOKEN is set on the two eas steps alone and never printed.
+# App Store Connect also gives each upload to the internal group "Tom", which has automatic distribution, so run
+# internal-testflight.yml once more afterwards to put Tom's iPhone back on the newest internal build.
+
+on:
+  workflow_dispatch:
+
+# One queue with internal-testflight.yml, which explains why (EAS's remote autoIncrement and the build number).
+concurrency:
+  group: app-store-connect-upload
+  cancel-in-progress: false
+  queue: max
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  app-store:
+    name: Build on this runner, check the IPA and submit to App Store Connect
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      # What goes to App Review is what was merged. GitHub's own control for this is an environment's deployment
+      # branches (https://docs.github.com/en/actions/reference/workflows-and-actions/deployments-and-environments),
+      # a repository setting; this step makes the same rule in the workflow itself.
+      - name: From main only
+        run: |
+          if [ "$GITHUB_REF" != "refs/heads/main" ]; then
+            echo "::error::App Store builds come from main only, not $GITHUB_REF"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: CI gate, Xcode, Node, fastlane and the Xcode project (.github/actions/ship-setup)
+        uses: ./.github/actions/ship-setup
+
+      - name: Build the production profile on this runner (no EAS cloud build)
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          # Capabilities are set in the Developer portal already; syncing them would need an Apple sign-in.
+          EXPO_NO_CAPABILITY_SYNC: "1"
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+        run: |
+          set -euo pipefail
+          if [ -z "${EXPO_TOKEN:-}" ]; then
+            echo "::error::Missing repository secret EXPO_TOKEN"
+            exit 1
+          fi
+          test "$(node --version)" = "v22.23.1"
+          npx --yes eas-cli@24.11.0 build -p ios -e production --local --non-interactive --freeze-credentials \
+            --output "$RUNNER_TEMP/Taken-app-store.ipa"
+          test -f "$RUNNER_TEMP/Taken-app-store.ipa"
+
+      - name: Check the IPA before it is uploaded
+        run: scripts/check-ipa.sh "$RUNNER_TEMP/Taken-app-store.ipa"
+
+      - name: Submit to App Store Connect
+        env:
+          EXPO_TOKEN: ${{ secrets.EXPO_TOKEN }}
+          EAS_BUILD_NO_EXPO_GO_WARNING: "true"
+        run: |
+          set -euo pipefail
+          npx --yes eas-cli@24.11.0 submit -p ios -e production --path "$RUNNER_TEMP/Taken-app-store.ipa" \
+            --non-interactive --wait
+
+      - name: Summary
+        run: |
+          set -euo pipefail
+          plist="$RUNNER_TEMP/Taken-app-store-Info.plist"
+          unzip -p "$RUNNER_TEMP/Taken-app-store.ipa" Payload/Taken.app/Info.plist > "$plist"
+          version="$(plutil -extract CFBundleShortVersionString raw -o - "$plist")"
+          build="$(plutil -extract CFBundleVersion raw -o - "$plist")"
+          {
+            echo "### Taken $version ($build) sent to App Store Connect"
+            echo "Processing takes a few minutes; then it can be added to the $version App Store version and sent to App Review."
+            echo "The internal group Tom gets it too (automatic distribution): run internal-testflight.yml once more so Tom's iPhone goes back to the newest internal build."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,0 +1,84 @@
+name: Ship setup
+description: >-
+  What internal-testflight.yml and app-store-build.yml do before eas build --local: the CI gate, the Xcode in
+  .xcode-version, the Node and fastlane of the EAS image, and the Xcode project eas-cli reads. It holds no secret.
+
+# One copy for both shipping workflows, so their gate and toolchain cannot drift apart. A composite action shares steps
+# within a job; a reusable workflow shares whole jobs (https://docs.github.com/en/actions/sharing-automations/avoiding-duplication).
+# Each workflow checks out the repository with its history (fetch-depth: 0, which the gate reads) before it uses this
+# action, and sets EXPO_TOKEN on its own two eas steps: a composite action cannot read secrets.
+
+runs:
+  using: composite
+  steps:
+    # Nothing ships that ci.yml has not passed: the build, the unit tests, and the screenshots with their link checks
+    # (taken://todo must bring the To-do tab to the front). A green run counts when it is this commit or an ancestor and
+    # nothing ci.yml checks has changed since. ci.yml ignores docs/, brand/ and Markdown, and it neither builds nor tests
+    # the two shipping workflows or this action, so a change to them needs no new CI run either.
+    - name: CI passed for this code
+      shell: bash
+      env:
+        GH_TOKEN: ${{ github.token }}
+      run: |
+        set -euo pipefail
+        head="$(git rev-parse HEAD)"
+        # Any branch's green run counts when it covers exactly this code (an ancestor with no change since), so a
+        # merged pull request ships without waiting for main to run the same tests again.
+        shas="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --status success --limit 100 \
+                  --json headSha --jq '.[].headSha')"
+        for sha in $shas; do
+          git cat-file -e "$sha^{commit}" 2>/dev/null || continue
+          git merge-base --is-ancestor "$sha" "$head" || continue
+          if git diff --quiet "$sha" "$head" -- . ':(exclude)docs/**' ':(exclude)brand/**' ':(exclude)*.md' \
+               ':(exclude).github/workflows/internal-testflight.yml' ':(exclude).github/workflows/app-store-build.yml' \
+               ':(exclude).github/actions/ship-setup/**'; then
+            echo "ci.yml passed on $sha, and nothing it checks has changed since"
+            exit 0
+          fi
+        done
+        echo "::error::No green ci.yml run covers $head (build, unit tests, screenshots and link checks). Let CI pass first."
+        exit 1
+
+    - name: Select Xcode (.xcode-version)
+      shell: bash
+      run: scripts/select-xcode.sh
+
+    # Node 22.23.1 (2026-06-22) and fastlane 2.236.1 (2026-06-11), as on the EAS image eas.json names,
+    # macos-tahoe-26.5-xcode-26.6 (https://docs.expo.dev/build-reference/infrastructure/). A local build ignores the
+    # node, fastlane and image fields of eas.json (https://docs.expo.dev/build-reference/local-builds/), so they are
+    # pinned here, not left to whatever the runner image ships that week, since these jobs hold EXPO_TOKEN and sign with
+    # EAS's credentials. eas-cli 24.11.0 asks for Node ^20.18.3 or >=22, and each profile's eas/run_fastlane runs the
+    # fastlane on PATH.
+    - uses: actions/setup-node@v4
+      with:
+        node-version: 22.23.1
+
+    - name: fastlane 2.236.1, as on the EAS image
+      shell: bash
+      env:
+        FASTLANE_SKIP_UPDATE_CHECK: "1"
+      run: |
+        set -euo pipefail
+        want=2.236.1
+        # Only this version, so the binstub cannot pick a newer one the runner image carries.
+        gem uninstall fastlane --all --executables --ignore-dependencies >/dev/null 2>&1 || true
+        gem install fastlane -v "$want" --no-document
+        have="$( (fastlane --version 2>/dev/null || true) | sed -n 's/^fastlane \([0-9][0-9.]*\).*$/\1/p' | tail -1)"
+        echo "fastlane on PATH: ${have:-none} at $(command -v fastlane || echo none); want $want"
+        if [ "$have" != "$want" ]; then
+          echo "::error::fastlane ${have:-none} is on PATH, not $want: refusing to build"
+          exit 1
+        fi
+
+    # eas-cli reads the native project before it starts a local build. Without ios/ it treats Taken as an Expo config
+    # project and fails looking for expo-modules-autolinking (run 39515723770). The same two commands as a build from
+    # the Mac (handoff "How to ship a build"); each profile's own steps generate again in their working copy, from
+    # project.yml (production) or project.internal.yml (internal).
+    - name: Generate the Xcode project (ios -> repo root)
+      shell: bash
+      run: |
+        set -euo pipefail
+        command -v xcodegen >/dev/null 2>&1 || brew install xcodegen
+        xcodegen generate --spec project.yml
+        ln -sfn . ios
+        ls ios/Taken.xcodeproj >/dev/null

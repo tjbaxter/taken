@@ -8,7 +8,7 @@ import Foundation
 enum FoundingMember {
     /// The last 1.0.x build number shipped. 1.0.0 build 7 is the build in App Review.
     /// Release engineer: if a later 1.0.x build ships, set this to that build's number before the 1.1 build goes
-    /// out. Every 1.1+ build number must stay above it (release.yml refuses one that is not).
+    /// out. Every 1.1+ build number must stay above it (release.yml and scripts/check-ipa.sh refuse one that is not).
     static let maxBuild = 7
 
     /// On iOS `AppTransaction.originalAppVersion` is the CFBundleVersion of the customer's first download. Only a
