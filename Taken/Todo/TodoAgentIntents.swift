@@ -11,30 +11,9 @@ import WidgetKit
 
 // MARK: - Values Shortcuts sees
 
-/// Personal or Work, as Shortcuts shows it. Its own enum, one case for each `TodoArea`, so the file format's type stays
-/// a plain Codable enum in the widget extension.
-enum TodoListOption: String, AppEnum, CaseIterable {
-    case personal
-    case work
-
-    static var typeDisplayRepresentation: TypeDisplayRepresentation { "List" }
-    static var caseDisplayRepresentations: [TodoListOption: DisplayRepresentation] {
-        [
-            .personal: DisplayRepresentation(title: "Personal", image: .init(systemName: "person")),
-            .work: DisplayRepresentation(title: "Work", image: .init(systemName: "briefcase")),
-        ]
-    }
-
-    init(_ area: TodoArea) {
-        self = TodoListOption(rawValue: area.rawValue) ?? .personal
-    }
-
-    var area: TodoArea { TodoArea(stored: rawValue) }
-}
-
 /// Which to-dos "Get to-dos" hands on.
 enum TodoShowOption: String, AppEnum, CaseIterable {
-    /// Both lists' open to-dos in the To-do tab's order (the list on top first), or one list's.
+    /// The open to-dos in the To-do tab's order: due first, soonest first, then the newest note first.
     case open
     /// Done on the day being lived (the day-start hour decides it, as it does in the app), newest first.
     case doneToday
@@ -72,26 +51,21 @@ struct TodoEntity: AppEntity, Identifiable {
     @Property(title: "Done at")
     var completedAt: Date?
 
-    @Property(title: "List")
-    var list: TodoListOption
-
     /// "Tomorrow 09:00": the due label the list shows, under the title in Shortcuts.
     let dueLabel: String?
 
-    init(id: UUID, title: String, due: Date?, isDone: Bool, completedAt: Date?, list: TodoListOption, dueLabel: String?) {
+    init(id: UUID, title: String, due: Date?, isDone: Bool, completedAt: Date?, dueLabel: String?) {
         self.id = id
         self.dueLabel = dueLabel
         self.title = title
         self.due = due
         self.isDone = isDone
         self.completedAt = completedAt
-        self.list = list
     }
 
     init(_ task: TodoTask, now: Date, clock: DayClock) {
         self.init(id: task.id, title: task.title, due: TodoOrdering.sortDate(task, clock: clock), isDone: task.isDone,
-                  completedAt: task.completedAt, list: TodoListOption(task.area),
-                  dueLabel: TodoText.dueLabel(task, now: now, clock: clock))
+                  completedAt: task.completedAt, dueLabel: TodoText.dueLabel(task, now: now, clock: clock))
     }
 
     var displayRepresentation: DisplayRepresentation {
@@ -121,53 +95,46 @@ struct TodoEntityQuery: EnumerableEntityQuery {
 
 // MARK: - Actions
 
-/// "Get to-dos": the open ones, the ones done today, or all, from one list or both. Reading needs no Taken Pro.
+/// "Get to-dos": the open ones, the ones done today, or all, from the one list. Reading needs no Taken Pro.
 struct GetTodosIntent: AppIntent {
     static var title: LocalizedStringResource { "Get to-dos" }
     static var description: IntentDescription { IntentDescription("Your to-dos from Taken, for use in other shortcuts.") }
-    /// Siri reads the list aloud, from both lists and up to 30 days of done ones, so a locked iPhone asks for Face ID or
-    /// the passcode first (Apple, IntentAuthenticationPolicy). The Lock Screen widget still shows the first titles.
+    /// Siri reads the list aloud, with up to 30 days of done ones, so a locked iPhone asks for Face ID or the passcode
+    /// first (Apple, IntentAuthenticationPolicy). The Lock Screen widget still shows the first titles.
     static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
 
     @Parameter(title: "Show", default: .open)
     var show: TodoShowOption
 
-    @Parameter(title: "List", description: "Personal or Work. Leave it empty for both.")
-    var list: TodoListOption?
-
     static var parameterSummary: some ParameterSummary {
-        Summary("Get \(\.$show)") {
-            \.$list
-        }
+        Summary("Get \(\.$show)")
     }
 
     init() {}
 
-    init(show: TodoShowOption, list: TodoListOption? = nil) {
+    init(show: TodoShowOption) {
         self.show = show
-        self.list = list
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<[TodoEntity]> & ProvidesDialog {
-        Self.answer(todos: TodoStore.shared.load(), show: show, area: list?.area, now: Date(), clock: TodoAgent.liveClock())
+        Self.answer(todos: TodoStore.shared.load(), show: show, now: Date(), clock: TodoAgent.liveClock())
     }
 
     /// The to-dos as the value, and a short line for Siri: how many, and the first three.
-    static func answer(todos: TodoState, show: TodoShowOption, area: TodoArea?, now: Date, clock: DayClock)
+    static func answer(todos: TodoState, show: TodoShowOption, now: Date, clock: DayClock)
         -> some IntentResult & ReturnsValue<[TodoEntity]> & ProvidesDialog {
-        let tasks = TodoAgent.tasks(in: todos, show: show, area: area, now: now, clock: clock)
-        let text = TodoAgentCopy.summary(tasks.map(\.title), show: show, list: area)
+        let tasks = TodoAgent.tasks(in: todos, show: show, now: now, clock: clock)
+        let text = TodoAgentCopy.summary(tasks.map(\.title), show: show)
         return .result(value: tasks.map { TodoEntity($0, now: now, clock: clock) }, dialog: "\(text)")
     }
 }
 
-/// "Add to-do": one to-do from a shortcut (a title "Use Model" wrote, say), on the list asked for or the one on top of
-/// the To-do tab, where voice notes go. Gated exactly like a typed note: the first note needs no Taken Pro, after it
-/// adding does.
+/// "Add to-do": one to-do from a shortcut (a title "Use Model" wrote, say), onto the one list, where voice notes go.
+/// Gated exactly like a typed note: the first note needs no Taken Pro, after it adding does.
 struct AddTodoIntent: AppIntent {
     static var title: LocalizedStringResource { "Add to-do" }
     static var description: IntentDescription {
-        IntentDescription("Adds a to-do to Taken, on the list you choose or the one on top.")
+        IntentDescription("Adds a to-do to Taken.")
     }
     /// A write, and its answer reads the to-do back: the owner unlocks first, as for Get to-dos.
     static var authenticationPolicy: IntentAuthenticationPolicy { .requiresAuthentication }
@@ -178,30 +145,24 @@ struct AddTodoIntent: AppIntent {
     @Parameter(title: "Due")
     var due: Date?
 
-    @Parameter(title: "List", description: "Personal or Work. Leave it empty for the list on top in Taken.")
-    var list: TodoListOption?
-
     static var parameterSummary: some ParameterSummary {
         Summary("Add \(\.$title) to Taken") {
             \.$due
-            \.$list
         }
     }
 
     init() {}
 
-    init(title: String, due: Date? = nil, list: TodoListOption? = nil) {
+    init(title: String, due: Date? = nil) {
         self.title = title
         self.due = due
-        self.list = list
     }
 
     func perform() async throws -> some IntentResult & ReturnsValue<TodoEntity> & ProvidesDialog {
         let now = Date()
         let added: (task: TodoTask, state: TodoState)
         do {
-            added = try await TodoAgent.add(title: title, due: due, area: list?.area, store: .shared,
-                                            ledgerStore: .shared, now: now)
+            added = try await TodoAgent.add(title: title, due: due, store: .shared, ledgerStore: .shared, now: now)
         } catch TodoAgentError.needsTitle {
             throw $title.needsValueError("\(TodoAgentCopy.askTitle)")
         } catch let error as TodoAgentError {
@@ -246,35 +207,33 @@ enum TodoAgent {
         DayClock(dayStartHour: TakenStore.shared.load().settings.dayStartHour)
     }
 
-    /// Both lists, from the App Group, as entities.
+    /// The one list, from the App Group, as entities.
     static func live(_ show: TodoShowOption) -> [TodoEntity] {
         let now = Date()
         let clock = liveClock()
-        return tasks(in: TodoStore.shared.load(), show: show, area: nil, now: now, clock: clock)
+        return tasks(in: TodoStore.shared.load(), show: show, now: now, clock: clock)
             .map { TodoEntity($0, now: now, clock: clock) }
     }
 
-    /// What "Get to-dos" returns. A list given keeps to that list; none means both, in the order the To-do tab shows
-    /// them: the list on top first, each list due first. Done ones come newest first.
-    static func tasks(in state: TodoState, show: TodoShowOption, area: TodoArea?, now: Date, clock: DayClock) -> [TodoTask] {
-        let open = area.map { state.openTasks(in: $0, clock: clock) } ?? state.openTasksInListOrder(clock: clock)
+    /// What "Get to-dos" returns, in the order the To-do tab shows them: open ones due first, done ones newest first.
+    static func tasks(in state: TodoState, show: TodoShowOption, now: Date, clock: DayClock) -> [TodoTask] {
+        let open = state.openTasks(clock: clock)
         switch show {
         case .open:
             return open
         case .doneToday:
-            let today = clock.day(for: now)
-            return area.map { state.doneTasks(on: today, in: $0, clock: clock) } ?? state.doneTasks(on: today, clock: clock)
+            return state.doneTasks(on: clock.day(for: now), clock: clock)
         case .all:
-            let done = state.tasks.filter { $0.isDone && (area == nil || $0.area == area) }
+            let done = state.tasks.filter(\.isDone)
                 .sorted { ($0.completedAt ?? .distantPast) > ($1.completedAt ?? .distantPast) }
             return open + done
         }
     }
 
-    /// Adds one to-do: cleaned like every title (short lines, never paragraphs), a due date saved as a moment, on the
-    /// list asked for or the one on top (`topArea`, where voice notes go). Throws `needsTitle` when nothing is left of
-    /// the title and `needsPro` when adding is locked; either way nothing is written.
-    static func add(title: String, due: Date?, area: TodoArea?, store: TodoStore, ledgerStore: ProLedgerStore,
+    /// Adds one to-do to the one list: cleaned like every title (short lines, never paragraphs), a due date saved as a
+    /// moment. Throws `needsTitle` when nothing is left of the title and `needsPro` when adding is locked; either way
+    /// nothing is written.
+    static func add(title: String, due: Date?, store: TodoStore, ledgerStore: ProLedgerStore,
                     now: Date, recheck: (@MainActor @Sendable () async -> Void)? = nil) async throws
         -> (task: TodoTask, state: TodoState) {
         guard let clean = TodoText.clean(title) else { throw TodoAgentError.needsTitle }
@@ -282,7 +241,7 @@ enum TodoAgent {
             throw TodoAgentError.needsPro
         }
         let draft = TodoDraft(title: clean, due: due.map { TodoDue.time($0) })
-        let result = try store.update { state in state.add([draft], area: area ?? state.topArea, at: now) }
+        let result = try store.update { state in state.add([draft], at: now) }
         guard let task = result.value.first else { throw TodoAgentError.couldNotSave }
         return (task, result.state)
     }
@@ -326,16 +285,15 @@ enum TodoAgentCopy {
     /// How many titles "Get to-dos" reads out.
     static let titlesRead = 3
 
-    /// "3 open to-dos: Call the dentist, Buy milk and Book the car in.", "5 open Work to-dos: A, B, C and 2 more.",
-    /// "No to-dos done today."
-    static func summary(_ titles: [String], show: TodoShowOption, list: TodoArea?) -> String {
+    /// "3 open to-dos: Call the dentist, Buy milk and Book the car in.", "5 open to-dos: A, B, C and 2 more.", "No
+    /// to-dos done today."
+    static func summary(_ titles: [String], show: TodoShowOption) -> String {
         let noun = titles.count == 1 ? "to-do" : "to-dos"
-        let named = list.map { "\($0.title) \(noun)" } ?? noun
         let phrase: String
         switch show {
-        case .open: phrase = "open \(named)"
-        case .doneToday: phrase = "\(named) done today"
-        case .all: phrase = named
+        case .open: phrase = "open \(noun)"
+        case .doneToday: phrase = "\(noun) done today"
+        case .all: phrase = noun
         }
         guard !titles.isEmpty else { return "No \(phrase)." }
         let read = Array(titles.prefix(titlesRead))
@@ -344,10 +302,10 @@ enum TodoAgentCopy {
         return sentence("\(titles.count) \(phrase): \(names)")
     }
 
-    /// "Added to Work: Send the deck, due tomorrow at 9:00 AM."
+    /// "Added to your to-dos: Send the deck, due tomorrow at 9:00 AM."
     static func added(_ task: TodoTask, now: Date, clock: DayClock) -> String {
         let due = TodoText.spokenDue(task, now: now, clock: clock).map { ", \($0)" } ?? ""
-        return sentence("Added to \(task.area.title): \(task.title)\(due)")
+        return sentence("Added to your to-dos: \(task.title)\(due)")
     }
 
     static let all: [String] = [needsPro, couldNotSave, askTitle]

@@ -64,8 +64,6 @@ struct RootView: View {
         .onChange(of: model.sheet) { _, _ in DemoProbe.record(model) }
         .onChange(of: model.paywall?.id) { _, _ in DemoProbe.record(model) }
         .onChange(of: TodoModel.shared.phase) { _, _ in DemoProbe.record(model) }
-        .onChange(of: TodoModel.shared.state.areaOrder) { _, _ in DemoProbe.record(model) }
-        .onChange(of: TodoModel.shared.destination) { _, _ in DemoProbe.record(model) }
     }
 
     private var tabBinding: Binding<AppTab> {
@@ -97,8 +95,8 @@ struct RootView: View {
             .presentationBackground(theme.bg)
         case .todoEdit(let id):
             if let task = TodoModel.shared.state.task(id) {
-                TodoEditSheet(task: task, clock: TodoModel.shared.clock) { title, due, area in
-                    TodoModel.shared.edit(id, title: title, due: due, area: area)
+                TodoEditSheet(task: task, clock: TodoModel.shared.clock) { title, due in
+                    TodoModel.shared.edit(id, title: title, due: due)
                 } onDelete: {
                     TodoModel.shared.delete(task)
                 }

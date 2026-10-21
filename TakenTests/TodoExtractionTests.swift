@@ -142,8 +142,8 @@ final class TodoExtractionTests: XCTestCase {
     }
 
     func testTheNewCopyKeepsTheRules() {
-        for text in [TodoCopy.allUnsorted, TodoCopy.partUnsorted, TodoCopy.needsAppleIntelligence, TodoCopy.into(.work),
-                     TodoCopy.goesTo(.personal), TodoCopy.sendTo(.work), TodoCopy.sayIt] {
+        for text in [TodoCopy.allUnsorted, TodoCopy.partUnsorted, TodoCopy.needsAppleIntelligence, TodoCopy.sayIt,
+                     TodoCopy.doneToday, TodoCopy.oneMinuteLeft] {
             XCTAssertTrue(TodoCopy.all.contains(text), "\(text) is checked by the copy test")
         }
         XCTAssertEqual(TodoCopy.sortingNote(.couldNotSort), "Saved as you said it, one line per sentence. Tap one to edit.")
@@ -151,9 +151,6 @@ final class TodoExtractionTests: XCTestCase {
         XCTAssertNil(TodoCopy.sortingNote(.model))
         XCTAssertTrue([TodoCopy.needsAppleIntelligence, TodoCopy.appleIntelligenceOff, TodoCopy.modelNotReady]
             .allSatisfy { $0.hasPrefix("Saved as you said it.") })
-        XCTAssertEqual(TodoCopy.into(.personal), "Into Personal")
-        XCTAssertEqual(TodoCopy.goesTo(.personal), "Goes to Personal")
-        XCTAssertEqual(TodoCopy.sendTo(.work), "Double tap to send it to Work.")
     }
 
     func testAClockTimeAlreadyGoneMovesToItsNextOccurrence() {

@@ -5,9 +5,9 @@ import Foundation
 // those lines. If iOS ends Taken while the model is still sorting, every word is already on the list.
 
 extension TodoState {
-    /// Replaces a note saved as said (`saved`, its lines as they were written) with the tasks sorted from it, on the
-    /// note's list, said when the note was said. Only while every line is still there, open, with no due and its saved
-    /// title: a line someone edited, finished or moved meanwhile (a Shortcut, another build) leaves the note as it is.
+    /// Replaces a note saved as said (`saved`, its lines as they were written) with the tasks sorted from it, on the one
+    /// list, said when the note was said. Only while every line is still there, open, with no due and its saved title:
+    /// a line someone edited or finished meanwhile (the edit sheet, a Shortcut) leaves the note as it is.
     /// Returns the note's tasks as they now stand: the sorted ones; the lines when the drafts are just those lines;
     /// what is there when it was changed; nothing when the note was deleted or erased.
     @discardableResult
@@ -16,7 +16,7 @@ extension TodoState {
         guard !current.isEmpty else { return [] }
         let untouched = current.count == saved.count && saved.allSatisfy { line in
             guard let task = task(line.id) else { return false }
-            return !task.isDone && task.due == nil && task.title == line.title && task.area == line.area
+            return !task.isDone && task.due == nil && task.title == line.title
         }
         guard untouched, !drafts.isEmpty else { return current }
         if drafts == saved.map({ TodoDraft(title: $0.title, due: $0.due) }) { return current }
@@ -24,8 +24,7 @@ extension TodoState {
         let ids = Set(current.map(\.id))
         tasks.removeAll { ids.contains($0.id) }
         let added = drafts.enumerated().map { offset, draft in
-            TodoTask(title: draft.title, due: draft.due, createdAt: first.createdAt, noteId: noteId, order: offset,
-                     area: first.area)
+            TodoTask(title: draft.title, due: draft.due, createdAt: first.createdAt, noteId: noteId, order: offset)
         }
         tasks.append(contentsOf: added)
         prune(now: now)

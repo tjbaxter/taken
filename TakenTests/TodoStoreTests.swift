@@ -283,25 +283,22 @@ final class TodoStoreTests: XCTestCase {
         XCTAssertNil(stop(299, lastVoice: 298.9), "talking at 4:59")
         XCTAssertEqual(stop(300, lastVoice: 299.9), .cap, "5 minutes at most, even mid-sentence")
         XCTAssertFalse(TodoModel.capWarning(elapsed: 239.9))
-        XCTAssertTrue(TodoModel.capWarning(elapsed: 240), "the countdown from 4:00")
+        XCTAssertTrue(TodoModel.capWarning(elapsed: 240), "1 minute left from 4:00")
         XCTAssertEqual(TodoModel.silenceToStop, 30)
         XCTAssertEqual(TodoModel.longestNote, 300)
     }
 
-    func testTheListeningCardTimeAndTheScreenStayingOn() {
-        XCTAssertEqual(TodoCopy.elapsed(12), "0:12")
-        XCTAssertEqual(TodoCopy.elapsed(102), "1:42")
-        XCTAssertEqual(TodoCopy.timeLeft(60), "1:00 left")
-        XCTAssertEqual(TodoCopy.timeLeft(1), "0:01 left")
-        XCTAssertEqual(TodoCopy.spokenElapsed(130), "2 minutes 10 seconds")
-        XCTAssertEqual(TodoCopy.spokenElapsed(60), "1 minute")
-        XCTAssertEqual(TodoCopy.spokenTimeLeft(45), "45 seconds left")
-        XCTAssertEqual(TodoCopy.noteTime(elapsed: 102.4).text, "1:42")
-        XCTAssertFalse(TodoCopy.noteTime(elapsed: 102.4).countdown)
-        XCTAssertEqual(TodoCopy.noteTime(elapsed: 260).text, "0:40 left", "the todo-cap screenshot")
-        XCTAssertTrue(TodoCopy.noteTime(elapsed: 260).countdown)
-        XCTAssertEqual(TodoCopy.noteTime(elapsed: 299.5).text, "0:01 left")
-        for text in [TodoCopy.timeLeft(60), TodoCopy.stoppedAtCap, TodoCopy.spokenElapsed(130), TodoCopy.part(2, of: 5)] {
+    /// Replaces testTheListeningCardTimeAndTheScreenStayingOn: the card shows no time and never counts down (Tom
+    /// 2026-10-21: "don't count them down"); from 4:00 it says "1 minute left", once.
+    func testTheListeningCardSaysOneMinuteLeftOnceAndTheScreenStaysOn() {
+        XCTAssertEqual(TodoCopy.oneMinuteLeft, "1 minute left")
+        XCTAssertEqual(TodoCopy.listening, "Listening")
+        XCTAssertEqual(TodoCopy.sorting, "Sorting into to-dos")
+        XCTAssertEqual(TodoCopy.sayIt, "Say what you need to do")
+        XCTAssertEqual(TodoCopy.part(2, of: 5), "part 2 of 5")
+        XCTAssertFalse(TodoCopy.all.contains { $0.range(of: #"\d:\d\d"#, options: .regularExpression) != nil },
+                       "no running time and no countdown anywhere in the copy")
+        for text in [TodoCopy.oneMinuteLeft, TodoCopy.stoppedAtCap, TodoCopy.part(2, of: 5)] {
             XCTAssertTrue(TodoCopy.all.contains(text), "\(text) is checked by the copy test")
         }
         XCTAssertEqual(TodoCopy.stoppedAtCap, "Stopped at 5 minutes. Tap the mic to keep going.")
@@ -393,14 +390,13 @@ final class TodoStoreTests: XCTestCase {
         let now = at(2026, 10, 20, 9)
         var state = TodoState()
         let note = UUID()
-        let lines = state.add(TodoValidation.lines("Call the dentist. Buy milk and bread."), area: .work, noteId: note,
-                              at: now)
+        let lines = state.add(TodoValidation.lines("Call the dentist. Buy milk and bread."), noteId: note, at: now)
         XCTAssertEqual(lines.map(\.title), ["Call the dentist", "Buy milk and bread"], "every sentence saved at once")
         let sorted = state.replaceNote(noteId: note, saved: lines, with: [TodoDraft(title: "Call the dentist"),
                                                                          TodoDraft(title: "Buy milk"),
                                                                          TodoDraft(title: "Buy bread")], at: now)
         XCTAssertEqual(sorted.map(\.title), ["Call the dentist", "Buy milk", "Buy bread"])
-        XCTAssertEqual(sorted.map(\.area), [.work, .work, .work], "on the note's list")
+        XCTAssertEqual(sorted.map(\.area), [.personal, .personal, .personal], "on the one list")
         XCTAssertEqual(Set(sorted.map(\.noteId)), [note])
         XCTAssertEqual(sorted.map(\.order), [0, 1, 2])
         XCTAssertEqual(state.tasks.count, 3, "the lines are gone")

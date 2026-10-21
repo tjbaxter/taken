@@ -50,10 +50,11 @@ struct VoiceNoteTrace: Codable, Identifiable, Hashable, Sendable {
         var answer: [RawTodo]
     }
 
+    /// A task as saved. A record written by a 1.1 internal build with Personal and Work also carries the list it went
+    /// to, and the note its list and chip; neither is read (one list since 2026-10-21), so such a record still loads.
     struct Saved: Codable, Hashable, Sendable {
         var title: String
         var due: String?
-        var list: String
         var id: UUID
     }
 
@@ -62,9 +63,6 @@ struct VoiceNoteTrace: Codable, Identifiable, Hashable, Sendable {
     var build: String
     var system: String
     var input: VoiceNoteInput
-    /// The list the note went to, and whether its chip changed it.
-    var list: String
-    var chipChanged: Bool
     var locale: String
     var vocabulary = 0
     var engine: String?
@@ -90,14 +88,12 @@ struct VoiceNoteTrace: Codable, Identifiable, Hashable, Sendable {
     var grounded: [String] = []
     var saved: [Saved] = []
 
-    init(input: VoiceNoteInput, list: TodoArea, chipChanged: Bool = false, at start: Date = Date()) {
+    init(input: VoiceNoteInput, at start: Date = Date()) {
         startedAt = start
         build = "\(AppInfo.version) (\(AppInfo.build))"
         let os = ProcessInfo.processInfo.operatingSystemVersion
         system = "\(os.majorVersion).\(os.minorVersion).\(os.patchVersion)"
         self.input = input
-        self.list = list.rawValue
-        self.chipChanged = chipChanged
         locale = Locale.current.identifier
     }
 
@@ -105,13 +101,6 @@ struct VoiceNoteTrace: Codable, Identifiable, Hashable, Sendable {
 
     mutating func mark(_ label: String, at moment: Date = Date()) {
         marks.append(Mark(label: label, seconds: moment.timeIntervalSince(startedAt)))
-    }
-
-    /// The chip sent the note to another list.
-    mutating func chose(_ area: TodoArea) {
-        chipChanged = true
-        list = area.rawValue
-        mark("chip: \(area.rawValue)")
     }
 
     /// The transcriber is listening.
@@ -165,8 +154,7 @@ struct VoiceNoteTrace: Codable, Identifiable, Hashable, Sendable {
         grounded = drafts.drafts.map { draft in
             VoiceNoteLog.due(draft.due, clock: clock).map { "\(draft.title) (\($0))" } ?? draft.title
         }
-        saved = tasks.map { Saved(title: $0.title, due: VoiceNoteLog.due($0.due, clock: clock), list: $0.area.rawValue,
-                                  id: $0.id) }
+        saved = tasks.map { Saved(title: $0.title, due: VoiceNoteLog.due($0.due, clock: clock), id: $0.id) }
         mark("saved")
     }
 
@@ -206,7 +194,7 @@ struct VoiceNoteTrace: Codable, Identifiable, Hashable, Sendable {
         copy.phrases = phrases.map { TimedPhrase(text: cap($0.text), start: $0.start, end: $0.end) }
         copy.resets = resets.map { TranscriptReset(at: $0.at, before: cap($0.before), after: cap($0.after)) }
         copy.grounded = grounded.map(cap)
-        copy.saved = saved.map { Saved(title: cap($0.title), due: $0.due, list: $0.list, id: $0.id) }
+        copy.saved = saved.map { Saved(title: cap($0.title), due: $0.due, id: $0.id) }
         copy.parts = parts.map { part in
             var part = part
             part.text = cap(part.text)
@@ -325,14 +313,13 @@ final class VoiceNoteLogStore: @unchecked Sendable {
 
 /// The log as plain text, one labelled line per field, in the sorting eval's report style.
 enum VoiceNoteLog {
-    /// "17:18 · Work · 34 s · stopped: tap · 1 to-do"
+    /// "17:18 · 34 s · stopped: tap · 1 to-do"
     static func row(_ trace: VoiceNoteTrace, timeZone: TimeZone = .current) -> String {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         let parts = calendar.dateComponents([.hour, .minute], from: trace.startedAt)
-        let list = TodoArea(stored: trace.list).title
         let seconds = Int((trace.marks.first { $0.label == "stop" } ?? trace.marks.last)?.seconds ?? 0)
-        var fields = [String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0), list, "\(seconds) s"]
+        var fields = [String(format: "%02d:%02d", parts.hour ?? 0, parts.minute ?? 0), "\(seconds) s"]
         fields.append(trace.input == .typed ? VoiceNoteLogCopy.typed : "\(VoiceNoteLogCopy.stopped): \(trace.stopReason ?? "?")")
         fields.append(VoiceNoteLogCopy.toDos(trace.saved.count))
         return fields.joined(separator: " \u{00B7} ")
@@ -347,7 +334,6 @@ enum VoiceNoteLog {
         var lines = ["Taken voice note, build \(trace.build), iOS \(trace.system)",
                      "Started: \(formatter.string(from: trace.startedAt))",
                      "Input: \(trace.input.rawValue)",
-                     "List: \(trace.list), chip changed: \(trace.chipChanged ? "yes" : "no")",
                      "Locale: \(trace.locale), vocabulary \(trace.vocabulary)",
                      "Engine: \(trace.engine ?? "none")" + (trace.engineWhy.map { ", because \($0)" } ?? ""),
                      "Stopped: \(trace.stopReason ?? "none"), \(trace.wordsAtStop) words heard",
@@ -378,7 +364,7 @@ enum VoiceNoteLog {
         lines.append("Sorting: \(trace.sorting ?? "none")")
         for task in trace.grounded { lines.append("After grounding: \(task)") }
         for task in trace.saved {
-            lines.append("Saved: \(task.title)" + (task.due.map { " (\($0))" } ?? "") + " on \(task.list), \(task.id.uuidString)")
+            lines.append("Saved: \(task.title)" + (task.due.map { " (\($0))" } ?? "") + ", \(task.id.uuidString)")
         }
         lines.append("Timings: " + trace.marks.map { String(format: "%@ %.1f s", $0.label, $0.seconds) }.joined(separator: ", "))
         lines.append("Context: now \(trace.contextNow ?? "none"), zone \(trace.timeZone ?? "none"), day starts "
@@ -540,10 +526,10 @@ private struct VoiceNoteDetailView: View {
                 part.answer.map { "\(part.index + 1). \($0.title) (\"\($0.spoken ?? "")\", \($0.dueISO8601 ?? "no due"))" }
             })
             section(VoiceNoteLogCopy.afterGrounding, trace.grounded)
-            section(VoiceNoteLogCopy.saved, trace.saved.map { $0.title + ($0.due.map { " (\($0))" } ?? "") + ", \($0.list)" })
+            section(VoiceNoteLogCopy.saved, trace.saved.map { $0.title + ($0.due.map { " (\($0))" } ?? "") })
             section(VoiceNoteLogCopy.timings, trace.marks.map { String(format: "%@ %.1f s", $0.label, $0.seconds) })
             section(VoiceNoteLogCopy.context, [
-                "\(trace.input.rawValue), \(trace.list), chip changed \(trace.chipChanged ? "yes" : "no")",
+                trace.input.rawValue,
                 "\(trace.engine ?? "none")" + (trace.engineWhy.map { ", \($0)" } ?? ""),
                 "\(trace.contextNow ?? "none"), \(trace.timeZone ?? "none"), build \(trace.build), iOS \(trace.system)",
             ])

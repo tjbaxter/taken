@@ -169,13 +169,13 @@ enum TodoValidation {
     static let lateGrace: TimeInterval = 10 * 60
 
     /// The model's tasks as they are saved: first checked against the words said (TodoGrounding: a task never said is
-    /// dropped, one action split in two is joined again, a due nobody said goes), then titles cleaned, due dates parsed
-    /// and checked, duplicates and empties dropped, at most `maxTasks`. With nothing left from a note that had words,
-    /// the note is saved as said (`lines`).
+    /// dropped, one action split in two is joined again, a clock time or a day nobody said goes), then titles cleaned,
+    /// due dates parsed and checked, duplicates and empties dropped, at most `maxTasks`. With nothing left from a note
+    /// that had words, the note is saved as said (`lines`).
     static func validate(_ raw: [RawTodo], transcript: String, context: TodoContext) -> [TodoDraft] {
         var drafts: [TodoDraft] = []
         var seen = Set<String>()
-        for item in TodoGrounding.reconcile(raw, transcript: transcript) {
+        for item in TodoGrounding.reconcile(raw, transcript: transcript, context: context) {
             guard let draft = draft(item, context: context), seen.insert(key(draft)).inserted else { continue }
             drafts.append(draft)
             if drafts.count == maxTasks { break }
@@ -203,7 +203,8 @@ enum TodoValidation {
             }
         }
         var byPart: [Int: [RawTodo]] = [:]
-        for item in TodoGrounding.reconcileIndexed(raw, transcript: note, windows: windows, carried: carried) {
+        for item in TodoGrounding.reconcileIndexed(raw, transcript: note, windows: windows, carried: carried,
+                                                   context: context) {
             byPart[partOf[item.source], default: []].append(item.task)
         }
         let spoken = SpokenNote(note)
