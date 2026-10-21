@@ -39,15 +39,17 @@ jobs:
           fetch-depth: 0
 
       # Nothing ships that ci.yml has not passed: the build, the unit tests, and the screenshots with their link checks
-      # (taken://todo must bring the To-do tab to the front). The newest green run on main counts when it is this commit
-      # or an ancestor, and nothing ci.yml checks (it ignores docs/, brand/ and Markdown) has changed since.
+      # (taken://todo must bring the To-do tab to the front). A green run counts when it is this commit or an ancestor
+      # and nothing ci.yml checks (it ignores docs/, brand/ and Markdown) has changed since.
       - name: CI passed for this code
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           head="$(git rev-parse HEAD)"
-          shas="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --branch main --status success --limit 50 \
+          # Any branch's green run counts when it covers exactly this code (an ancestor with no change since), so a
+          # merged pull request ships without waiting for main to run the same tests again.
+          shas="$(gh run list -R "$GITHUB_REPOSITORY" --workflow ci.yml --status success --limit 100 \
                     --json headSha --jq '.[].headSha')"
           for sha in $shas; do
             git cat-file -e "$sha^{commit}" 2>/dev/null || continue
