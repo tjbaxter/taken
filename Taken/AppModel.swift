@@ -22,6 +22,8 @@ enum SheetRoute: Identifiable, Hashable {
     case todoEdit(UUID)
     /// Typing to-dos instead of saying them.
     case todoType
+    /// How to add the Lock Screen widget, from Today's one-time invite.
+    case widgetHelp
 
     var id: String {
         switch self {
@@ -32,6 +34,7 @@ enum SheetRoute: Identifiable, Hashable {
         case .editItem(let id): return "edit-\(id.uuidString)"
         case .todoEdit(let id): return "todo-\(id.uuidString)"
         case .todoType: return "todo-type"
+        case .widgetHelp: return "widget-help"
         }
     }
 }
@@ -92,6 +95,10 @@ final class AppModel {
     /// Increments each time a tap finishes the day (All taken), to run its check animation once.
     private(set) var lockInCount = 0
     private(set) var notificationsDenied = false
+    /// Yesterday, while Today offers to fill it in (`TodayPrompts.repairDay`); worked out with the stats.
+    private(set) var repairDay: DayKey?
+    /// `-demo` shows a one-time row only when its `-screen` asks: today-nudge-offer, today-repair, today-widget-invite.
+    private(set) var demoPrompt: TodayPrompt?
 
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var ticker: Task<Void, Never>?
@@ -121,6 +128,8 @@ final class AppModel {
         let state = store.load()
         let now = clockNow()
         let engine = StackEngine(state: state, clock: DayClock(dayStartHour: state.settings.dayStartHour))
+        self.demoPrompt = isDemo ? Self.demoPrompt(forScreen: launchScreen, settings: state.settings,
+                                                   today: engine.today(now: now)) : nil
         self.pro = pro ?? ProStore(ledger: .shared, hasLogged: !state.doses.isEmpty)
         self.state = state
         self.theme = Theme.look(state.settings.theme)
@@ -164,7 +173,8 @@ final class AppModel {
         let store = TakenStore(fileURL: url, postsChangeNotifications: false)
         var seeded = screen == "add" || screen == "add-search" || screen == "empty"
             ? StackState(settings: StackSettings(reminderEnabled: true))
-            : DemoData.state(now: demoNow, allTaken: screen == "today-done")
+            : DemoData.state(now: demoNow, allTaken: screen == "today-done" || screen == "today-widget-invite",
+                             yesterdayPartial: screen == "today-repair")
         seeded.settings.theme = look
         try? store.replace(with: seeded)
         // Store screenshots show Taken with Pro; -screen paywall, locked and settings-locked show it without, and
@@ -216,6 +226,66 @@ final class AppModel {
     /// "START 7 DAYS ON US" or "PRO ENDED · TAP TO CONTINUE".
     var lockedBarText: String {
         ProCopy.lockedBar(eligible: pro.introEligible, intro: pro.offers[.yearly]?.intro)
+    }
+
+    // MARK: One-time rows (the 1.1 retention build, SPEC 3.1)
+
+    /// The one quiet row under Today's progress line, if any. Never in `-demo` unless its `-screen` asks for it.
+    var todayPrompt: TodayPrompt? {
+        if isDemo { return demoPrompt }
+        return TodayPrompts.pick(settings: settings, hasStack: hasStack, today: today, repairDay: repairDay,
+                                 locked: isLocked)
+    }
+
+    static func demoPrompt(forScreen screen: String?, settings: StackSettings, today: DayKey) -> TodayPrompt? {
+        switch screen {
+        case "today-nudge-offer": return .nudgeOffer(minutes: settings.reminderMinutes)
+        case "today-repair": return .repair(today.adding(-1))
+        case "today-widget-invite": return .widgetInvite
+        default: return nil
+        }
+    }
+
+    /// Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. Turn on is
+    /// the only place, with Profile's toggle, where iOS asks for notification permission.
+    func answerNudgeOffer(turnOn: Bool) {
+        withAnimation(.snappy(duration: 0.22)) {
+            if isDemo { demoPrompt = nil }
+            _ = write { $0.settings.nudgeOfferDone = true }
+        }
+        guard turnOn else { return }
+        requirePro { [weak self] in
+            guard let self else { return }
+            Task { await self.turnOnNudgeFromOffer() }
+        }
+    }
+
+    private func turnOnNudgeFromOffer() async {
+        await setReminderEnabled(true)
+        if settings.reminderEnabled {
+            show(Toast(message: RetentionCopy.nudgeOn, time: Fmt.minutes(settings.reminderMinutes)))
+        } else if notificationsDenied {
+            show(Toast(message: RetentionCopy.notificationsOff))
+        }
+    }
+
+    /// The widget invite is on screen: the day it first showed is kept, so it shows on that day only.
+    func noteWidgetInviteShown() {
+        guard !isDemo, settings.widgetInviteDay == nil else { return }
+        let day = today.day.ordinal
+        write { $0.settings.widgetInviteDay = day }
+    }
+
+    /// A tap on the widget invite (it opens how to add the widget) or its close: either way it is gone for good.
+    func closeWidgetInvite(openHelp: Bool) {
+        withAnimation(.snappy(duration: 0.22)) {
+            if isDemo {
+                demoPrompt = nil
+            } else {
+                _ = write { $0.settings.widgetInviteDone = true }
+            }
+        }
+        if openHelp { sheet = .widgetHelp }
     }
 
     func nextLabel(for row: ItemDay) -> String {
@@ -310,6 +380,7 @@ final class AppModel {
         case "item":
             if let item = state.items.first(where: { $0.name == "Finasteride" }) { sheet = .editItem(item.id) }
         case "paywall", "paywall-no-yearly": presentPaywall(origin: .intro)
+        case "widget-help": sheet = .widgetHelp
         default: break
         }
     }
@@ -377,6 +448,7 @@ final class AppModel {
         history = engine.history(today: today.day)
         streak = engine.streak(today: today.day)
         adherence = engine.adherence(today: today.day)
+        repairDay = TodayPrompts.repairDay(engine: engine, today: today.day)
     }
 
     /// Every write goes through here: coordinated store write, then widgets, controls, nudges.

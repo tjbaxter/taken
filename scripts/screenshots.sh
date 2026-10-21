@@ -162,6 +162,15 @@ done
 # Feedback build 3 (Tom 2026-10-21): a note past 4:00 on the original card, with its one static "1 minute left".
 shoot 47-todo-cap todo-cap
 lands 47-todo-cap "tab=todo sheet=none todo=listening"
+# The 1.1 retention build (SPEC 3.1): Today's one-time rows, which -demo shows only when the -screen asks (the other
+# captures never have one): the evening nudge offered once, yesterday's repair line, the widget invite under the first
+# All taken, and the sheet it opens.
+shoot 50-today-nudge-offer today-nudge-offer
+lands 50-today-nudge-offer "tab=today sheet=none"
+shoot 51-today-repair today-repair
+shoot 52-today-widget-invite today-widget-invite
+shoot 53-widget-help widget-help
+lands 53-widget-help "sheet=widget-help"
 # Links reach the right screen with the quick action's scene delegate in place: Taken opens its own link after launch
 # (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). The demo app writes
 # what is in front to tmp/taken-ui-state.txt (DemoProbe), and the check fails unless the link landed there:

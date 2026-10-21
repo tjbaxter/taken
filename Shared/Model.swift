@@ -136,6 +136,14 @@ struct StackSettings: Codable, Hashable, Sendable {
     /// The look (Profile > Look). The app, the widgets, the Control Center control and the app icon follow it, so it
     /// lives here in the App Group store with everything else. Files from before 1.1 have none: Signal.
     var theme: ThemeID = .signal
+    /// Today's one-time rows (SPEC 3.1, the 1.1 retention build), each answered once and never shown again. Kept in this
+    /// file with the rest of the settings, and kept by Erase all data like the look, so a row once answered never comes
+    /// back. The evening nudge offer was answered (Turn on or Not now).
+    var nudgeOfferDone: Bool = false
+    /// The day (DayKey ordinal) the widget invite first showed, under the first All taken: it shows on that day only.
+    var widgetInviteDay: Int?
+    /// The widget invite was tapped or closed.
+    var widgetInviteDone: Bool = false
 
     static let defaultWakeMinutes = 7 * 60
     /// The day rolls over this long before the wake-up time, so a late night stays on the day being lived.
@@ -191,6 +199,7 @@ struct StackSettings: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case wakeMinutes, dayStartHour, reminderEnabled, reminderMinutes, hapticsEnabled, theme
+        case nudgeOfferDone, widgetInviteDay, widgetInviteDone
     }
 
     init(from decoder: any Decoder) throws {
@@ -208,6 +217,9 @@ struct StackSettings: Codable, Hashable, Sendable {
         hapticsEnabled = try c.decodeIfPresent(Bool.self, forKey: .hapticsEnabled) ?? true
         // A look this version does not know (or a malformed one) reads as Signal and never costs the rest of the file.
         theme = (try? c.decodeIfPresent(ThemeID.self, forKey: .theme)) ?? .signal
+        nudgeOfferDone = (try? c.decodeIfPresent(Bool.self, forKey: .nudgeOfferDone)) ?? false
+        widgetInviteDay = try? c.decodeIfPresent(Int.self, forKey: .widgetInviteDay)
+        widgetInviteDone = (try? c.decodeIfPresent(Bool.self, forKey: .widgetInviteDone)) ?? false
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -219,6 +231,10 @@ struct StackSettings: Codable, Hashable, Sendable {
         try c.encodeIfPresent(chosenReminderMinutes, forKey: .reminderMinutes)
         try c.encode(hapticsEnabled, forKey: .hapticsEnabled)
         try c.encode(theme, forKey: .theme)
+        // Written only once set, so a file that never showed a one-time row looks as it did.
+        if nudgeOfferDone { try c.encode(true, forKey: .nudgeOfferDone) }
+        try c.encodeIfPresent(widgetInviteDay, forKey: .widgetInviteDay)
+        if widgetInviteDone { try c.encode(true, forKey: .widgetInviteDone) }
     }
 }
 

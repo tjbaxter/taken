@@ -602,11 +602,15 @@ extension StackState {
         }
     }
 
-    /// Removes the stack, every dose and the settings. The look stays: it is how the phone shows Taken, not data.
+    /// Removes the stack, every dose and the settings. The look stays: it is how the phone shows Taken, not data. So do
+    /// Today's one-time rows already answered (the nudge offer, the widget invite), so none of them comes back.
     mutating func eraseAll() {
-        let look = settings.theme
+        let kept = settings
         self = StackState()
-        settings.theme = look
+        settings.theme = kept.theme
+        settings.nudgeOfferDone = kept.nudgeOfferDone
+        settings.widgetInviteDay = kept.widgetInviteDay
+        settings.widgetInviteDone = kept.widgetInviteDone
     }
 }
 

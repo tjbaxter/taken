@@ -105,6 +105,8 @@ struct RootView: View {
             TodoTypeSheet { text in
                 TodoModel.shared.submitTyped(text, app: model)
             }
+        case .widgetHelp:
+            WidgetHelpSheet()
         }
     }
 }
@@ -147,6 +149,12 @@ struct TodayView: View {
             }
             .padding(.top, 16)
             .transition(.opacity)
+        } else if let prompt = model.todayPrompt {
+            // One quiet row at most, never in the way of a ring: the nudge offered once, yesterday's repair, or the
+            // widget invite under the first All taken.
+            TodayPromptRow(prompt: prompt)
+                .padding(.top, 16)
+                .transition(.opacity)
         }
 
         HStack(alignment: .center, spacing: 8) {
