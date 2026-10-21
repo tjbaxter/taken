@@ -369,7 +369,7 @@ His standing rule is to follow documented practice where it differs from what he
 - Exactly 72 hours counts as "at least 72 hours"; no extra buffer. With a nudge time later in the day than the trial started, the reminder falls on the evening of day 3, not day 4: earlier than the promise, never later.
 - The price left out of the reminder, never guessed, when StoreKit has not given one yet (it is cached in `pro.json` whenever the plans load).
 - Any answer to the ask, Not now or a swipe included, answers Today's nudge offer as well, so there is never a second notification ask.
-- The ask's title, "Your trial has started.", and the timeline's look: three steps left to right with a hairline, the first lit.
+- The ask's title, "Your trial has started.", and the timeline's look: three steps left to right, each with a small dot, the first lit, and no rules between them (they read as dashes).
 
 ### Where this differs from what Tom said (one line)
 - "Don't send trial reminders": one is sent, because he asked what converts and the documented practice is to promise one on the paywall and keep it.

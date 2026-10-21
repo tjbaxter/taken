@@ -8,6 +8,8 @@ struct TrialAskSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
     @State private var busy = false
+    /// The content's own height: the sheet is as tall as what it says, not half the screen.
+    @State private var contentHeight: CGFloat = 340
 
     init() {}
 
@@ -67,10 +69,18 @@ struct TrialAskSheet: View {
             .padding(.horizontal, 24)
             .padding(.top, 30)
             .padding(.bottom, 12)
+            .background {
+                GeometryReader { proxy in
+                    Color.clear
+                        .onAppear { contentHeight = proxy.size.height }
+                        .onChange(of: proxy.size.height) { _, height in contentHeight = height }
+                }
+            }
         }
         .scrollBounceBehavior(.basedOnSize)
         .background(theme.bg.ignoresSafeArea())
-        .presentationDetents([.medium, .large])
+        // Larger text than fits scrolls inside the sheet.
+        .presentationDetents([.height(contentHeight)])
         .presentationDragIndicator(.visible)
         .presentationBackground(theme.bg)
     }

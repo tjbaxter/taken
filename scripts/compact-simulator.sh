@@ -1,19 +1,18 @@
 #!/usr/bin/env bash
-# Print the UDID of a 6.1 inch iPhone simulator on the newest iOS 26 runtime, creating one if the runner has none, so
-# CI can check that the paywall fits the smallest current iPhone without scrolling (SPEC 3.9).
+# Print the UDID of a 6.1 inch iPhone simulator on the newest iOS 26 runtime, so CI can check that the paywall fits
+# the smallest current iPhone without scrolling (SPEC 3.9). The iPhone 16 (393 x 852 pt with the Dynamic Island) is the
+# tightest 6.1 inch sheet, 4 pt shorter than the iPhone 16e's (390 x 844 pt, notch): it is used, created if the runner
+# has none, and the other 6.1 inch iPhones are the fallback.
 # Usage: scripts/compact-simulator.sh
 set -euo pipefail
 
-# 6.1 inch iPhones, 393 x 852 pt (Dynamic Island) or 390 x 844 pt (notch); iPhone 16 is the tighter of the two.
-names=("iPhone 16" "iPhone 16e" "iPhone 17e" "iPhone 15")
-types=("iPhone-16" "iPhone-16e" "iPhone-17e" "iPhone-15")
-
-found="$(xcrun simctl list devices available -j | python3 -c '
+existing() {
+  xcrun simctl list devices available -j | python3 -c '
 import json, sys
 
-wanted = sys.argv[1:]
+wanted = sys.argv[1]
 devices = json.load(sys.stdin)["devices"]
-best = {}
+best = None
 for runtime, entries in devices.items():
     marker = "SimRuntime.iOS-"
     if marker not in runtime:
@@ -25,20 +24,12 @@ for runtime, entries in devices.items():
     if version[0] != 26:
         continue
     for entry in entries:
-        name = entry["name"]
-        if entry.get("isAvailable", True) and name in wanted:
-            if name not in best or best[name][0] < version:
-                best[name] = (version, entry["udid"])
-for name in wanted:
-    if name in best:
-        print(best[name][1])
-        break
-' "${names[@]}")"
-
-if [ -n "$found" ]; then
-  echo "$found"
-  exit 0
-fi
+        if entry.get("isAvailable", True) and entry["name"] in (wanted, "Taken " + wanted):
+            if best is None or best[0] < version:
+                best = (version, entry["udid"])
+print(best[1] if best else "")
+' "$1"
+}
 
 runtime="$(xcrun simctl list runtimes available -j | python3 -c '
 import json, sys
@@ -48,12 +39,16 @@ runtimes = [r for r in json.load(sys.stdin)["runtimes"] if r.get("platform", "iO
 runtimes.sort(key=lambda r: tuple(int(p) for p in r["version"].split(".")), reverse=True)
 print(runtimes[0]["identifier"] if runtimes else "")
 ')"
-if [ -z "$runtime" ]; then
-  echo "No iOS 26 runtime to create a 6.1 inch iPhone on" >&2
-  exit 1
-fi
-for type in "${types[@]}"; do
-  if udid="$(xcrun simctl create "Taken 6.1in" "com.apple.CoreSimulator.SimDeviceType.$type" "$runtime" 2>/dev/null)"; then
+
+for pair in "iPhone 16:iPhone-16" "iPhone 16e:iPhone-16e" "iPhone 17e:iPhone-17e" "iPhone 15:iPhone-15"; do
+  name="${pair%%:*}"
+  type="${pair##*:}"
+  udid="$(existing "$name")"
+  if [ -z "$udid" ] && [ -n "$runtime" ]; then
+    udid="$(xcrun simctl create "Taken $name" "com.apple.CoreSimulator.SimDeviceType.$type" "$runtime" 2>/dev/null || true)"
+  fi
+  if [ -n "$udid" ]; then
+    echo "$name: $udid" >&2
     echo "$udid"
     exit 0
   fi

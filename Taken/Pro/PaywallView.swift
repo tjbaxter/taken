@@ -206,19 +206,13 @@ struct PaywallView: View {
         }
     }
 
-    /// The trial promise under the yearly plan, left to right: "Today" (lit), "Day 4", "Day 7", each with its line under
-    /// it, joined by a hairline. Calm: the look's own tokens and Geist, no icons, nothing that moves.
+    /// The trial promise under the yearly plan, left to right: "Today" (its dot lit), "Day 4", "Day 7", each with its line
+    /// under it. Calm: the look's own tokens and Geist, no icons, nothing that moves, and no rules between the steps,
+    /// which would read as dashes.
     private func trialTimeline(_ steps: [TrialStep]) -> some View {
         HStack(alignment: .top, spacing: 0) {
             ForEach(Array(steps.enumerated()), id: \.offset) { index, step in
-                if index > 0 {
-                    Rectangle()
-                        .fill(theme.lineStrong)
-                        .frame(height: 1)
-                        .frame(minWidth: 8, maxWidth: .infinity)
-                        .padding(.horizontal, 6)
-                        .padding(.top, 8)
-                }
+                if index > 0 { Spacer(minLength: 10) }
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 6) {
                         Circle()
