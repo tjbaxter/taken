@@ -218,11 +218,13 @@ jobs:
       - name: Capture screenshots
         run: scripts/screenshots.sh "${{ steps.sim.outputs.udid }}" build/DerivedData/Build/Products/Debug-iphonesimulator/Taken.app screenshots build/screenshot-diagnostics "${{ steps.sim.outputs.small }}" "${{ steps.sim.outputs.compact }}"
 
+      # The whole folder: the captures, and the App Store sets in store/us and store/neutral with the day each shows
+      # (demo-date.txt), which store-shots.yml renders.
       - name: Upload screenshots
         uses: actions/upload-artifact@v7
         with:
           name: screenshots
-          path: screenshots/*.png
+          path: screenshots/
           if-no-files-found: error
           retention-days: 30
 

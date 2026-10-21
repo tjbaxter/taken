@@ -143,8 +143,9 @@ final class TodoModel {
         guard arguments.contains("-demo") else {
             return TodoModel(store: .shared, isDemo: false, launchScreen: nil, clockNow: { Date() })
         }
-        // Screenshots: demo tasks in a temporary file, never the real one, at the demo's moment.
-        let demoNow = DemoData.referenceNow()
+        // Screenshots: demo tasks in a temporary file, never the real one, at the demo's moment (the store sets' Thursday
+        // under -demo-stack, as AppModel's).
+        let demoNow = DemoData.referenceNow(stack: DemoStack(arguments: arguments))
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("todos-demo-\(UUID().uuidString).json")
         let store = TodoStore(fileURL: url)
         let recording = screen == "todo-recording" || screen == "todo-cap"

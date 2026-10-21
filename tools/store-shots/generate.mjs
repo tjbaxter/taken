@@ -1,13 +1,16 @@
-// Taken App Store screenshots, step 1 of 2: drives store-frame.html once per frame (frames.mjs) in Playwright's
-// Chromium and saves each frame at 2x (2640 x 5736). finish.py (step 2) downsamples them with Lanczos to the
-// store size, 1320 x 2868 RGB. .github/workflows/store-shots.yml runs both on a GitHub runner, never on a Mac.
+// Taken App Store screenshots, step 1 of 2: drives store-frame.html once per frame of one set (frames.mjs) in
+// Playwright's Chromium and saves each frame at 2x (2640 x 5736). finish.py (step 2) downsamples them with Lanczos to
+// the store sizes, 1320 x 2868 and 1206 x 2622 RGB. .github/workflows/store-shots.yml runs both on a GitHub runner, once
+// per set, never on a Mac.
 //
-//   RAW=<raw screens dir> OUT=<2x dir> PLAYWRIGHT=<.../playwright/index.mjs> node tools/store-shots/generate.mjs
-//   optional: ONLY=03 (frames whose file starts with it), SCREEN_MAP='{"day":"Day sheet.png"}'
+//   SET=en-US|neutral RAW=<raw screens dir> OUT=<2x dir> PLAYWRIGHT=<.../playwright/index.mjs> \
+//     node tools/store-shots/generate.mjs
+//   optional: ONLY=03 (frames whose file starts with it), SCREEN_MAP='{"day":"Day sheet.png"}',
+//   DEMO_DATE=YYYY-MM-DD (the day the captures show, for the drawn Lock Screen)
 //
-// RAW holds the app's own simulator captures: the "screenshots" artifact of ci.yml, or store/placeholder until
-// that exists. A frame names a state (today, today-done, add, day, log, settings) and takes the file whose name
-// is that state, optionally behind a prefix ("03-add.png", "iPhone 17 Pro Max - add.png"); SCREEN_MAP overrides.
+// RAW holds the set's own simulator captures: its folder of the "screenshots" artifact of ci.yml
+// (screenshots/store/us or screenshots/store/neutral). A frame names a state (today, today-done, add, add-search, day,
+// log) and takes the file whose name is that state, optionally behind a prefix ("03-add.png"); SCREEN_MAP overrides.
 // RAW may hold one folder per ci.yml run, named "<order>-<run id>": a state takes the first run's capture, and
 // falls back to the next run's when that capture is missing or blank (a screen that failed to draw).
 
@@ -23,14 +26,23 @@ const RAW = process.env.RAW;
 const OUT = process.env.OUT;
 if (!RAW || !OUT) throw new Error("set RAW (raw screens dir) and OUT (2x output dir)");
 const ONLY = process.env.ONLY || "";
-const MAP = JSON.parse(process.env.SCREEN_MAP || "{}");
-// DEMO_DATE=YYYY-MM-DD, the day ci.yml took the captures: the drawn Lock Screen shows it, as the app's top bar does
+const SET = process.env.SET || "en-US";
+// SCREEN_MAP is one map for every set ({"day":"..."}) or a map per set ({"neutral":{"add-search":"..."}}).
+const MAPS = JSON.parse(process.env.SCREEN_MAP || "{}");
+const MAP = MAPS[SET] && typeof MAPS[SET] === "object" ? MAPS[SET] : MAPS;
+// DEMO_DATE=YYYY-MM-DD, the day the set's captures show (the app's demo-date.txt in the set's folder): the drawn Lock
+// Screen shows it, as the app's Today title does, written the way iOS writes it for that set's storefront
+// ("Thursday, October 15" in the U.S., "Thursday 15 October" elsewhere).
 const DEMO_DATE = /^\d{4}-\d{2}-\d{2}$/.test(process.env.DEMO_DATE || "") ? process.env.DEMO_DATE : "";
-const longDate = (iso) =>
-  new Date(`${iso}T12:00:00Z`).toLocaleDateString("en-GB", { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" }).replace(/,/g, "");
 const pw = process.env.PLAYWRIGHT ? pathToFileURL(process.env.PLAYWRIGHT).href : "playwright";
 const { chromium } = await import(pw);
-const { FRAMES, specFor } = await import(pathToFileURL(join(HERE, "frames.mjs")).href);
+const { framesFor, SETS, specFor } = await import(pathToFileURL(join(HERE, "frames.mjs")).href);
+const FRAMES = framesFor(SET);
+const longDate = (iso) => {
+  const options = { weekday: "long", day: "numeric", month: "long", timeZone: "UTC" };
+  const text = new Date(`${iso}T12:00:00Z`).toLocaleDateString(SETS[SET].dateLocale, options);
+  return SETS[SET].dateLocale === "en-GB" ? text.replace(/,/g, "") : text;
+};
 
 function pngs(dir) {
   const out = [];
@@ -122,7 +134,8 @@ try {
     if (info.clearance < 40) { console.error(`${f.file}: the phone comes within ${info.clearance}px of the caption`); failed = true; }
     if (info.phone.x0 < 0 || info.phone.x1 > spec.w) { console.error(`${f.file}: the phone runs off the side (${info.phone.x0} to ${info.phone.x1})`); failed = true; }
     await page.screenshot({ path: join(OUT, f.file), clip: { x: 0, y: 0, width: spec.w, height: spec.h }, type: "png" });
-    report.push({ file: f.file, key: f.key, screen: spec.screen.kind === "capture" ? spec.screen.file : spec.screen.kind, ...info });
+    report.push({ set: SET, file: f.file, key: f.key, screen: spec.screen.kind === "capture" ? spec.screen.file : spec.screen.kind,
+      date: spec.screen.kind === "lock" ? spec.screen.date : undefined, ...info });
     await ctx.close();
   }
 } finally {

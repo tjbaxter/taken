@@ -15,10 +15,17 @@ bundle_id="com.tombaxter.taken"
 mkdir -p "$out" "$diag"
 
 prepare() {
-  local device="$1"
+  local device="$1" key
   xcrun simctl boot "$device" 2>/dev/null || true
   xcrun simctl bootstatus "$device" -b
   xcrun simctl ui "$device" appearance dark || true
+  # The keyboard's one-time introductions ("Speed up your typing by sliding your finger...") would cover the Add sheet's
+  # type mode in its first capture on each device: mark them shown, as Chromium's iOS simulator bots do
+  # (ios/build/bots/scripts/iossim_util.py, disable_simulator_keyboard_tutorial).
+  for key in DidShowContinuousPathIntroduction KeyboardDidShowProductivityTutorial DidShowGestureKeyboardIntroduction \
+             UIKeyboardDidShowInternationalInfoIntroduction; do
+    xcrun simctl spawn "$device" defaults write com.apple.keyboard.preferences "$key" -bool true || true
+  done
   xcrun simctl status_bar "$device" override \
     --time "9:41" \
     --dataNetwork wifi --wifiMode active --wifiBars 3 \
@@ -76,11 +83,12 @@ paywall_fits() {
 }
 
 shoot() {
-  local name="$1" screen="$2" look="${3:-signal}"
+  local name="$1" screen="$2" look="${3:-signal}" stack="${4:-standard}"
+  mkdir -p "$(dirname "$out/$name.png")"
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
   rm -f "$(probe_file)" "$(fit_file)"
   sleep 1
-  xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" >/dev/null
+  xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" -demo-stack "$stack" >/dev/null
   sleep 6
   local attempt size
   for attempt in 1 2 3 4; do
@@ -93,7 +101,7 @@ shoot() {
     if [ "$attempt" -eq 2 ]; then
       xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
       sleep 1
-      xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" >/dev/null
+      xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" -demo-stack "$stack" >/dev/null
     fi
     sleep 4
   done
@@ -229,6 +237,27 @@ if cmp -s "$out/35-link-todo.png" "$out/04-settings.png"; then
   exit 1
 fi
 
+# The App Store sets (REDESIGN.md "App Store pack for 1.1"), one folder each, which store-shots.yml renders:
+# store/us for the English (U.S.) localization and store/neutral for every other one. Each is the demo on a Thursday
+# with its weekly row (-demo-stack, Shared/DemoData.swift): the U.S. set names generic medicines ("Semaglutide",
+# "Weekly · Thu") and shows the Add sheet's chip grid; the neutral set has a "Weekly shot" row, no prescription-only
+# medicine, and the type-ahead with "mag" typed in place of the chip grid. The probe proves each launch took its stack,
+# and gives the day it shows, for the Lock Screen the composer draws.
+store_set() {
+  local set="$1" add="$2"
+  shoot "store/$set/01-today" today signal "$set"
+  lands "store/$set/01-today" "tab=today sheet=none stack=$set"
+  sed -n 's/^day=//p' "$(probe_file)" > "$out/store/$set/demo-date.txt"
+  echo "store/$set shows $(cat "$out/store/$set/demo-date.txt")"
+  shoot "store/$set/02-today-done" today-done signal "$set"
+  shoot "store/$set/03-$add" "$add" signal "$set"
+  lands "store/$set/03-$add" "sheet=add stack=$set"
+  shoot "store/$set/04-day" day signal "$set"
+  shoot "store/$set/06-log" log signal "$set"
+}
+store_set us add
+store_set neutral add-search
+
 # The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
 if [ -n "$small" ] && [ "$small" != "$udid" ]; then
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
@@ -245,6 +274,10 @@ if [ -n "$small" ] && [ "$small" != "$udid" ]; then
   shoot 45-add-search-6.3in add-search
   # The one To-do list on the smaller iPhone: Done today and the mic above the tab bar.
   shoot 49-todo-6.3in todo
+  # The neutral set's type-ahead on the smaller iPhone, where the keyboard leaves fewer chip rows in view: the frame
+  # 03 store-shots.yml can take instead (screen_map), if a chip under the 6.9 inch capture's suggestions shows.
+  shoot store/neutral/03-add-search-6.3in add-search signal neutral
+  lands store/neutral/03-add-search-6.3in "sheet=add stack=neutral"
 fi
 
 # The paywall on a 6.1 inch iPhone, the smallest current size: every plan and the trial timeline above the button,
