@@ -7,8 +7,11 @@ struct ItemRowView: View {
     let now: Date
     let clock: DayClock
     let expanded: Bool
-    /// The Not today group: "Next: Thursday" under the name, and a quiet ring.
+    /// The Not today group: "Next: Thursday" for VoiceOver, and a quiet ring.
     var nextLabel: String?
+    /// The Not today group: the whole line under the name ("Every other day · Next: Thursday", "Weekly · Thu · Not
+    /// logged", "Weekly · Counts for Thursday"). Nil on a Stack row.
+    var note: String?
     /// Locked mode: a tap on the ring opens Taken Pro instead of logging.
     var locked: Bool = false
     let onTake: () -> Void
@@ -16,17 +19,21 @@ struct ItemRowView: View {
 
     @Environment(\.theme) private var theme
 
-    init(row: ItemDay, now: Date, clock: DayClock, expanded: Bool, nextLabel: String? = nil, locked: Bool = false,
-         onTake: @escaping () -> Void, onOpen: @escaping () -> Void) {
+    init(row: ItemDay, now: Date, clock: DayClock, expanded: Bool, nextLabel: String? = nil, note: String? = nil,
+         locked: Bool = false, onTake: @escaping () -> Void, onOpen: @escaping () -> Void) {
         self.row = row
         self.now = now
         self.clock = clock
         self.expanded = expanded
         self.nextLabel = nextLabel
+        self.note = note
         self.locked = locked
         self.onTake = onTake
         self.onOpen = onOpen
     }
+
+    /// The day being lived, which every time on the row is read against.
+    private var today: DayKey { clock.day(for: now) }
 
     private var quiet: Bool { nextLabel != nil && row.doses.isEmpty }
 
@@ -54,7 +61,7 @@ struct ItemRowView: View {
                 Button(action: onTake) {
                     HStack(spacing: 10) {
                         if let last = row.lastDose {
-                            Text(Fmt.clock(last.takenAt, clock))
+                            Text(Fmt.doseClock(last.takenAt, viewing: today, clock))
                                 .font(.mono(15, .monoMedium, relativeTo: .body))
                                 .foregroundStyle(theme.signalInk)
                                 .fixedSize()
@@ -85,10 +92,10 @@ struct ItemRowView: View {
         .accessibilityAction(named: "Edit item") { onOpen() }
     }
 
-    /// "Daily", "2x daily · 1 of 2", "Every other day · Next: Thursday", "Weekly · Next: Thursday".
+    /// "Daily", "2x daily · 1 of 2", "Every other day · Next: Thursday", "Weekly · Thu · Not logged".
     private var subtitle: String {
+        if let note { return note }
         let frequency = Fmt.frequency(row.frequency)
-        if let nextLabel, row.doses.isEmpty { return Fmt.notDue(row.frequency, next: nextLabel) }
         if row.isDue && row.dosesPerDay > 1 { return "\(frequency) \u{00B7} \(row.takenCount) of \(row.dosesPerDay)" }
         return frequency
     }
@@ -99,7 +106,7 @@ struct ItemRowView: View {
                 HStack(spacing: 6) {
                     Text(row.doses.count > 1 ? "Dose \(index + 1) taken at" : "Taken at")
                         .font(.sans(14, .sans, relativeTo: .footnote))
-                    Text(Fmt.clock(dose.takenAt, clock))
+                    Text(Fmt.doseClock(dose.takenAt, viewing: today, clock))
                         .font(.mono(14, .monoMedium, relativeTo: .footnote))
                     Text("\u{00B7} \(Fmt.agoDetailed(dose.takenAt, now: now))")
                         .font(.sans(14, .sans, relativeTo: .footnote))
@@ -110,12 +117,29 @@ struct ItemRowView: View {
     }
 
     private var accessibilityHint: String {
+        Self.accessibilityHint(row: row, quiet: quiet, locked: locked)
+    }
+
+    private var accessibilityLabel: String {
+        Self.accessibilityLabel(row: row, today: today, clock: clock, nextLabel: nextLabel)
+    }
+
+    nonisolated static func accessibilityHint(row: ItemDay, quiet: Bool, locked: Bool) -> String {
         guard row.isPending || quiet else { return "Double tap for the times. Actions has Edit item." }
         return locked ? "Logging needs Taken Pro. Double tap to see plans." : "Double tap to mark taken."
     }
 
-    private var accessibilityLabel: String {
+    /// VoiceOver's one sentence for the row. A weekly row in Not today speaks for its week: "Semaglutide, Thursday's
+    /// dose not logged." while open, "Semaglutide, taken Friday at 8:12 AM." once logged, with "Counts for Thursday."
+    /// after an early dose.
+    nonisolated static func accessibilityLabel(row: ItemDay, today: DayKey, clock: DayClock, nextLabel: String?,
+                                   locale: Locale = .current) -> String {
         let name = row.item.name
+        if row.isOpen { return "\(name), \(Fmt.weekday(row.day))'s dose not logged." }
+        if row.day != today, let last = row.lastDose {
+            let taken = "\(name), taken \(Fmt.spokenDose(last.takenAt, viewing: today, clock, locale: locale))."
+            return row.day > today ? "\(taken) Counts for \(Fmt.weekday(row.day))." : taken
+        }
         if row.doses.isEmpty {
             if let nextLabel { return "\(name), not due today. \(nextLabel)." }
             return "\(name), pending."

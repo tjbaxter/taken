@@ -112,7 +112,8 @@ final class DayLogicTests: XCTestCase {
         XCTAssertEqual(Fmt.frequency(.daily(times: 2)), "2x daily")
     }
 
-    /// Weekly is a one-day Days set: due, pending and nudged on that day only, with no new streak or nudge logic.
+    /// Weekly is a one-day Days set: due, pending and nudged on that day only. How its week counts (a dose logged after
+    /// its day, an early one, the open week) is WeeklyWeekTests.
     func testAWeeklyItemIsPendingOnlyOnItsDayAndNudgedOnlyThen() {
         let shot = makeItem("Semaglutide", "SEM", .weekdays([5]), created: at(2026, 10, 1, 8))
         var state = StackState(items: [shot])

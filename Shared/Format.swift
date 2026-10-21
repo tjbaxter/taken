@@ -37,13 +37,44 @@ enum Fmt {
         return "\(minutes / 60)h ago"
     }
 
-    /// "9h 12m ago"
+    /// "9h 12m ago", and "1d 2h ago" from a day on (a weekly dose logged on an earlier day).
     static func agoDetailed(_ date: Date, now: Date) -> String {
         let minutes = Int(now.timeIntervalSince(date) / 60)
         if minutes < 1 { return "just now" }
         if minutes < 60 { return "\(minutes)m ago" }
+        let hours = minutes / 60
+        if hours >= 24 {
+            let rest = hours % 24
+            return rest == 0 ? "\(hours / 24)d ago" : "\(hours / 24)d \(rest)h ago"
+        }
         let rest = minutes % 60
-        return rest == 0 ? "\(minutes / 60)h ago" : "\(minutes / 60)h \(rest)m ago"
+        return rest == 0 ? "\(hours)h ago" : "\(hours)h \(rest)m ago"
+    }
+
+    /// A dose's time as a row or a chip shows it: "08:12" when it was logged on the day being viewed, otherwise with the
+    /// day it was logged, "Fri 08:12" (a weekly dose that counts for its due day, SPEC 3.3).
+    static func doseClock(_ date: Date, viewing day: DayKey, _ clock: DayClock) -> String {
+        let logged = clock.day(for: date)
+        let time = self.clock(date, clock)
+        return logged == day ? time : "\(weekdaysShort[logged.mondayIndex]) \(time)"
+    }
+
+    /// The same for VoiceOver and Siri, in the clock's zone and the locale's own short time: "at 8:12 AM", or
+    /// "Friday at 8:12 AM" when it was logged on another day.
+    static func spokenDose(_ date: Date, viewing day: DayKey, _ clock: DayClock, locale: Locale = .current) -> String {
+        let logged = clock.day(for: date)
+        var style = Date.FormatStyle(date: .omitted, time: .shortened)
+        style.timeZone = clock.calendar.timeZone
+        style.locale = locale
+        // Newer releases put a narrow no-break space before AM; a plain space reads the same and compares the same.
+        let time = date.formatted(style).replacingOccurrences(of: "\u{202F}", with: " ")
+            .replacingOccurrences(of: "\u{00A0}", with: " ")
+        return logged == day ? "at \(time)" : "\(weekday(logged)) at \(time)"
+    }
+
+    /// "Thursday"
+    static func weekday(_ day: DayKey) -> String {
+        weekdaysLong[day.mondayIndex]
     }
 
     /// "MON 12 OCT", the short day the nudge's notifications name.
@@ -94,6 +125,19 @@ enum Fmt {
         return "\(self.frequency(frequency)) \u{00B7} \(next)"
     }
 
+    /// The item sheet's one fixed line under a Weekly schedule (App Review Guideline 1.4.1). Taken only records doses: it
+    /// never says when, whether or how much to take.
+    static let missedDoseNote = "Missed a dose? Follow your medicine's leaflet, or ask your pharmacist or doctor."
+
+    /// Under a weekly item in Not today, from the week today is in (`StackEngine.weekRow`): "Weekly · Thu · Not logged"
+    /// while the week is open, "Weekly · Next: Thursday" once it is logged, "Weekly · Counts for Thursday" for an early
+    /// dose. No countdown, and nothing about when to take it.
+    static func weekNote(_ row: ItemDay, today: DayKey) -> String {
+        if row.day > today { return "Weekly \u{00B7} Counts for \(weekday(row.day))" }
+        if row.isOpen { return "\(frequency(row.frequency)) \u{00B7} Not logged" }
+        return notDue(row.frequency, next: next(row.day.adding(7), today: today))
+    }
+
     /// "Next: tomorrow", "Next: Thursday", "Next: 14 Oct"
     static func next(_ next: DayKey?, today: DayKey) -> String {
         guard let next else { return "Not scheduled" }
@@ -112,8 +156,16 @@ enum Fmt {
         return "\(summary.takenDueDoses) of \(summary.dueDoses) taken"
     }
 
-    /// The day sheet's status line. Today is still running, so what is not taken yet is pending, not missed.
+    /// The day sheet's status line. Today is still running, so what is not taken yet is pending, not missed. A weekly
+    /// item whose week is still open is "not logged", never missed: "1 of 2 taken · 1 not logged".
     static func daySheetStatus(_ summary: DaySummary, isToday: Bool) -> String {
+        let open = summary.openCount
+        if open > 0 {
+            var parts = ["\(summary.takenDueDoses) of \(summary.dueDoses + open) taken"]
+            if summary.pendingDoses > 0 { parts.append("\(summary.pendingDoses) \(isToday ? "pending" : "missed")") }
+            parts.append("\(open) not logged")
+            return parts.joined(separator: " \u{00B7} ")
+        }
         switch summary.status {
         case .nothingDue:
             return summary.allDoses.isEmpty ? "Nothing due" : "\(summary.allDoses.count) logged \u{00B7} nothing due"
@@ -128,11 +180,12 @@ enum Fmt {
         }
     }
 
-    /// A day sheet row: "Daily · taken", "2x daily · 1 of 2", "Daily · missed" (pending today), with the frequency the
-    /// item had on that day.
+    /// A day sheet row: "Daily · taken", "2x daily · 1 of 2", "Daily · missed" (pending today), "Weekly · Thu · not
+    /// logged" (its week still open), with the frequency the item had on that day.
     static func dayItemStatus(_ row: ItemDay, isToday: Bool) -> String {
         let schedule = frequency(row.frequency)
         if !row.isActive && row.doses.isEmpty { return "\(schedule) \u{00B7} \(row.isPaused ? "archived" : "added later")" }
+        if row.isOpen { return "\(schedule) \u{00B7} not logged" }
         if !row.isDue { return "\(schedule) \u{00B7} not due" }
         if row.isDone { return "\(schedule) \u{00B7} taken" }
         if row.doses.isEmpty { return "\(schedule) \u{00B7} \(isToday ? "pending" : "missed")" }

@@ -222,7 +222,30 @@ final class AppModel {
         Fmt.next(engine.nextDueDay(for: row.item, after: today.day), today: today.day)
     }
 
-    func sheetSummary(for day: DayKey) -> DaySummary { engine.sheetSummary(for: day) }
+    /// A row in Not today and the line under its name. A weekly item shows the week today is in (SPEC 3.3): its due day,
+    /// open ("Weekly · Thu · Not logged") or logged ("Weekly · Next: Thursday"), or the next due day an early dose
+    /// already counts for ("Weekly · Counts for Thursday"). Anything else is today's row, as before.
+    func notTodayRow(_ row: ItemDay) -> (row: ItemDay, note: String) {
+        if let week = engine.weekRow(for: row.item, today: today.day) {
+            return (week, Fmt.weekNote(week, today: today.day))
+        }
+        let note = row.doses.isEmpty ? Fmt.notDue(row.frequency, next: nextLabel(for: row)) : Fmt.frequency(row.frequency)
+        return (row, note)
+    }
+
+    func sheetSummary(for day: DayKey) -> DaySummary { engine.sheetSummary(for: day, asOf: today.day) }
+
+    /// The dose Set time corrects: the item's latest dose logged today, whichever day it counts for. Nil logs a new one.
+    func setTimeDose(for item: Item) -> Dose? {
+        state.doses.filter { $0.itemId == item.id && clock.day(of: $0) == today.day }.max(by: { $0.takenAt < $1.takenAt })
+    }
+
+    /// Set time belongs on a row whose last dose was logged today, or that has none and is today's. Otherwise (a weekly
+    /// row whose dose was logged another day, or whose week is open) the row offers its day's sheet instead.
+    func offersSetTime(_ row: ItemDay) -> Bool {
+        guard let last = row.lastDose else { return row.day == today.day }
+        return clock.day(of: last) == today.day
+    }
 
     func csv() -> String { CSVExport.make(state: state) }
 
@@ -493,9 +516,10 @@ final class AppModel {
 
     // MARK: Taking
 
-    /// Tap on a row: pending logs a dose, taken shows the detail. Never un-takes.
+    /// Tap on a row: pending logs a dose, taken shows the detail. Never un-takes. A weekly item's open week logs from
+    /// its ring (it counts for the due day, at the real time); once the week is logged a tap only shows the detail.
     func tap(_ row: ItemDay) {
-        if row.isPending || (!row.isDue && row.doses.isEmpty) {
+        if row.isPending || row.isOpen || (!row.isDue && row.doses.isEmpty) {
             let item = row.item
             requirePro { [weak self] in self?.log(item) }
         } else {
@@ -561,13 +585,14 @@ final class AppModel {
         announce("Undone.")
     }
 
-    /// Removes today's latest dose of an item. The toast's UNDO puts it back with its original time.
-    func undoLastDose(_ item: Item) {
-        let day = today.day
-        let clock = self.clock
-        guard let removed = write({ $0.undoLastDose(itemId: item.id, on: day, clock: clock) }) ?? nil else { return }
+    /// Removes the row's latest dose: today's on a Stack row, and on a weekly row the one that counts for its week,
+    /// whatever day it was logged. The toast's UNDO puts it back with its original time.
+    func undoLastDose(_ row: ItemDay) {
+        guard let last = row.lastDose else { return }
+        let item = row.item
+        write { $0.removeDoses([last.id]) }
         Haptics.soft(hapticsOn)
-        show(Toast(message: "\(item.name): last dose removed", undo: .restore([removed])))
+        show(Toast(message: "\(item.name): last dose removed", undo: .restore([last])))
         announce("\(item.name), last dose removed.")
     }
 
@@ -584,7 +609,7 @@ final class AppModel {
         let (at, isFuture) = moment(on: today.day, minutes: hour * 60 + minute)
         guard !isFuture else { return }
         let zone = clock.calendar.timeZone
-        let existing = today.items.first { $0.id == item.id }?.lastDose
+        let existing = setTimeDose(for: item)
         let wasLocked = today.allTaken
         if let existing {
             write { $0.setDoseTime(doseId: existing.id, to: at, timeZone: zone) }

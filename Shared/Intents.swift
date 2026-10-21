@@ -190,10 +190,19 @@ struct StackItemQuery: EntityStringQuery {
 enum SiriAnswers {
     /// "Yes. Vitamin D3 at 7:42 AM, Fish Oil at 7:42 AM. Finasteride is not due today."
     /// "Not yet: Fish Oil is pending."
-    static func status(state: StackState, now: Date, timeZone: TimeZone = .current) -> String {
+    /// A weekly item not due today answers for its week instead of "is not due today" (SPEC 3.3, `weekSentence`).
+    static func status(state: StackState, now: Date, timeZone: TimeZone = .current, locale: Locale = .current) -> String {
         let clock = DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone)
-        let today = StackEngine(state: state, clock: clock).todaySummary(now: now)
+        let engine = StackEngine(state: state, clock: clock)
+        let today = engine.todaySummary(now: now)
         guard !today.isEmpty else { return "Your stack is empty. Open Taken to add what you take." }
+        var weeks: [String] = []
+        var weekly: Set<UUID> = []
+        for row in today.items where !row.isDue && row.doses.isEmpty {
+            guard let week = engine.weekRow(for: row.item, today: today.day) else { continue }
+            weekly.insert(row.item.id)
+            weeks.append(weekSentence(week, today: today.day, clock: clock, locale: locale))
+        }
 
         let taken = today.items.filter { !$0.doses.isEmpty }.map { row -> String in
             let times = row.doses.map { Fmt.spoken($0.takenAt) }
@@ -204,7 +213,7 @@ enum SiriAnswers {
                 ? "\(row.item.name) (\(row.doses.count) of \(row.dosesPerDay))"
                 : row.item.name
         }
-        let notDue = today.items.filter { !$0.isDue && $0.doses.isEmpty }.map { $0.item.name }
+        let notDue = today.items.filter { !$0.isDue && $0.doses.isEmpty && !weekly.contains($0.item.id) }.map { $0.item.name }
 
         var sentences: [String] = []
         if pending.isEmpty {
@@ -216,7 +225,19 @@ enum SiriAnswers {
         if !notDue.isEmpty {
             sentences.append("\(Fmt.list(notDue)) \(notDue.count == 1 ? "is" : "are") not due today.")
         }
+        sentences.append(contentsOf: weeks)
         return sentences.joined(separator: " ")
+    }
+
+    /// A weekly item's week, from its row (`StackEngine.weekRow`): "Semaglutide was taken Friday at 8:12 AM, for
+    /// Thursday." (logged on another day than the one it counts for), "Semaglutide was taken Thursday at 8:12 AM." (on its
+    /// day), "Semaglutide is not logged for Thursday." (the week still open). Never when, whether or how much to take.
+    static func weekSentence(_ week: ItemDay, today: DayKey, clock: DayClock, locale: Locale = .current) -> String {
+        let name = week.item.name
+        guard let dose = week.lastDose else { return "\(name) is not logged for \(Fmt.weekday(week.day))." }
+        let when = Fmt.spokenDose(dose.takenAt, viewing: today, clock, locale: locale)
+        if clock.day(for: dose.takenAt) == week.day { return "\(name) was taken \(when)." }
+        return "\(name) was taken \(when), for \(Fmt.weekday(week.day))."
     }
 
     /// Why TAKE ALL logged nothing.

@@ -801,9 +801,16 @@ struct ItemEditorView: View {
             } header: {
                 editorTitle("Schedule")
             } footer: {
-                Text("A change applies from today. Earlier days keep the schedule they had.")
-                    .font(.sans(14, .sans, relativeTo: .footnote))
-                    .foregroundStyle(theme.fgSubtle)
+                VStack(alignment: .leading, spacing: 6) {
+                    Text("A change applies from today. Earlier days keep the schedule they had.")
+                    // Weekly: one fixed line, never a countdown or a window (App Review Guideline 1.4.1). Taken only
+                    // records doses; what to do about a missed one is for the leaflet and the pharmacist.
+                    if choice == .weekly {
+                        Text(Fmt.missedDoseNote)
+                    }
+                }
+                .font(.sans(14, .sans, relativeTo: .footnote))
+                .foregroundStyle(theme.fgSubtle)
             }
 
             Section {

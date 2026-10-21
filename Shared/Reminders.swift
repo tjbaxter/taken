@@ -25,7 +25,9 @@ enum Reminders {
     }
 
     /// Pure planning, unit tested: which nudges should exist right now. Without Taken Pro there are none, and a
-    /// plan set not to renew is nudged only until it ends (PRO.md).
+    /// plan set not to renew is nudged only until it ends (PRO.md). A weekly item is nudged on its due day only: never
+    /// on the six days after it while its week is open (how late a dose may still be taken differs by medicine, so a
+    /// later prompt would be dosing advice), and never on a due day an early dose already counts for (SPEC 3.3, R4).
     static func plan(state: StackState, now: Date, timeZone: TimeZone = .current, window: NudgeWindow = .open) -> [Plan] {
         guard window != .closed, state.settings.reminderEnabled, !state.items.isEmpty else { return [] }
         let clock = DayClock(dayStartHour: state.settings.dayStartHour, timeZone: timeZone)
