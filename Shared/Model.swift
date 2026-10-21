@@ -142,8 +142,18 @@ struct StackSettings: Codable, Hashable, Sendable {
     var nudgeOfferDone: Bool = false
     /// The day (DayKey ordinal) the widget invite first showed, under the first All taken: it shows on that day only.
     var widgetInviteDay: Int?
-    /// The widget invite was tapped or closed.
+    /// The widget invite was tapped or closed, or a Taken widget was already on the Lock Screen.
     var widgetInviteDone: Bool = false
+    /// The day (DayKey ordinal) whose repair line ("Forgot to log yesterday? Fill it in") was closed: it stays hidden for
+    /// that day only. Not kept by Erase all data.
+    var repairClosedDay: Int?
+
+    /// The Nudge toggle in Profile, or Turn on on the offer: either is an explicit answer, so the one-time offer on Today
+    /// never comes back after it, even once the nudge is turned off again.
+    mutating func setReminder(_ enabled: Bool) {
+        reminderEnabled = enabled
+        nudgeOfferDone = true
+    }
 
     static let defaultWakeMinutes = 7 * 60
     /// The day rolls over this long before the wake-up time, so a late night stays on the day being lived.
@@ -199,7 +209,7 @@ struct StackSettings: Codable, Hashable, Sendable {
 
     private enum CodingKeys: String, CodingKey {
         case wakeMinutes, dayStartHour, reminderEnabled, reminderMinutes, hapticsEnabled, theme
-        case nudgeOfferDone, widgetInviteDay, widgetInviteDone
+        case nudgeOfferDone, widgetInviteDay, widgetInviteDone, repairClosedDay
     }
 
     init(from decoder: any Decoder) throws {
@@ -220,6 +230,7 @@ struct StackSettings: Codable, Hashable, Sendable {
         nudgeOfferDone = (try? c.decodeIfPresent(Bool.self, forKey: .nudgeOfferDone)) ?? false
         widgetInviteDay = try? c.decodeIfPresent(Int.self, forKey: .widgetInviteDay)
         widgetInviteDone = (try? c.decodeIfPresent(Bool.self, forKey: .widgetInviteDone)) ?? false
+        repairClosedDay = try? c.decodeIfPresent(Int.self, forKey: .repairClosedDay)
     }
 
     func encode(to encoder: any Encoder) throws {
@@ -235,6 +246,7 @@ struct StackSettings: Codable, Hashable, Sendable {
         if nudgeOfferDone { try c.encode(true, forKey: .nudgeOfferDone) }
         try c.encodeIfPresent(widgetInviteDay, forKey: .widgetInviteDay)
         if widgetInviteDone { try c.encode(true, forKey: .widgetInviteDone) }
+        try c.encodeIfPresent(repairClosedDay, forKey: .repairClosedDay)
     }
 }
 

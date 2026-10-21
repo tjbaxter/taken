@@ -1,4 +1,5 @@
 import XCTest
+import WidgetKit
 @testable import Taken
 
 /// The 1.1 retention build (SPEC 3.1): Today's one-time rows, the evening nudge offered once, the honest repair and the
@@ -59,12 +60,52 @@ final class RetentionTests: XCTestCase {
         XCTAssertTrue(text.contains(#""widgetInviteDay":\#(monday.ordinal)"#), text)
         XCTAssertEqual(try TakenStore.decode(Data(text.utf8)).settings, state.settings)
 
+        state.settings.repairClosedDay = monday.ordinal - 1
+        XCTAssertTrue(String(decoding: try TakenStore.encode(state), as: UTF8.self).contains(#""repairClosedDay":"#))
         state.eraseAll()
         XCTAssertTrue(state.items.isEmpty)
         XCTAssertFalse(state.settings.reminderEnabled, "settings reset")
         XCTAssertTrue(state.settings.nudgeOfferDone, "an answered row never comes back, even after Erase all data")
         XCTAssertTrue(state.settings.widgetInviteDone)
-        XCTAssertEqual(state.settings.widgetInviteDay, monday.ordinal)
+        XCTAssertNil(state.settings.widgetInviteDay, "a date from the log goes with the log (privacy policy, section 11)")
+        XCTAssertNil(state.settings.repairClosedDay)
+
+        // An invite shown but never tapped or closed is kept as answered, without its day: it never showed again anyway.
+        var shownOnly = StackState()
+        shownOnly.settings.widgetInviteDay = monday.ordinal
+        shownOnly.eraseAll()
+        XCTAssertNil(shownOnly.settings.widgetInviteDay)
+        XCTAssertTrue(shownOnly.settings.widgetInviteDone)
+        var never = StackState()
+        never.eraseAll()
+        XCTAssertFalse(never.settings.widgetInviteDone, "never shown: it can still show once")
+        XCTAssertFalse(never.settings.nudgeOfferDone)
+    }
+
+    /// Profile's Nudge toggle answers the offer too: someone who had the nudge on (or turned it on in Profile) and turns
+    /// it off never sees "Nudge me at 20:00 if anything's left" again.
+    @MainActor
+    func testTheNudgeToggleInProfileAnswersTheOffer() async {
+        let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 19, 9))
+        var state = StackState(items: [vd3])
+        state.settings.reminderEnabled = true
+        let today = summary(state, now: at(2026, 10, 19, 9))
+        XCTAssertNil(TodayPrompts.pick(settings: state.settings, hasStack: true, today: today, repairDay: nil, locked: false))
+        state.settings.setReminder(false)
+        XCTAssertFalse(state.settings.reminderEnabled)
+        XCTAssertTrue(state.settings.nudgeOfferDone)
+        XCTAssertNil(TodayPrompts.pick(settings: state.settings, hasStack: true, today: today, repairDay: nil, locked: false),
+                     "turned off in Profile: the offer stays away")
+
+        let model = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "today"])
+        await model.setReminderEnabled(true)
+        await model.setReminderEnabled(false)
+        XCTAssertFalse(model.settings.reminderEnabled)
+        XCTAssertTrue(model.settings.nudgeOfferDone, "on, then off, in Profile")
+        if case .nudgeOffer = TodayPrompts.pick(settings: model.settings, hasStack: model.hasStack, today: model.today,
+                                                repairDay: nil, locked: false) {
+            XCTFail("the offer came back after the nudge was turned off in Profile")
+        }
     }
 
     // MARK: The widget invite
@@ -96,7 +137,23 @@ final class RetentionTests: XCTestCase {
         unanswered.nudgeOfferDone = false
         XCTAssertEqual(TodayPrompts.pick(settings: unanswered, hasStack: true, today: done, repairDay: nil, locked: false),
                        .nudgeOffer(minutes: 20 * 60), "one row at a time, the nudge offer first")
+        XCTAssertNil(TodayPrompts.pick(settings: state.settings, hasStack: true, today: done, repairDay: nil, locked: false,
+                                       lockScreenWidget: true), "not for someone with the widget on the Lock Screen")
         XCTAssertEqual(RetentionCopy.widgetInvite, "Log from your Lock Screen: add the Taken widget")
+    }
+
+    /// WidgetKit's configured widgets: only the Taken stack widget in a Lock Screen family counts.
+    func testTheLockScreenWidgetCheckReadsTheStackWidgetsLockScreenFamilies() {
+        XCTAssertFalse(TodayPrompts.hasLockScreenWidget([]))
+        for family in [WidgetFamily.accessoryCircular, .accessoryRectangular, .accessoryInline] {
+            XCTAssertTrue(TodayPrompts.hasLockScreenWidget([(kind: TakenWidgetKind.stack, family: family)]), "\(family)")
+        }
+        XCTAssertFalse(TodayPrompts.hasLockScreenWidget([(kind: TakenWidgetKind.stack, family: .systemSmall),
+                                                         (kind: TakenWidgetKind.stack, family: .systemMedium)]),
+                       "a Home Screen widget is not the Lock Screen")
+        XCTAssertFalse(TodayPrompts.hasLockScreenWidget([(kind: TodoCaptureRoute.widgetKind, family: .accessoryCircular)]),
+                       "the To-do widget does not log doses")
+        XCTAssertEqual(TakenWidgetKind.stack, "TakenStack", "the kind the widget extension declares")
     }
 
     // MARK: The honest repair
@@ -148,6 +205,24 @@ final class RetentionTests: XCTestCase {
         XCTAssertEqual(RetentionCopy.repair, "Forgot to log yesterday? Fill it in")
     }
 
+    /// The repair line's close hides it for the day it was about, and only that day.
+    func testTheRepairLineClosesForItsDay() {
+        let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 8))
+        var state = StackState(items: [vd3])
+        state.settings.nudgeOfferDone = true
+        let today = summary(state, now: at(2026, 10, 19, 9))
+        let sunday = monday.adding(-1)
+        XCTAssertEqual(TodayPrompts.pick(settings: state.settings, hasStack: true, today: today, repairDay: sunday,
+                                         locked: false), .repair(sunday))
+        state.settings.repairClosedDay = sunday.ordinal
+        XCTAssertNil(TodayPrompts.pick(settings: state.settings, hasStack: true, today: today, repairDay: sunday,
+                                       locked: false), "closed for Sunday")
+        XCTAssertEqual(TodayPrompts.pick(settings: state.settings, hasStack: true, today: today, repairDay: monday,
+                                         locked: false), .repair(monday), "a later day's line still shows")
+        let text = String(decoding: (try? TakenStore.encode(StackState())) ?? Data(), as: UTF8.self)
+        XCTAssertFalse(text.contains("repairClosedDay"), "a file with none looks as before")
+    }
+
     // MARK: Copy
 
     func testTheRetentionCopyKeepsTheRules() {
@@ -179,6 +254,8 @@ final class RetentionTests: XCTestCase {
         let repair = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "today-repair"])
         XCTAssertEqual(repair.todayPrompt, .repair(repair.today.day.adding(-1)))
         XCTAssertEqual(repair.repairDay, repair.today.day.adding(-1), "the demo's yesterday is partial")
+        repair.closeRepair(repair.today.day.adding(-1))
+        XCTAssertNil(repair.todayPrompt, "its close hides it")
 
         let invite = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "today-widget-invite"])
         XCTAssertEqual(invite.todayPrompt, .widgetInvite)

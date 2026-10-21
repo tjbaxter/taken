@@ -1,6 +1,7 @@
 import SwiftUI
 import Observation
 import AppIntents
+import WidgetKit
 
 /// The tab bar's three tabs (REDESIGN.md).
 enum AppTab: String, Hashable, Sendable {
@@ -99,6 +100,9 @@ final class AppModel {
     private(set) var repairDay: DayKey?
     /// `-demo` shows a one-time row only when its `-screen` asks: today-nudge-offer, today-repair, today-widget-invite.
     private(set) var demoPrompt: TodayPrompt?
+    /// Whether the Taken widget is on the Lock Screen already, as WidgetKit last said; nil until it has answered, and the
+    /// widget invite waits for that answer.
+    private(set) var lockScreenWidget: Bool?
 
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var ticker: Task<Void, Never>?
@@ -234,7 +238,7 @@ final class AppModel {
     var todayPrompt: TodayPrompt? {
         if isDemo { return demoPrompt }
         return TodayPrompts.pick(settings: settings, hasStack: hasStack, today: today, repairDay: repairDay,
-                                 locked: isLocked)
+                                 locked: isLocked, lockScreenWidget: lockScreenWidget ?? true)
     }
 
     static func demoRow(forScreen screen: String?, settings: StackSettings, today: DayKey) -> TodayPrompt? {
@@ -288,15 +292,54 @@ final class AppModel {
         if openHelp { sheet = .widgetHelp }
     }
 
+    /// Someone who already has the Taken widget on the Lock Screen never gets the invite: WidgetKit lists the widgets the
+    /// person configured (https://developer.apple.com/documentation/widgetkit/widgetcenter/getcurrentconfigurations(_:)),
+    /// and one in a Lock Screen family counts as the invite answered. Asked each time Taken comes to the front.
+    private func checkLockScreenWidget() async {
+        guard !isDemo else { return }
+        guard !settings.widgetInviteDone else {
+            lockScreenWidget = false
+            return
+        }
+        let found = await Self.lockScreenWidgetConfigured()
+        lockScreenWidget = found
+        if found && !settings.widgetInviteDone { write { $0.settings.widgetInviteDone = true } }
+    }
+
+    private static func lockScreenWidgetConfigured() async -> Bool {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Bool, Never>) in
+            WidgetCenter.shared.getCurrentConfigurations { result in
+                // An error reads as none, so the invite still shows once.
+                let widgets = ((try? result.get()) ?? []).map { (kind: $0.kind, family: $0.family) }
+                continuation.resume(returning: TodayPrompts.hasLockScreenWidget(widgets))
+            }
+        }
+    }
+
+    /// The repair line's close: hidden for the day it was about, so nobody who really missed a dose is pushed to record
+    /// one. It never says the streak broke.
+    func closeRepair(_ day: DayKey) {
+        withAnimation(.snappy(duration: 0.22)) {
+            if isDemo {
+                demoPrompt = nil
+            } else {
+                _ = write { $0.settings.repairClosedDay = day.ordinal }
+            }
+        }
+    }
+
     func nextLabel(for row: ItemDay) -> String {
         Fmt.next(engine.nextDueDay(for: row.item, after: today.day), today: today.day)
     }
 
     /// A row in Not today and the line under its name. A weekly item shows the week today is in (SPEC 3.3): its due day,
     /// open ("Weekly · Thu · Not logged") or logged ("Weekly · Next: Thursday"), or the next due day an early dose
-    /// already counts for ("Weekly · Counts for Thursday"). Anything else is today's row, as before.
+    /// already counts for ("Weekly · Counts for Thursday"). In the 1 to 3 days before the next due day, with this week
+    /// logged, it is today's quiet ring instead ("Weekly · Next: Thursday"), so an early dose is one tap, as before this
+    /// build, and counts for the next due day (R1 b). Anything else is today's row, as before.
     func notTodayRow(_ row: ItemDay) -> (row: ItemDay, note: String) {
-        if let week = engine.weekRow(for: row.item, today: today.day) {
+        if !engine.takesEarlyDose(row.item, today: today.day),
+           let week = engine.weekRow(for: row.item, today: today.day) {
             return (week, Fmt.weekNote(week, today: today.day))
         }
         let note = row.doses.isEmpty ? Fmt.notDue(row.frequency, next: nextLabel(for: row)) : Fmt.frequency(row.frequency)
@@ -355,6 +398,8 @@ final class AppModel {
         guard !isDemo else { return }
         let snapshot = state
         Task {
+            // A Taken widget added to the Lock Screen while Taken was away ends the widget invite before it shows.
+            await checkLockScreenWidget()
             // Renewals, refunds and purchases made elsewhere land here (PRO.md: refresh on foreground).
             await pro.foreground()
             await Reminders.reschedule(state: snapshot, now: Date())
@@ -589,7 +634,9 @@ final class AppModel {
     // MARK: Taking
 
     /// Tap on a row: pending logs a dose, taken shows the detail. Never un-takes. A weekly item's open week logs from
-    /// its ring (it counts for the due day, at the real time); once the week is logged a tap only shows the detail.
+    /// its ring (it counts for the due day, at the real time); once the week is logged a tap only shows the detail, until
+    /// the 1 to 3 days before the next due day, when the row is today's quiet ring and logs an early dose
+    /// (`notTodayRow`).
     func tap(_ row: ItemDay) {
         if row.isPending || row.isOpen || (!row.isDue && row.doses.isEmpty) {
             let item = row.item
@@ -772,7 +819,8 @@ final class AppModel {
             await TodoNotificationScheduler.shared.reschedule(TodoStore.shared.load().tasks)
         }
         if !enabled { notificationsDenied = false }
-        write { $0.settings.reminderEnabled = enabled }
+        // Profile's toggle answers Today's nudge offer too, so the offer never comes back after it is turned off.
+        write { $0.settings.setReminder(enabled) }
     }
 
     func setReminderMinutes(_ minutes: Int) {

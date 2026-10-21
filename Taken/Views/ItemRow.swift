@@ -61,7 +61,7 @@ struct ItemRowView: View {
                 Button(action: onTake) {
                     HStack(spacing: 10) {
                         if let last = row.lastDose {
-                            Text(Fmt.doseClock(last.takenAt, viewing: today, clock))
+                            Text(Fmt.doseClock(last, viewing: today, clock))
                                 .font(.mono(15, .monoMedium, relativeTo: .body))
                                 .foregroundStyle(theme.signalInk)
                                 .fixedSize()
@@ -106,7 +106,7 @@ struct ItemRowView: View {
                 HStack(spacing: 6) {
                     Text(row.doses.count > 1 ? "Dose \(index + 1) taken at" : "Taken at")
                         .font(.sans(14, .sans, relativeTo: .footnote))
-                    Text(Fmt.doseClock(dose.takenAt, viewing: today, clock))
+                    Text(Fmt.doseClock(dose, viewing: today, clock))
                         .font(.mono(14, .monoMedium, relativeTo: .footnote))
                     Text("\u{00B7} \(Fmt.agoDetailed(dose.takenAt, now: now))")
                         .font(.sans(14, .sans, relativeTo: .footnote))
@@ -131,24 +131,25 @@ struct ItemRowView: View {
 
     /// VoiceOver's one sentence for the row. A weekly row in Not today speaks for its week: "Semaglutide, Thursday's
     /// dose not logged." while open, "Semaglutide, taken Friday at 8:12 AM." once logged, with "Counts for Thursday."
-    /// after an early dose.
+    /// after an early dose. On the due day itself an early dose keeps its day too, "Semaglutide, taken Tuesday at 8:12
+    /// AM.", as the row shows "Tue 08:12".
     nonisolated static func accessibilityLabel(row: ItemDay, today: DayKey, clock: DayClock, nextLabel: String?,
                                    locale: Locale = .current) -> String {
         let name = row.item.name
         if row.isOpen { return "\(name), \(Fmt.weekday(row.day))'s dose not logged." }
         if row.day != today, let last = row.lastDose {
-            let taken = "\(name), taken \(Fmt.spokenDose(last.takenAt, viewing: today, clock, locale: locale))."
+            let taken = "\(name), taken \(Fmt.spokenDose(last, viewing: today, clock, locale: locale))."
             return row.day > today ? "\(taken) Counts for \(Fmt.weekday(row.day))." : taken
         }
         if row.doses.isEmpty {
             if let nextLabel { return "\(name), not due today. \(nextLabel)." }
             return "\(name), pending."
         }
-        let times = Fmt.list(row.doses.map { Fmt.spoken($0.takenAt) })
+        let times = Fmt.spokenDoses(row.doses, viewing: today, clock, locale: locale)
         if row.isPending {
-            return "\(name), \(row.takenCount) of \(row.dosesPerDay) taken, at \(times). Pending."
+            return "\(name), \(row.takenCount) of \(row.dosesPerDay) taken, \(times). Pending."
         }
-        return "\(name), taken at \(times)."
+        return "\(name), taken \(times)."
     }
 }
 

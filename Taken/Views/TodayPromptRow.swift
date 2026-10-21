@@ -80,34 +80,47 @@ struct TodayPromptRow: View {
 
     // MARK: Repair
 
+    /// The line opens yesterday's sheet; its close, the same 44 pt one the widget invite has, hides it for that day.
     private func repair(_ day: DayKey) -> some View {
-        Button {
-            model.sheet = .day(day)
-        } label: {
-            HStack(spacing: 6) {
-                Text(RetentionCopy.repairQuestion)
-                    .foregroundStyle(theme.fg)
-                Text(RetentionCopy.repairAction)
-                    .foregroundStyle(theme.signalInk)
-                Spacer(minLength: 8)
-                Image(systemName: "chevron.right")
+        HStack(spacing: 0) {
+            Button {
+                model.sheet = .day(day)
+            } label: {
+                HStack(spacing: 6) {
+                    Text(RetentionCopy.repairQuestion)
+                        .foregroundStyle(theme.fg)
+                    Text(RetentionCopy.repairAction)
+                        .foregroundStyle(theme.signalInk)
+                    Spacer(minLength: 0)
+                }
+                .font(.sans(15, .sansMedium, relativeTo: .subheadline))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.leading, 16)
+                .frame(maxWidth: .infinity, minHeight: 48, alignment: .leading)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(PressStyle())
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(RetentionCopy.repair)
+            .accessibilityHint("Opens \(Fmt.longDay(day)).")
+            .accessibilityAddTraits(.isButton)
+            Button {
+                model.closeRepair(day)
+            } label: {
+                Image(systemName: "xmark")
                     .font(.system(size: 12, weight: .semibold))
                     .foregroundStyle(theme.fgSubtle)
+                    .frame(width: 44, height: 44)
+                    .contentShape(Rectangle())
             }
-            .font(.sans(15, .sansMedium, relativeTo: .subheadline))
-            .lineLimit(1)
-            .minimumScaleFactor(0.8)
-            .padding(.horizontal, 16)
-            .frame(maxWidth: .infinity, minHeight: 48)
-            .background(theme.bgRaised, in: shape)
-            .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
-            .contentShape(Rectangle())
+            .buttonStyle(PressStyle())
+            .accessibilityLabel("Close")
+            .padding(.trailing, 4)
         }
-        .buttonStyle(PressStyle())
-        .accessibilityElement(children: .ignore)
-        .accessibilityLabel(RetentionCopy.repair)
-        .accessibilityHint("Opens \(Fmt.longDay(day)).")
-        .accessibilityAddTraits(.isButton)
+        .background(theme.bgRaised, in: shape)
+        .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: Widget invite

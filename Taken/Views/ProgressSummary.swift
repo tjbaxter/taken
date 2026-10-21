@@ -55,11 +55,11 @@ struct ProgressSummary: View {
                     .font(.sans(18, .sans, relativeTo: .body))
                     .foregroundStyle(theme.fgMuted)
                 Spacer(minLength: 8)
-                if let last = summary.lastDose {
+                if let last = Self.lastTime(summary, clock: clock) {
                     Text("Last ")
                         .font(.sans(14, .sans, relativeTo: .footnote))
                         .foregroundStyle(theme.fgSubtle)
-                    Text(Fmt.clock(last.takenAt, clock))
+                    Text(last)
                         .font(.mono(14, .monoMedium, relativeTo: .footnote))
                         .foregroundStyle(theme.fgSubtle)
                 }
@@ -85,9 +85,9 @@ struct ProgressSummary: View {
                     .font(.sans(24, .sansSemibold, relativeTo: .title2))
                     .foregroundStyle(theme.signalInk)
                 HStack(spacing: 0) {
-                    if let last = summary.lastDose {
+                    if let last = Self.lastTime(summary, clock: clock) {
                         Text("Last dose ")
-                        Text(Fmt.clock(last.takenAt, clock))
+                        Text(last)
                             .font(.mono(14, .monoMedium, relativeTo: .footnote))
                     }
                     if streak > 1 {
@@ -104,6 +104,12 @@ struct ProgressSummary: View {
             }
             Spacer(minLength: 0)
         }
+    }
+
+    /// The time after "Last": "08:12", or "Tue 08:12" for an early weekly dose logged on another day that counts for
+    /// today (SPEC 3.3), as its row shows it, so it never reads as a time today.
+    nonisolated static func lastTime(_ summary: DaySummary, clock: DayClock) -> String? {
+        summary.lastDose.map { Fmt.doseClock($0, viewing: summary.day, clock) }
     }
 
     /// The day finished with a tap: the check springs in.

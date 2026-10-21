@@ -109,7 +109,7 @@ final class WeeklyWeekTests: XCTestCase {
         let row = today.items.first { $0.item.id == s.sem.id }
         XCTAssertEqual(row?.isDone, true, "Thu 22's row is done, showing that dose")
         XCTAssertEqual(row?.isPending, false)
-        XCTAssertEqual(row.flatMap(\.lastDose).map { Fmt.doseClock($0.takenAt, viewing: thu22, londonClock()) }, "Tue 08:12")
+        XCTAssertEqual(row.flatMap(\.lastDose).map { Fmt.doseClock($0, viewing: thu22, londonClock()) }, "Tue 08:12")
         XCTAssertEqual(Fmt.progress(today), "1 of 2 taken", "it counts in today's progress")
 
         let plans = Reminders.plan(state: s.state, now: at(2026, 10, 20, 9), timeZone: london)
@@ -175,8 +175,8 @@ final class WeeklyWeekTests: XCTestCase {
         let logged = try XCTUnwrap(s.engine.weekRow(for: s.sem, today: sat17))
         XCTAssertFalse(logged.isOpen)
         XCTAssertEqual(logged.lastDose?.id, dose.id)
-        XCTAssertEqual(Fmt.doseClock(dose.takenAt, viewing: sat17, londonClock()), "08:12")
-        XCTAssertEqual(Fmt.doseClock(dose.takenAt, viewing: sun18, londonClock()), "Sat 08:12")
+        XCTAssertEqual(Fmt.doseClock(dose, viewing: sat17, londonClock()), "08:12")
+        XCTAssertEqual(Fmt.doseClock(dose, viewing: sun18, londonClock()), "Sat 08:12")
         XCTAssertEqual(Fmt.weekNote(logged, today: sat17), "Weekly \u{00B7} Next: Thursday")
         XCTAssertEqual(Fmt.weekNote(try XCTUnwrap(s.engine.weekRow(for: s.sem, today: sun18)), today: sun18),
                        "Weekly \u{00B7} Next: Thursday")
@@ -190,10 +190,116 @@ final class WeeklyWeekTests: XCTestCase {
         let waiting = try XCTUnwrap(early.engine.weekRow(for: early.sem, today: wed21))
         XCTAssertEqual(waiting.day, thu22)
         XCTAssertEqual(Fmt.weekNote(waiting, today: wed21), "Weekly \u{00B7} Counts for Thursday")
-        XCTAssertEqual(waiting.lastDose.map { Fmt.doseClock($0.takenAt, viewing: wed21, londonClock()) }, "Tue 08:12")
+        XCTAssertEqual(waiting.lastDose.map { Fmt.doseClock($0, viewing: wed21, londonClock()) }, "Tue 08:12")
     }
 
-    func testCreditRespectsTheStartAndScheduleChanges() {
+    // MARK: The early dose (R1 b) on Today, its day and its sheet
+
+    /// The 1 to 3 days before the next due day, with this week logged, Today's row is today's quiet ring, so an early
+    /// dose is one tap. On the 3 days after the due day the lit ring stays and a tap never logs.
+    func testAnEarlyDoseIsOneTapInTheDaysBeforeTheNextDueDay() {
+        var s = stack(vd3Through: 21)
+        s.state.logDose(itemId: s.sem.id, at: at(2026, 10, 15, 8), timeZone: london)
+        for offset in 1...3 {
+            XCTAssertFalse(s.engine.takesEarlyDose(s.sem, today: thu15.adding(offset)), "D+\(offset): the lit ring stays")
+        }
+        for offset in 4...6 {
+            XCTAssertTrue(s.engine.takesEarlyDose(s.sem, today: thu15.adding(offset)), "D+\(offset): a tap logs")
+        }
+        let open = stack(vd3Through: 21)
+        XCTAssertTrue(open.engine.weekRow(for: open.sem, today: tue20)?.isOpen ?? false)
+        XCTAssertFalse(open.engine.takesEarlyDose(open.sem, today: tue20), "an open week logs from its own ring")
+        s.state.logDose(itemId: s.sem.id, at: at(2026, 10, 20, 8, 12), timeZone: london)
+        XCTAssertFalse(s.engine.takesEarlyDose(s.sem, today: wed21), "once it is logged the row is Thu 22's")
+        XCTAssertEqual(s.engine.weekRow(for: s.sem, today: wed21)?.day, thu22)
+    }
+
+    /// Thu 15 logged, then a tap on Semaglutide's Not today ring on Tue 20 logs a dose that counts for Thu 22.
+    @MainActor
+    func testATapOnTheRingLogsAnEarlyDoseFromToday() throws {
+        let zone = TimeZone.current
+        func local(_ day: Int, _ hour: Int, _ minute: Int = 0) -> Date { at(2026, 10, day, hour, minute, zone) }
+        let vd3 = makeItem("Vitamin D3", "VD3", created: local(1, 9), sortIndex: 0)
+        let sem = makeItem("Semaglutide", "SEM", .weekdays([5]), created: local(1, 9), sortIndex: 1)
+        var state = StackState(items: [vd3, sem])
+        state.logDose(itemId: sem.id, at: local(8, 9), timeZone: zone)
+        state.logDose(itemId: sem.id, at: local(15, 9), timeZone: zone)
+        let store = TakenStore(fileURL: temporaryStoreURL(), postsChangeNotifications: false)
+        try store.replace(with: state)
+        let now = local(20, 10, 30)
+        let profiles = ProfileStore(directory: FileManager.default.temporaryDirectory
+            .appendingPathComponent("taken-tests-profile-\(UUID().uuidString)"))
+        let model = AppModel(store: store, pro: ProStore(demoLocked: false, now: now), profileStore: profiles,
+                             isDemo: true, launchScreen: nil, clockNow: { now })
+
+        let entry = try XCTUnwrap(model.today.notDue.first { $0.item.id == sem.id })
+        let shown = model.notTodayRow(entry)
+        XCTAssertEqual(shown.row.day, tue20, "today's row, not last Thursday's")
+        XCTAssertTrue(shown.row.doses.isEmpty, "a quiet ring")
+        XCTAssertEqual(shown.note, "Weekly \u{00B7} Next: Thursday")
+        model.tap(shown.row)
+
+        XCTAssertEqual(model.engine.doses(of: sem.id, on: thu22).map(\.takenAt), [now], "it counts for Thu 22")
+        XCTAssertTrue(model.engine.doses(of: sem.id, on: tue20).isEmpty)
+        let after = model.notTodayRow(try XCTUnwrap(model.today.notDue.first { $0.item.id == sem.id }))
+        XCTAssertEqual(after.row.day, thu22)
+        XCTAssertEqual(after.note, "Weekly \u{00B7} Counts for Thursday")
+        XCTAssertTrue(model.offersSetTime(after.row), "logged today: Set time corrects it")
+        XCTAssertEqual(model.toast?.message, "Semaglutide taken at")
+    }
+
+    /// On Thu 22 with the Tue 20 dose credited to it, the row, the progress line, VoiceOver and Siri all name Tuesday.
+    func testAnEarlyDoseKeepsItsDayOnTheDueDay() throws {
+        var s = stack(vd3Through: 21)
+        s.state.logDose(itemId: s.sem.id, at: at(2026, 10, 15, 8), timeZone: london)
+        s.state.logDose(itemId: s.sem.id, at: at(2026, 10, 20, 8, 12), timeZone: london)
+        let now = at(2026, 10, 22, 7)
+        let today = s.engine.todaySummary(now: now)
+        let row = try XCTUnwrap(today.items.first { $0.item.id == s.sem.id })
+        XCTAssertEqual(row.day, thu22)
+        XCTAssertEqual(today.lastDose?.takenAt, at(2026, 10, 20, 8, 12), "the only dose counted for today")
+
+        let siri = SiriAnswers.status(state: s.state, now: now, timeZone: london, locale: enUS)
+        XCTAssertTrue(siri.contains("Semaglutide taken Tuesday at 8:12 AM."), siri)
+        XCTAssertFalse(siri.contains("Semaglutide at 8:12 AM"), siri)
+        let same = SiriAnswers.status(state: stack(vd3Through: 22).state, now: at(2026, 10, 22, 9), timeZone: london,
+                                      locale: enUS)
+        XCTAssertTrue(same.contains("Vitamin D3 at 8:00 AM"), "a dose logged today reads as before: \(same)")
+        #if canImport(UIKit)
+        XCTAssertEqual(ItemRowView.accessibilityLabel(row: row, today: thu22, clock: londonClock(), nextLabel: nil,
+                                                      locale: enUS),
+                       "Semaglutide, taken Tuesday at 8:12 AM.")
+        XCTAssertEqual(ProgressSummary.lastTime(today, clock: londonClock()), "Tue 08:12", "Last Tue 08:12, never 08:12")
+        let vd3Row = try XCTUnwrap(stack(vd3Through: 22).engine.todaySummary(now: at(2026, 10, 22, 9)).items.first)
+        XCTAssertEqual(ItemRowView.accessibilityLabel(row: vd3Row, today: thu22, clock: londonClock(), nextLabel: nil,
+                                                      locale: enUS),
+                       "Vitamin D3, taken at 8:00 AM.", "unchanged for a dose logged that day")
+        #endif
+    }
+
+    /// Long-press "Open Thursday" on the early row opens Thu 22 from Tue 20: a day still to come reads as pending, never
+    /// missed, and its chip names the day the dose was logged.
+    func testTheNextDueDaysSheetNeverSaysMissed() throws {
+        var s = stack(vd3Through: 19)
+        s.state.logDose(itemId: s.sem.id, at: at(2026, 10, 15, 8), timeZone: london)
+        let dose = try XCTUnwrap(s.state.logDose(itemId: s.sem.id, at: at(2026, 10, 19, 8, 12), timeZone: london))
+        let row = try XCTUnwrap(s.engine.weekRow(for: s.sem, today: tue20))
+        XCTAssertEqual(row.day, thu22, "Mon 19 is 3 days before Thu 22: it counts for it")
+        let sheet = s.engine.sheetSummary(for: thu22, asOf: tue20)
+        #if canImport(UIKit)
+        let live = DaySheet.isLive(thu22, today: tue20)
+        XCTAssertTrue(live)
+        XCTAssertFalse(DaySheet.isLive(thu15, today: tue20), "an earlier day is still past")
+        let status = Fmt.daySheetStatus(sheet, isToday: live)
+        XCTAssertEqual(status, "1 of 2 taken \u{00B7} 1 pending")
+        for line in [status] + sheet.items.map({ Fmt.dayItemStatus($0, isToday: live) }) {
+            XCTAssertNil(line.range(of: "missed", options: .caseInsensitive), line)
+        }
+        #endif
+        XCTAssertEqual(Fmt.doseClock(dose, viewing: thu22, londonClock()), "Mon 08:12")
+    }
+
+    func testCreditRespectsTheStartAndScheduleChanges() throws {
         let vd3 = makeItem("Vitamin D3", "VD3", created: at(2026, 10, 1, 7), sortIndex: 0)
         let added = makeItem("Semaglutide", "SEM", .weekdays([5]), created: at(2026, 10, 17, 9), sortIndex: 1)
         var fresh = StackState(items: [vd3, added])
@@ -211,6 +317,23 @@ final class WeeklyWeekTests: XCTestCase {
         engine = s.engine
         XCTAssertEqual(engine.doses(of: s.sem.id, on: sat17).count, 1, "moved to Saturday: a Saturday dose counts for it")
         XCTAssertTrue(engine.doses(of: s.sem.id, on: thu15).isEmpty, "never for Thu 15, on the old schedule")
+
+        // Weekly to Every other day after a late dose: the dose still counts for Thu 15, and Every other day reads the
+        // day it was really taken, Sat 17, so Sun 18 is not due and the nudge never asks for it a day after a dose.
+        var switched = stack(vd3Through: 17, reminder: true)
+        switched.state.logDose(itemId: switched.sem.id, at: at(2026, 10, 17, 10), timeZone: london)
+        switched.state.updateItem(id: switched.sem.id, name: "Semaglutide", code: "SEM", frequency: .alternateDays,
+                                  now: at(2026, 10, 18, 9))
+        engine = switched.engine
+        let sem = try XCTUnwrap(switched.state.item(switched.sem.id))
+        XCTAssertEqual(engine.doses(of: sem.id, on: thu15).count, 1, "the late dose still counts for its week")
+        XCTAssertEqual(engine.lastDoseDay(of: sem.id, before: sun18), sat17, "the day it was logged")
+        XCTAssertFalse(engine.isDue(sem, on: sun18), "a day after a real dose")
+        XCTAssertTrue(engine.isDue(sem, on: sun18.adding(1)))
+        XCTAssertEqual(engine.nextDueDay(for: sem, after: sun18), sun18.adding(1))
+        let plans = Reminders.plan(state: switched.state, now: at(2026, 10, 18, 9), timeZone: london)
+        XCTAssertEqual(plans.first { $0.day == sun18 }?.body, "1 pending: VD3", "no Semaglutide on Sun 18")
+        XCTAssertEqual(plans.first { $0.day == sun18.adding(1) }?.body, "2 pending: VD3, SEM")
     }
 
     func testOtherSchedulesAreUnchanged() {
@@ -236,7 +359,7 @@ final class WeeklyWeekTests: XCTestCase {
         XCTAssertEqual(s.engine.doses(of: s.sem.id, on: thu15).map(\.id), [late.id], "and Undo puts it back")
     }
 
-    func testADoseLoggedAbroadCreditsFromItsLoggedDay() {
+    func testADoseLoggedAbroadCreditsFromItsLoggedDay() throws {
         let newYork = TimeZone(identifier: "America/New_York")!
         var s = stack(vd3Through: 21)
         // 23:30 EDT on Wed 21 is 04:30 BST on Thu 22: logged on Wednesday where it was taken, so it counts for Thu 15.
@@ -245,6 +368,29 @@ final class WeeklyWeekTests: XCTestCase {
         XCTAssertEqual(engine.doses(of: s.sem.id, on: thu15).count, 1)
         XCTAssertTrue(engine.doses(of: s.sem.id, on: thu22).isEmpty)
         XCTAssertEqual(engine.todaySummary(now: at(2026, 10, 22, 9)).items.first { $0.item.id == s.sem.id }?.isPending, true)
+        let late = try XCTUnwrap(engine.doses(of: s.sem.id, on: thu15).first)
+        XCTAssertTrue(Fmt.doseClock(late, viewing: thu15, londonClock()).hasPrefix("Wed "),
+                      "logged on Wednesday where it was taken: the chip names Wednesday, as the engine reads it")
+
+        // On time abroad: 23:30 EDT on Thu 15 is 04:30 BST on Fri 16, after the 04:00 day start. Back in London it reads
+        // as Thursday's dose on Thursday, with no day before the time, and Siri says it was taken on its day.
+        var onTime = stack(vd3Through: 21)
+        let dose = try XCTUnwrap(onTime.state.logDose(itemId: onTime.sem.id, at: at(2026, 10, 15, 23, 30, newYork),
+                                                      timeZone: newYork))
+        XCTAssertEqual(onTime.engine.doses(of: onTime.sem.id, on: thu15).map(\.id), [dose.id])
+        XCTAssertEqual(Fmt.doseClock(dose, viewing: thu15, londonClock()), "04:30", "no Fri before an on-time dose")
+        XCTAssertEqual(Fmt.doseClock(dose, viewing: sat17, londonClock()), "Thu 04:30")
+        XCTAssertEqual(Fmt.spokenDose(dose, viewing: thu15, londonClock(), locale: enUS), "at 4:30 AM")
+        let siri = SiriAnswers.status(state: onTime.state, now: at(2026, 10, 17, 10), timeZone: london, locale: enUS)
+        XCTAssertTrue(siri.contains("Semaglutide was taken Thursday at 4:30 AM."), siri)
+        XCTAssertFalse(siri.contains("for Thursday"), "never as taken on another day: \(siri)")
+
+        // A daily dose logged abroad keeps its plain time on its own day, as before this build.
+        var daily = stack(vd3Through: 14)
+        let vd3 = try XCTUnwrap(daily.state.logDose(itemId: daily.vd3.id, at: at(2026, 10, 15, 23, 30, newYork),
+                                                    timeZone: newYork))
+        XCTAssertEqual(daily.engine.doses(of: daily.vd3.id, on: thu15).map(\.id), [vd3.id])
+        XCTAssertEqual(Fmt.doseClock(vd3, viewing: thu15, londonClock()), "04:30")
     }
 
     func testSiriWeeklySentences() {

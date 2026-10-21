@@ -52,24 +52,39 @@ enum Fmt {
     }
 
     /// A dose's time as a row or a chip shows it: "08:12" when it was logged on the day being viewed, otherwise with the
-    /// day it was logged, "Fri 08:12" (a weekly dose that counts for its due day, SPEC 3.3).
-    static func doseClock(_ date: Date, viewing day: DayKey, _ clock: DayClock) -> String {
-        let logged = clock.day(for: date)
-        let time = self.clock(date, clock)
+    /// day it was logged, "Fri 08:12" (a weekly dose that counts for its due day, SPEC 3.3). The logged day is the one
+    /// the engine reads (`DayClock.day(of:)`, at the dose's own UTC offset), so a dose logged abroad keeps its day.
+    static func doseClock(_ dose: Dose, viewing day: DayKey, _ clock: DayClock) -> String {
+        let logged = clock.day(of: dose)
+        let time = self.clock(dose.takenAt, clock)
         return logged == day ? time : "\(weekdaysShort[logged.mondayIndex]) \(time)"
     }
 
     /// The same for VoiceOver and Siri, in the clock's zone and the locale's own short time: "at 8:12 AM", or
     /// "Friday at 8:12 AM" when it was logged on another day.
-    static func spokenDose(_ date: Date, viewing day: DayKey, _ clock: DayClock, locale: Locale = .current) -> String {
-        let logged = clock.day(for: date)
+    static func spokenDose(_ dose: Dose, viewing day: DayKey, _ clock: DayClock, locale: Locale = .current) -> String {
+        let logged = clock.day(of: dose)
+        let time = spokenTime(dose.takenAt, clock, locale: locale)
+        return logged == day ? "at \(time)" : "\(weekday(logged)) at \(time)"
+    }
+
+    /// A row's doses for VoiceOver and Siri: "at 7:42 AM and 9:00 AM" when all were logged on the day being viewed, as
+    /// before; otherwise each with its day, "Tuesday at 8:12 AM" (an early weekly dose on its due day, SPEC 3.3).
+    static func spokenDoses(_ doses: [Dose], viewing day: DayKey, _ clock: DayClock, locale: Locale = .current) -> String {
+        if doses.allSatisfy({ clock.day(of: $0) == day }) {
+            return "at " + list(doses.map { spokenTime($0.takenAt, clock, locale: locale) })
+        }
+        return list(doses.map { spokenDose($0, viewing: day, clock, locale: locale) })
+    }
+
+    /// "8:12 AM" or "08:12", in the clock's zone and the locale's own short time.
+    private static func spokenTime(_ date: Date, _ clock: DayClock, locale: Locale) -> String {
         var style = Date.FormatStyle(date: .omitted, time: .shortened)
         style.timeZone = clock.calendar.timeZone
         style.locale = locale
         // Newer releases put a narrow no-break space before AM; a plain space reads the same and compares the same.
-        let time = date.formatted(style).replacingOccurrences(of: "\u{202F}", with: " ")
+        return date.formatted(style).replacingOccurrences(of: "\u{202F}", with: " ")
             .replacingOccurrences(of: "\u{00A0}", with: " ")
-        return logged == day ? "at \(time)" : "\(weekday(logged)) at \(time)"
     }
 
     /// "Thursday"

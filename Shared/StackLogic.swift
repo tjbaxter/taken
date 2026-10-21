@@ -105,7 +105,11 @@ struct StackEngine: Sendable {
     let orderedItems: [Item]
 
     private let doseDays: [UUID: [DayKey: [Dose]]]
+    /// The days doses count for (R1), sorted.
     private let sortedDoseDays: [UUID: [DayKey]]
+    /// The days doses were logged, sorted. Every other day reads these, so a weekly dose credited to its due day never
+    /// moves the item's alternate days after a schedule change (only the day a weekly dose counts for changes).
+    private let sortedLoggedDays: [UUID: [DayKey]]
     private let latestDoseAt: [UUID: Date]
     private let activeFrom: [UUID: DayKey]
     private let archivedFrom: [UUID: DayKey]
@@ -123,6 +127,7 @@ struct StackEngine: Sendable {
         // Each dose's logged day, in time order: the day that was being lived where it was logged.
         var fixedClocks: [Int: DayClock] = [:]
         var logged: [UUID: [(dose: Dose, day: DayKey)]] = [:]
+        var loggedDays: [UUID: [DayKey]] = [:]
         var latest: [UUID: Date] = [:]
         for (itemId, list) in grouped {
             let sorted = list.sorted(by: { $0.takenAt < $1.takenAt })
@@ -140,9 +145,11 @@ struct StackEngine: Sendable {
                 entries.append((dose, day))
             }
             logged[itemId] = entries
+            loggedDays[itemId] = Set(entries.map(\.day)).sorted()
             latest[itemId] = sorted.last?.takenAt
         }
         self.latestDoseAt = latest
+        self.sortedLoggedDays = loggedDays
 
         // Frequency eras, archived stretches and each item's start come before the doses: a weekly dose's credit
         // (R1) reads all three.
@@ -264,9 +271,10 @@ struct StackEngine: Sendable {
         doseDays[itemId]?[day] ?? []
     }
 
-    /// The last day with a dose strictly before `day`.
+    /// The last day a dose was logged strictly before `day`, for Every other day. It reads the logged day, not the day a
+    /// weekly dose counts for (R1), so switching from Weekly to Every other day after a late dose keeps the real gap.
     func lastDoseDay(of itemId: UUID, before day: DayKey) -> DayKey? {
-        guard let days = sortedDoseDays[itemId], !days.isEmpty else { return nil }
+        guard let days = sortedLoggedDays[itemId], !days.isEmpty else { return nil }
         var lo = 0
         var hi = days.count
         while lo < hi {
@@ -316,6 +324,15 @@ struct StackEngine: Sendable {
         guard frequency(of: item, on: due) == frequency(of: item, on: today), isDue(item, on: due),
               isActive(item, on: due) else { return nil }
         return itemDay(item, on: due, asOf: today)
+    }
+
+    /// R1 b from Today: this week's due day already has its dose, nothing counts for the next due day yet, and today is 1
+    /// to 3 days before it, so a dose logged now counts for the next due day. Today's Not today row is then today's quiet
+    /// ring, which logs with one tap, rather than last week's lit one, which only shows its time (SPEC 3.3). On the 3 days
+    /// after the due day it is false: the lit ring stays, and a tap never logs a second dose.
+    func takesEarlyDose(_ item: Item, today: DayKey) -> Bool {
+        guard let week = weekRow(for: item, today: today), week.day < today, !week.doses.isEmpty else { return false }
+        return (1...3).contains(today.distance(to: week.day.adding(7)))
     }
 
     /// Whether anything at all counts for a day in this span: the honest repair asks it of the week before yesterday.
@@ -603,14 +620,15 @@ extension StackState {
     }
 
     /// Removes the stack, every dose and the settings. The look stays: it is how the phone shows Taken, not data. So do
-    /// Today's one-time rows already answered (the nudge offer, the widget invite), so none of them comes back.
+    /// whether Today's one-time offers were answered (the nudge offer, the widget invite), as two yes or no answers, so
+    /// neither comes back. The day the widget invite first showed is a date from the log, so it goes: an invite already
+    /// shown counts as answered, which is what that day meant (it never showed again after it).
     mutating func eraseAll() {
         let kept = settings
         self = StackState()
         settings.theme = kept.theme
         settings.nudgeOfferDone = kept.nudgeOfferDone
-        settings.widgetInviteDay = kept.widgetInviteDay
-        settings.widgetInviteDone = kept.widgetInviteDone
+        settings.widgetInviteDone = kept.widgetInviteDone || kept.widgetInviteDay != nil
     }
 }
 

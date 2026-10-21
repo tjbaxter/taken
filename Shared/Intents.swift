@@ -208,9 +208,12 @@ enum SiriAnswers {
             weeks.append(weekSentence(week, today: today.day, clock: clock, locale: locale))
         }
 
+        // A dose logged on another day (an early weekly dose on its due day, SPEC 3.3) names that day: "Semaglutide taken
+        // Tuesday at 8:12 AM", so it never sounds like a dose taken today.
         let taken = today.items.filter { !$0.doses.isEmpty }.map { row -> String in
-            let times = row.doses.map { Fmt.spoken($0.takenAt) }
-            return "\(row.item.name) at \(Fmt.list(times))"
+            let sameDay = row.doses.allSatisfy { clock.day(of: $0) == today.day }
+            let times = Fmt.spokenDoses(row.doses, viewing: today.day, clock, locale: locale)
+            return sameDay ? "\(row.item.name) \(times)" : "\(row.item.name) taken \(times)"
         }
         let pending = today.items.filter { $0.isPending }.map { row -> String in
             row.dosesPerDay > 1 && !row.doses.isEmpty
@@ -239,8 +242,9 @@ enum SiriAnswers {
     static func weekSentence(_ week: ItemDay, today: DayKey, clock: DayClock, locale: Locale = .current) -> String {
         let name = week.item.name
         guard let dose = week.lastDose else { return "\(name) is not logged for \(Fmt.weekday(week.day))." }
-        let when = Fmt.spokenDose(dose.takenAt, viewing: today, clock, locale: locale)
-        if clock.day(for: dose.takenAt) == week.day { return "\(name) was taken \(when)." }
+        let when = Fmt.spokenDose(dose, viewing: today, clock, locale: locale)
+        // The logged day as the engine reads it, at the dose's own UTC offset: a dose logged on time abroad is on time.
+        if clock.day(of: dose) == week.day { return "\(name) was taken \(when)." }
         return "\(name) was taken \(when), for \(Fmt.weekday(week.day))."
     }
 

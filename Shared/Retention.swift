@@ -1,4 +1,5 @@
 import Foundation
+import WidgetKit
 
 // The 1.1 retention build (SPEC 3.1, 2026-10-21): what keeps people logging and renewing, as pure rules. Today's one
 // quiet row: the evening nudge offered once, the honest repair, the widget invite. Copy rules: no em or en dash, never
@@ -11,25 +12,43 @@ enum TodayPrompt: Equatable, Sendable {
     /// first task (https://developer.apple.com/documentation/usernotifications/asking-permission-to-use-notifications).
     case nudgeOffer(minutes: Int)
     /// "Forgot to log yesterday? Fill it in": yesterday is partly or not logged and something was logged in the week
-    /// before. It opens yesterday's day sheet, the existing backfill. No freeze, no paid save, no "streak broken".
+    /// before. It opens yesterday's day sheet, the existing backfill, and its close hides it for that day, so nobody who
+    /// really missed a dose is pushed to record one. No freeze, no paid save, no "streak broken".
     case repair(DayKey)
-    /// "Log from your Lock Screen: add the Taken widget": once, on the first day that reaches All taken.
+    /// "Log from your Lock Screen: add the Taken widget": once, on the first day that reaches All taken, and never to
+    /// someone whose Lock Screen already has the Taken widget.
     case widgetInvite
 }
 
 enum TodayPrompts {
     /// Which row Today shows, if any. The nudge offer first (the lever with clinical evidence), then the repair, then the
     /// widget invite. None while locked: the Taken Pro bar sits there, and each of them leads to something Pro unlocks.
+    /// `lockScreenWidget`: a Taken stack widget is already on the Lock Screen (WidgetKit's configured widgets), so the
+    /// invite would be noise. A repair line closed for its day stays closed that day.
     static func pick(settings: StackSettings, hasStack: Bool, today: DaySummary, repairDay: DayKey?,
-                     locked: Bool) -> TodayPrompt? {
+                     locked: Bool, lockScreenWidget: Bool = false) -> TodayPrompt? {
         guard hasStack, !locked else { return nil }
         if !settings.reminderEnabled && !settings.nudgeOfferDone { return .nudgeOffer(minutes: settings.reminderMinutes) }
-        if let repairDay { return .repair(repairDay) }
-        if today.allTaken && !settings.widgetInviteDone
+        if let repairDay, settings.repairClosedDay != repairDay.ordinal { return .repair(repairDay) }
+        if today.allTaken && !settings.widgetInviteDone && !lockScreenWidget
             && (settings.widgetInviteDay == nil || settings.widgetInviteDay == today.day.ordinal) {
             return .widgetInvite
         }
         return nil
+    }
+
+    /// Whether the configured widgets (`WidgetCenter.getCurrentConfigurations`,
+    /// https://developer.apple.com/documentation/widgetkit/widgetcenter/getcurrentconfigurations(_:)) include the Taken
+    /// stack widget (`TakenWidgetKind.stack`) in a Lock Screen family. The To-do widget does not count: it does not log
+    /// doses.
+    static func hasLockScreenWidget(_ widgets: [(kind: String, family: WidgetFamily)]) -> Bool {
+        widgets.contains { widget in
+            guard widget.kind == TakenWidgetKind.stack else { return false }
+            switch widget.family {
+            case .accessoryCircular, .accessoryRectangular, .accessoryInline: return true
+            default: return false
+            }
+        }
     }
 
     /// Yesterday, when the repair line belongs on Today: it is partial or missed (a weekly item's open week counts
