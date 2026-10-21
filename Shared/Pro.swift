@@ -150,9 +150,12 @@ struct ProStatus: Codable, Hashable, Sendable {
     /// Lifetime and founding members: a subscription on the same Apple Account still renews, so Settings offers to
     /// manage it.
     var renewingSubscription: Bool
+    /// Subscriptions: the plan behind it, so the trial reminder names the price the trial turns into
+    /// (`ProLedger.prices`). Nil for lifetime and founding, and in files from before it was kept.
+    var plan: ProPlan?
 
     init(isPro: Bool, reason: ProReason, checkedAt: Date, expiresAt: Date? = nil, willRenew: Bool? = nil,
-         billingIssue: Bool = false, renewingSubscription: Bool = false) {
+         billingIssue: Bool = false, renewingSubscription: Bool = false, plan: ProPlan? = nil) {
         self.isPro = isPro
         self.reason = reason
         self.checkedAt = checkedAt
@@ -160,6 +163,7 @@ struct ProStatus: Codable, Hashable, Sendable {
         self.willRenew = willRenew
         self.billingIssue = billingIssue
         self.renewingSubscription = renewingSubscription
+        self.plan = plan
     }
 
     static func notPro(checkedAt: Date) -> ProStatus {
@@ -212,7 +216,7 @@ struct ProStatus: Codable, Hashable, Sendable {
     }
 
     private enum CodingKeys: String, CodingKey {
-        case isPro, reason, checkedAt, expiresAt, willRenew, billingIssue, renewingSubscription
+        case isPro, reason, checkedAt, expiresAt, willRenew, billingIssue, renewingSubscription, plan
     }
 
     init(from decoder: any Decoder) throws {
@@ -224,6 +228,8 @@ struct ProStatus: Codable, Hashable, Sendable {
         willRenew = try c.decodeIfPresent(Bool.self, forKey: .willRenew)
         billingIssue = try c.decodeIfPresent(Bool.self, forKey: .billingIssue) ?? false
         renewingSubscription = try c.decodeIfPresent(Bool.self, forKey: .renewingSubscription) ?? false
+        // A plan this version does not know reads as unknown and never costs the rest of the status.
+        plan = try? c.decodeIfPresent(ProPlan.self, forKey: .plan)
     }
 }
 
@@ -256,7 +262,8 @@ enum Entitlement {
         let inGrace = pastEnd && (best.fact.graceUntil.map { $0 > now } ?? false)
         return ProStatus(isPro: true, reason: reason, checkedAt: now,
                          expiresAt: inGrace ? best.fact.graceUntil : best.fact.expiresAt,
-                         willRenew: best.fact.willRenew, billingIssue: inGrace || best.fact.inBillingRetry)
+                         willRenew: best.fact.willRenew, billingIssue: inGrace || best.fact.inBillingRetry,
+                         plan: best.plan)
     }
 
     /// What to keep after asking StoreKit: `fresh` is what it said, `app` the app transaction it gave (nil when it
@@ -315,18 +322,34 @@ struct ProLedger: Codable, Hashable, Sendable {
     var introShownAt: Date?
     /// A log refused while locked, offered again when the app opens.
     var pending: PendingLog?
+    /// Each subscription's recurring price as StoreKit last gave it, by product id, so the trial reminder names the
+    /// real price wherever it is scheduled (the widgets and intents never ask StoreKit).
+    var prices: [String: PlanPrice]
+    /// The one notification ask after a trial started (`TrialAsk`) has been shown. It never shows again.
+    var trialAskAt: Date?
 
     init(status: ProStatus? = nil, firstSeenAt: Date, legacyLog: Bool, firstDoseAt: Date? = nil,
-         introShownAt: Date? = nil, pending: PendingLog? = nil) {
+         introShownAt: Date? = nil, pending: PendingLog? = nil, prices: [String: PlanPrice] = [:],
+         trialAskAt: Date? = nil) {
         self.status = status
         self.firstSeenAt = firstSeenAt
         self.legacyLog = legacyLog
         self.firstDoseAt = firstDoseAt
         self.introShownAt = introShownAt
         self.pending = pending
+        self.prices = prices
+        self.trialAskAt = trialAskAt
     }
 
-    private enum CodingKeys: String, CodingKey { case status, firstSeenAt, legacyLog, firstDoseAt, introShownAt, pending }
+    /// The price the cached subscription renews at, if StoreKit has given it.
+    var renewalPrice: PlanPrice? {
+        guard let plan = status?.plan, plan.isSubscription else { return nil }
+        return prices[plan.productID]
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case status, firstSeenAt, legacyLog, firstDoseAt, introShownAt, pending, prices, trialAskAt
+    }
 
     init(from decoder: any Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -336,6 +359,8 @@ struct ProLedger: Codable, Hashable, Sendable {
         firstDoseAt = try? c.decodeIfPresent(Date.self, forKey: .firstDoseAt)
         introShownAt = try c.decodeIfPresent(Date.self, forKey: .introShownAt)
         pending = try? c.decodeIfPresent(PendingLog.self, forKey: .pending)
+        prices = (try? c.decodeIfPresent([String: PlanPrice].self, forKey: .prices)) ?? [:]
+        trialAskAt = try? c.decodeIfPresent(Date.self, forKey: .trialAskAt)
     }
 }
 

@@ -4,9 +4,10 @@ import Foundation
 // code (PRO.md). Pure, so every line Apple requires is unit tested. Copy rules: no em or en dashes, never the word
 // for no charge, no exclamation marks.
 
-/// A billing period as StoreKit gives it: 1 year, 1 month, 1 week (or 7 days).
-struct PlanPeriod: Hashable, Sendable {
-    enum Unit: Hashable, Sendable {
+/// A billing period as StoreKit gives it: 1 year, 1 month, 1 week (or 7 days). Codable, so the price a trial turns
+/// into can be cached for the trial reminder (`ProLedger.prices`).
+struct PlanPeriod: Codable, Hashable, Sendable {
+    enum Unit: String, Codable, Hashable, Sendable {
         case day
         case week
         case month
@@ -19,6 +20,13 @@ struct PlanPeriod: Hashable, Sendable {
     init(value: Int, unit: Unit) {
         self.value = max(value, 1)
         self.unit = unit
+    }
+
+    private enum CodingKeys: String, CodingKey { case value, unit }
+
+    init(from decoder: any Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(value: try c.decode(Int.self, forKey: .value), unit: try c.decode(Unit.self, forKey: .unit))
     }
 
     /// Days in it, for day and week periods.
@@ -94,6 +102,35 @@ struct PlanOffer: Hashable, Sendable {
         self.period = period
         self.intro = intro
     }
+}
+
+/// A plan's recurring price as StoreKit gives it: "$19.99" and 1 year. Cached in `pro.json` (`ProLedger.prices`) so the
+/// trial reminder, which may be scheduled from a widget or an intent where StoreKit does not run, names the real price.
+struct PlanPrice: Codable, Hashable, Sendable {
+    var displayPrice: String
+    var period: PlanPeriod
+
+    init(displayPrice: String, period: PlanPeriod) {
+        self.displayPrice = displayPrice
+        self.period = period
+    }
+
+    /// The recurring price of a subscription offer; nil for one payment.
+    init?(_ offer: PlanOffer) {
+        guard let period = offer.period else { return nil }
+        self.init(displayPrice: offer.displayPrice, period: period)
+    }
+}
+
+/// One step of the paywall's trial timeline: "Today" and "full Pro".
+struct TrialStep: Hashable, Sendable {
+    let day: String
+    let text: String
+
+    /// "Day 4: we remind you", as VoiceOver reads it.
+    var line: String { "\(day): \(text)" }
+    /// The text as the timeline sets it, under its day: "We remind you".
+    var displayText: String { text.prefix(1).uppercased() + text.dropFirst() }
 }
 
 enum ProCopy {
@@ -192,6 +229,49 @@ enum ProCopy {
     /// "per year", "every 3 months".
     static func per(_ period: PlanPeriod) -> String {
         period.value == 1 ? "per \(period.unitWord)" : "every \(period.value) \(period.unitWord)s"
+    }
+
+    /// "a year", "every 3 months": how the trial timeline and the trial reminder say what follows the trial.
+    static func perPlain(_ period: PlanPeriod) -> String {
+        period.value == 1 ? "a \(period.unitWord)" : "every \(period.value) \(period.unitWord)s"
+    }
+
+    /// "$19.99 a year", from StoreKit's display price and period.
+    static func renewal(_ price: PlanPrice) -> String {
+        "\(price.displayPrice) \(perPlain(price.period))"
+    }
+
+    // MARK: The trial promise (2026-10-21)
+
+    /// The whole introductory span in days: a day or week offer by count, a month or year one on the calendar from
+    /// `now`, so "1 month" from 21 Oct is 31 days.
+    static func trialDays(_ intro: IntroTerms, from now: Date, timeZone: TimeZone = .current) -> Int {
+        if let days = intro.period.days { return days * intro.periodCount }
+        var calendar = Calendar(identifier: .gregorian)
+        calendar.timeZone = timeZone
+        let component: Calendar.Component = intro.period.unit == .year ? .year : .month
+        guard let end = calendar.date(byAdding: component, value: intro.period.value * intro.periodCount, to: now) else {
+            return 0
+        }
+        return calendar.dateComponents([.day], from: calendar.startOfDay(for: now), to: calendar.startOfDay(for: end)).day ?? 0
+    }
+
+    /// The three steps under the yearly plan while its introductory offer costs nothing and this Apple Account can still
+    /// have it: "Today: full Pro", "Day 4: we remind you", "Day 7: $19.99 a year starts". Built from StoreKit's trial
+    /// length, display price and period, never from numbers in the code; the reminder day is the trial length minus
+    /// `TrialReminder.leadDays`, and a trial of 3 days or less has no reminder step (it gets no reminder). Empty when
+    /// there is no such offer.
+    static func trialTimeline(_ offer: PlanOffer?, eligible: Bool, now: Date, timeZone: TimeZone = .current) -> [TrialStep] {
+        guard let offer, let price = PlanPrice(offer), let intro = liveIntro(offer, eligible: eligible),
+              intro.mode == .onUs else { return [] }
+        let days = trialDays(intro, from: now, timeZone: timeZone)
+        guard days >= 1 else { return [] }
+        var steps = [TrialStep(day: "Today", text: "full Pro")]
+        if days > TrialReminder.leadDays {
+            steps.append(TrialStep(day: "Day \(days - TrialReminder.leadDays)", text: "we remind you"))
+        }
+        steps.append(TrialStep(day: "Day \(days)", text: "\(renewal(price)) starts"))
+        return steps
     }
 
     /// The slim bar under Today's progress line in locked mode.

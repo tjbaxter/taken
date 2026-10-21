@@ -45,6 +45,8 @@ final class ProStore {
     private(set) var offersPhase: OffersPhase = .idle
     /// Whether this Apple Account can still have the introductory offer. Nil until StoreKit says.
     private(set) var introEligible: Bool?
+    /// The one notification ask after a trial started has been shown (`ProLedger.trialAskAt`).
+    private(set) var trialAskShown: Bool
 
     let isDemo: Bool
     /// Runs when an answer changes Pro itself (not just when it was checked): the app reloads the widgets, the
@@ -72,6 +74,7 @@ final class ProStore {
         self.legacyLog = record.legacyLog
         self.introShown = record.introShownAt != nil
         self.hasLoggedBefore = record.firstDoseAt != nil
+        self.trialAskShown = record.trialAskAt != nil
     }
 
     /// `-demo`: no StoreKit at all. Screenshots show Pro, or a locked log with the plans as StoreKit shapes them
@@ -89,6 +92,7 @@ final class ProStore {
         self.legacyLog = false
         self.introShown = true
         self.hasLoggedBefore = false
+        self.trialAskShown = false
         self.offers = offers
         self.offersPhase = .ready
         self.introEligible = true
@@ -270,9 +274,25 @@ final class ProStore {
             for (plan, product) in map { loaded[plan] = PlanOffer(plan: plan, product: product) }
             offers = loaded
             offersPhase = map.isEmpty ? .failed : .ready
+            cachePrices(loaded)
             await refreshEligibility()
         } catch {
             offersPhase = .failed
+        }
+    }
+
+    /// Each subscription's price as StoreKit gave it, kept in `pro.json` for the trial reminder, which is also
+    /// scheduled where StoreKit does not run (widgets, intents). Written only when it changed.
+    private func cachePrices(_ loaded: [ProPlan: PlanOffer]) {
+        var prices: [String: PlanPrice] = [:]
+        for (plan, offer) in loaded {
+            if let price = PlanPrice(offer) { prices[plan.productID] = price }
+        }
+        guard !prices.isEmpty else { return }
+        ledger.update { ledger in
+            guard var current = ledger?.prices else { return }
+            current.merge(prices) { _, fresh in fresh }
+            ledger?.prices = current
         }
     }
 
@@ -363,6 +383,17 @@ final class ProStore {
         let now = Date()
         ledger.update { ledger in
             if ledger?.introShownAt == nil { ledger?.introShownAt = now }
+        }
+    }
+
+    /// The notification ask after a trial started is on screen: it never shows again.
+    func markTrialAskShown() {
+        guard !trialAskShown else { return }
+        trialAskShown = true
+        guard !isDemo else { return }
+        let now = Date()
+        ledger.update { ledger in
+            if ledger?.trialAskAt == nil { ledger?.trialAskAt = now }
         }
     }
 

@@ -84,6 +84,12 @@ final class AppModel {
     var expandedItemID: UUID?
     /// The Taken Pro sheet, and which presentation level shows it.
     var paywall: PaywallRequest?
+    /// The one notification ask after a trial starts (`TrialAsk`), on the presentation level the paywall was on.
+    var trialAsk: PaywallAnchor?
+    /// How iOS's notification permission is read (`Reminders.permission`); tests and `-demo` give their own answer.
+    @ObservationIgnored var notificationPermission: @MainActor () async -> NotificationPermission = {
+        await Reminders.permission()
+    }
     /// Chips pre-selected in the Add sheet for the `-demo -screen add` screenshot, and how often each is taken.
     let demoPreselect: [String]
     let demoChoices: [String: FrequencyChoice]
@@ -114,6 +120,12 @@ final class AppModel {
     @ObservationIgnored private var iconWaitsForSettings = false
     /// What the paywall was opened for, run once Pro is on and the sheet has closed.
     @ObservationIgnored private var afterPaywall: (@MainActor () -> Void)?
+    /// A trial started in the paywall: the notification ask follows on this level once the sheet has gone.
+    @ObservationIgnored private var trialAskAfterPaywall: PaywallAnchor?
+    /// The notification ask was answered (Continue or Not now), so closing it adds nothing.
+    @ObservationIgnored private var trialAskAnswered = false
+    /// iOS's notification prompt is up (the nudge's Turn on or toggle): the trial ask then stays away.
+    @ObservationIgnored private var askingPermission = false
 
     init(store: TakenStore, pro: ProStore? = nil, profileStore: ProfileStore = .shared, isDemo: Bool,
          launchScreen: String?, clockNow: @escaping @Sendable () -> Date) {
@@ -156,6 +168,8 @@ final class AppModel {
             // Siri and the nudge run in this process: before refusing a log on a renewing plan's lapsed cache, they
             // ask the App Store again through this store.
             ProRecheck.handler = { [weak self] in _ = await self?.pro.refresh() }
+        } else {
+            notificationPermission = { .notDetermined }
         }
     }
 
@@ -427,6 +441,7 @@ final class AppModel {
             if let item = state.items.first(where: { $0.name == "Finasteride" }) { sheet = .editItem(item.id) }
         case "paywall", "paywall-no-yearly": presentPaywall(origin: .intro)
         case "widget-help": sheet = .widgetHelp
+        case "trial-ask": trialAsk = .root
         default: break
         }
     }
@@ -559,17 +574,69 @@ final class AppModel {
         paywall = nil
     }
 
-    /// Pro just came on in the paywall: what opened it runs once the sheet has gone.
-    func paywallUnlocked() {
+    /// Pro just came on in the paywall: what opened it runs once the sheet has gone. A trial that started there gets the
+    /// one notification ask after it (`TrialAsk`).
+    func paywallUnlocked(trialStarted: Bool = false) {
         if let pending = paywall?.pending { afterPaywall = pending }
+        if trialStarted, let anchor = paywall?.anchor { trialAskAfterPaywall = anchor }
     }
 
     /// The paywall sheet finished closing.
     func paywallDidDismiss() {
         let action = afterPaywall
         afterPaywall = nil
+        if let anchor = trialAskAfterPaywall {
+            trialAskAfterPaywall = nil
+            Task { [weak self] in await self?.offerTrialAsk(at: anchor) }
+        }
         guard let action, access.allowsLogging else { return }
         action()
+    }
+
+    // MARK: The trial promise (SPEC 3.9, 2026-10-21)
+
+    /// Right after a trial starts: the one short sheet asking for notifications, for the evening nudge and the reminder
+    /// before the trial ends, only while iOS has not asked yet and only once. When iOS already has an answer, the
+    /// reminder follows it (scheduled only when allowed).
+    func offerTrialAsk(at anchor: PaywallAnchor) async {
+        // The paywall has gone and the tap that opened it has run (it may be the nudge's own Turn on).
+        try? await Task.sleep(for: .milliseconds(400))
+        let permission = await notificationPermission()
+        let clear = paywall == nil && !askingPermission && !(anchor == .root && sheet != nil)
+        guard clear, TrialAsk.shows(trialStarted: true, permission: permission, alreadyShown: pro.trialAskShown) else {
+            if !isDemo {
+                let snapshot = state
+                await Reminders.reschedule(state: snapshot, now: Date())
+            }
+            return
+        }
+        pro.markTrialAskShown()
+        trialAskAnswered = false
+        trialAsk = anchor
+    }
+
+    /// Continue (iOS's prompt follows) or Not now. Allowed: the evening nudge comes on at its time, which answers
+    /// Today's nudge offer, and the trial reminder is scheduled with it. Any answer, a no included, answers Today's
+    /// nudge offer too, so there is never a second ask (own choice).
+    func answerTrialAsk(allow: Bool) async {
+        trialAskAnswered = true
+        if allow { await setReminderEnabled(true) }
+        if !settings.nudgeOfferDone { write { $0.settings.nudgeOfferDone = true } }
+        trialAsk = nil
+        guard allow else { return }
+        if settings.reminderEnabled {
+            show(Toast(message: RetentionCopy.nudgeOn, time: Fmt.minutes(settings.reminderMinutes)))
+        } else if notificationsDenied {
+            show(Toast(message: RetentionCopy.notificationsOff))
+        }
+    }
+
+    /// The ask was swiped away: the same as Not now.
+    func trialAskDidDismiss() {
+        trialAsk = nil
+        guard !trialAskAnswered else { return }
+        trialAskAnswered = true
+        if !settings.nudgeOfferDone { write { $0.settings.nudgeOfferDone = true } }
     }
 
     /// About 1.5 s after the first dose the paywall slides up, once.
@@ -813,7 +880,9 @@ final class AppModel {
 
     func setReminderEnabled(_ enabled: Bool) async {
         if enabled && !isDemo {
+            askingPermission = true
             let granted = await Reminders.requestPermission()
+            askingPermission = false
             notificationsDenied = !granted
             guard granted else { return }
             // Notifications are allowed now: to-dos with a time get theirs too.

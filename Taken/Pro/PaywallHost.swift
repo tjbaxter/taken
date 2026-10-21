@@ -61,6 +61,22 @@ private struct PaywallHost: ViewModifier {
                     .environment(\.theme, model.theme)
                     .preferredColorScheme(model.theme.scheme)
             }
+            // The one notification ask after a trial starts, on the level the paywall was on, once it has gone.
+            .sheet(isPresented: askBinding, onDismiss: { model.trialAskDidDismiss() }) {
+                TrialAskSheet()
+                    .environment(model)
+                    .environment(\.theme, model.theme)
+                    .preferredColorScheme(model.theme.scheme)
+            }
+    }
+
+    private var askBinding: Binding<Bool> {
+        Binding(
+            get: { model.trialAsk == anchor },
+            set: { shown in
+                if !shown, model.trialAsk == anchor { model.trialAsk = nil }
+            }
+        )
     }
 
     private var binding: Binding<PaywallRequest?> {

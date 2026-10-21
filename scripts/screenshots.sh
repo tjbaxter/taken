@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Capture App Store screenshots from the simulator with demo data.
 # Usage: scripts/screenshots.sh <simulator-udid> <path/to/Taken.app> <output-dir> [diagnostics-dir] [6.3-inch-udid]
+#        [6.1-inch-udid]
 set -euo pipefail
 
 udid="$1"
@@ -8,6 +9,7 @@ app="$2"
 out="$3"
 diag="${4:-$out-diagnostics}"
 small="${5:-}"
+compact="${6:-}"
 bundle_id="com.tombaxter.taken"
 
 mkdir -p "$out" "$diag"
@@ -57,10 +59,26 @@ probe_file() {
   echo "$(xcrun simctl get_app_container "$udid" "$bundle_id" data)/tmp/taken-ui-state.txt"
 }
 
+# The paywall's scrolling content against its room, as the demo app measured it (DemoProbe.recordPaywallFit).
+fit_file() {
+  echo "$(xcrun simctl get_app_container "$udid" "$bundle_id" data)/tmp/taken-paywall-fit.txt"
+}
+
+# The paywall must show every plan and the trial timeline above the button without scrolling (SPEC 3.9).
+paywall_fits() {
+  local name="$1" fit
+  fit="$(cat "$(fit_file)" 2>/dev/null || true)"
+  echo "$name paywall: $(echo "$fit" | tr '\n' ' ')"
+  if ! grep -qx "fits=1" <<<"$fit"; then
+    echo "::error::$name: the paywall scrolls; its plans and trial timeline must fit above the button: $(echo "$fit" | tr '\n' ' ')"
+    exit 1
+  fi
+}
+
 shoot() {
   local name="$1" screen="$2" look="${3:-signal}"
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
-  rm -f "$(probe_file)"
+  rm -f "$(probe_file)" "$(fit_file)"
   sleep 1
   xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" >/dev/null
   sleep 6
@@ -94,6 +112,7 @@ shoot 08-empty empty
 # Taken Pro (PRO.md): the paywall (yearly selected, introductory week available) and TODAY locked without Pro.
 # CI has no App Store account, so under -demo the paywall shows StoreKit-shaped plans instead of loading products.
 shoot 09-paywall paywall
+paywall_fits 09-paywall
 shoot 10-locked locked
 shoot 11-widgets-locked widgets-locked
 
@@ -171,6 +190,12 @@ shoot 51-today-repair today-repair
 shoot 52-today-widget-invite today-widget-invite
 shoot 53-widget-help widget-help
 lands 53-widget-help "sheet=widget-help"
+# The trial promise (SPEC 3.9, 2026-10-21): the one notification ask after a trial starts, in Signal and in Blush. The
+# paywall captures above show the trial timeline under the yearly plan.
+shoot 54-trial-ask trial-ask
+lands 54-trial-ask "ask=1"
+shoot 54-trial-ask-blush trial-ask blush
+lands 54-trial-ask-blush "ask=1"
 # Links reach the right screen with the quick action's scene delegate in place: Taken opens its own link after launch
 # (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). The demo app writes
 # what is in front to tmp/taken-ui-state.txt (DemoProbe), and the check fails unless the link landed there:
@@ -213,12 +238,30 @@ if [ -n "$small" ] && [ "$small" != "$udid" ]; then
   xcrun simctl launch "$udid" "$bundle_id" -demo -screen today >/dev/null
   sleep 6
   shoot 12-paywall-6.3in paywall
+  paywall_fits 12-paywall-6.3in
   # Today on the smaller iPhone: the Not today group stays in view above Take all.
   shoot 40-today-6.3in today
   # Type mode on the smaller iPhone: the pinned field and the suggestion rows stay above the keyboard.
   shoot 45-add-search-6.3in add-search
   # The one To-do list on the smaller iPhone: Done today and the mic above the tab bar.
   shoot 49-todo-6.3in todo
+fi
+
+# The paywall on a 6.1 inch iPhone, the smallest current size: every plan and the trial timeline above the button,
+# with no scrolling, measured by the demo app itself. And the notification ask there.
+if [ -n "$compact" ] && [ "$compact" != "$udid" ]; then
+  xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
+  xcrun simctl shutdown "$udid" >/dev/null 2>&1 || true
+  prepare "$compact"
+  udid="$compact"
+  xcrun simctl launch "$udid" "$bundle_id" -demo -screen today >/dev/null
+  sleep 6
+  shoot 55-paywall-6.1in paywall
+  paywall_fits 55-paywall-6.1in
+  shoot 55-paywall-6.1in-blush paywall blush
+  paywall_fits 55-paywall-6.1in-blush
+  shoot 56-trial-ask-6.1in trial-ask
+  lands 56-trial-ask-6.1in "ask=1"
 fi
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true

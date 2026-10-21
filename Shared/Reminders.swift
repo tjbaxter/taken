@@ -121,21 +121,49 @@ enum Reminders {
         await UNUserNotificationCenter.current().notificationSettings().authorizationStatus == .denied
     }
 
-    /// Replace every pending nudge with a fresh plan, and withdraw delivered nudges that no longer apply.
+    /// Whether iOS has asked yet, and what it was told. Provisional and ephemeral count as allowed; Taken never asks
+    /// for provisional (it delivers quietly).
+    static func permission() async -> NotificationPermission {
+        switch await UNUserNotificationCenter.current().notificationSettings().authorizationStatus {
+        case .notDetermined: return .notDetermined
+        case .denied: return .denied
+        default: return .allowed
+        }
+    }
+
+    /// Replace every pending nudge with a fresh plan, and withdraw delivered nudges that no longer apply. The trial
+    /// reminder (`TrialReminder`) is rebuilt with them, so its count stays current, and it goes, delivered or not, once
+    /// the trial is cancelled, converts, hits a billing issue or Pro is for good. None of this asks for permission.
     static func reschedule(state: StackState, now: Date) async {
         let center = UNUserNotificationCenter.current()
         let pending = await center.pendingNotificationRequests()
-        let ours = pending.map(\.identifier).filter { $0.hasPrefix(requestPrefix) }
+        let ours = pending.map(\.identifier).filter { $0.hasPrefix(requestPrefix) || $0 == TrialReminder.identifier }
         if !ours.isEmpty { center.removePendingNotificationRequests(withIdentifiers: ours) }
 
+        let ledger = ProLedgerStore.shared.load()
         let delivered = await center.deliveredNotifications().map(\.request.identifier)
-        let stale = staleDelivered(delivered, state: state, now: now)
+        var stale = staleDelivered(delivered, state: state, now: now)
+        if delivered.contains(TrialReminder.identifier), !TrialReminder.isRenewingTrial(ledger?.status, now: now) {
+            stale.append(TrialReminder.identifier)
+        }
         if !stale.isEmpty { center.removeDeliveredNotifications(withIdentifiers: stale) }
 
-        let ledger = ProLedgerStore.shared.load()
         let window = ProGate.nudgeWindow(access: ProGate.access(ledger: ledger, state: state, now: now), status: ledger?.status)
         let plans = plan(state: state, now: now, window: window)
-        guard !plans.isEmpty, await isAuthorized() else { return }
+        let trial = TrialReminder.plan(status: ledger?.status, price: ledger?.renewalPrice, state: state, now: now)
+        guard !plans.isEmpty || trial != nil, await isAuthorized() else { return }
+
+        if let trial {
+            let content = UNMutableNotificationContent()
+            content.body = trial.body
+            content.sound = .default
+            content.threadIdentifier = "taken.pro"
+            // Informational, never Time Sensitive (Apple's HIG, Managing notifications).
+            content.interruptionLevel = .active
+            let trigger = UNCalendarNotificationTrigger(dateMatching: trial.components, repeats: false)
+            try? await center.add(UNNotificationRequest(identifier: TrialReminder.identifier, content: content,
+                                                        trigger: trigger))
+        }
 
         for plan in plans {
             let content = UNMutableNotificationContent()
