@@ -372,6 +372,119 @@ final class TodoGroundingTests: XCTestCase {
         XCTAssertFalse(SpokenNote("Call mum tomorrow.").isDayTimeHeader(0..<3))
     }
 
+    // MARK: Clock times nobody said (G7; Tom's six tasks all due 09:21, 21 Oct 2026)
+
+    /// Wednesday 21 October 2026, 09:21 in London: the moment Tom spoke.
+    private let tomsNow = TodoContext(now: at(2026, 10, 21, 9, 21), timeZone: london, dayStartHour: 4)
+    private let tomsDay = DayKey(year: 2026, month: 10, day: 21)
+
+    private func savedAtNine21(_ raw: [RawTodo], _ transcript: String) -> [TodoDraft] {
+        TodoValidation.validate(raw, transcript: transcript, context: tomsNow)
+    }
+
+    private func hasClockTime(_ draft: TodoDraft) -> Bool {
+        if case .time = draft.due { return true }
+        return false
+    }
+
+    /// Tom's note (the words before "I need to" are not in his screenshot, so the first sentence stands in for them),
+    /// with every task answered at the prompt's own "Now" with a time: no task keeps a clock time, and only the one
+    /// "today" was said for keeps a day.
+    func testTomsNoteKeepsNoClockTimeAndADayOnlyWhereTodayWasSaid() {
+        let now = "2026-10-21T09:21:00"
+        let answers = [("reply to Sam about the flat", "Reply to Sam about the flat"),
+                       ("take my vitamin D tablets", "Take my vitamin D tablets"),
+                       ("clean the apartment", "Clean the apartment"),
+                       ("get my life in order", "Get my life in order"),
+                       ("go to the gym", "Go to the gym"),
+                       ("be in a calorie deficit", "Be in a calorie deficit")]
+            .map { RawTodo(spoken: $0.0, title: $0.1, dueISO8601: now, hasTime: true) }
+        let note = "Need to reply to Sam about the flat. Today I need to take my vitamin D tablets. Need to clean the "
+            + "apartment get my life in order go to the gym and be in a calorie deficit"
+        let drafts = savedAtNine21(answers, note)
+        XCTAssertEqual(drafts.map(\.title), answers.map(\.title), "every task said stays")
+        XCTAssertFalse(drafts.contains(where: hasClockTime), "no clock time was said: \(drafts.map(\.due))")
+        XCTAssertEqual(drafts.map(\.due), [nil, .day(tomsDay), nil, nil, nil, nil], "a day only where today was said")
+
+        // As his screenshot shows it, without full stops: still no clock time anywhere.
+        let run = note.replacingOccurrences(of: ".", with: "")
+        let unpunctuated = savedAtNine21(answers, run)
+        XCTAssertEqual(unpunctuated.count, 6)
+        XCTAssertFalse(unpunctuated.contains(where: hasClockTime), "\(unpunctuated.map(\.due))")
+        XCTAssertTrue(unpunctuated.allSatisfy { $0.due == nil || $0.due == .day(tomsDay) },
+                      "one run-on sentence with today in it: today at most, never 09:21")
+    }
+
+    func testAClockTimeStaysOnlyWhereATimeWasSaid() {
+        let mum = savedAtNine21([RawTodo(spoken: "Call mum at 8 tonight", title: "Call mum", dueISO8601: "2026-10-21T20:00:00",
+                                         hasTime: true)], "Call mum at 8 tonight")
+        XCTAssertEqual(mum.first?.due, .time(at(2026, 10, 21, 20)))
+        let gym = savedAtNine21([RawTodo(spoken: "Gym at 6", title: "Gym", dueISO8601: "2026-10-21T18:00:00", hasTime: true)],
+                                "Gym at 6")
+        XCTAssertEqual(gym.first?.due, .time(at(2026, 10, 21, 18)))
+        let dentist = savedAtNine21([RawTodo(spoken: "Tomorrow call the dentist", title: "Call the dentist",
+                                             dueISO8601: "2026-10-22T09:00:00", hasTime: true)], "Tomorrow call the dentist")
+        XCTAssertEqual(dentist.first?.due, .day(DayKey(year: 2026, month: 10, day: 22)), "tomorrow, with no time")
+        XCTAssertEqual(savedAtNine21([RawTodo(spoken: "Tomorrow call the dentist", title: "Call the dentist",
+                                              dueISO8601: "2026-10-22")], "Tomorrow call the dentist").first?.due,
+                       .day(DayKey(year: 2026, month: 10, day: 22)))
+        let tablets = savedAtNine21([RawTodo(spoken: "in 20 minutes take my tablets", title: "Take my tablets",
+                                             dueISO8601: "2026-10-21T09:41:00", hasTime: true)],
+                                    "in 20 minutes take my tablets")
+        XCTAssertEqual(tablets.first?.due, .time(at(2026, 10, 21, 9, 41)), "now plus 20 minutes")
+        let noon = savedAtNine21([RawTodo(spoken: "lunch with Jo at noon", title: "Lunch with Jo", dueISO8601: "2026-10-21T12:00:00",
+                                          hasTime: true)], "lunch with Jo at noon")
+        XCTAssertEqual(noon.first?.due, .time(at(2026, 10, 21, 12)))
+        let tonight = savedAtNine21([RawTodo(spoken: "ring Jo tonight", title: "Ring Jo", dueISO8601: "2026-10-21T19:00:00",
+                                             hasTime: true)], "ring Jo tonight")
+        XCTAssertEqual(tonight.first?.due, .day(tomsDay), "tonight is a day, not a time")
+        let friday = savedAtNine21([RawTodo(spoken: "renew my passport on Friday", title: "Renew my passport",
+                                            dueISO8601: "2026-10-23T09:00:00", hasTime: true)], "renew my passport on Friday")
+        XCTAssertEqual(friday.first?.due, .day(DayKey(year: 2026, month: 10, day: 23)))
+        let today = savedAtNine21([RawTodo(spoken: "today take my tablets", title: "Take my tablets",
+                                           dueISO8601: "2026-10-21T09:21:00", hasTime: true)], "today take my tablets")
+        XCTAssertEqual(today.first?.due, .day(tomsDay), "the prompt's Now goes, the day said stays")
+    }
+
+    /// An answer stored before `spoken`, that no word places, keeps its due as before, except a time at the prompt's
+    /// "Now" when no time was said anywhere in the note.
+    func testATimeAtThePromptsNowAlwaysGoesEvenUnplaced() {
+        let atNow = RawTodo(title: "Pay the rent", dueISO8601: "2026-10-21T09:22:00", hasTime: true)
+        XCTAssertEqual(savedAtNine21([atNow], "um okay sort the bills out today").first?.due, .day(tomsDay))
+        XCTAssertNil(savedAtNine21([atNow], "um okay sort the bills out").first?.due, "no day said either")
+        let later = RawTodo(title: "Pay the rent", dueISO8601: "2026-10-21T16:00:00", hasTime: true)
+        XCTAssertEqual(savedAtNine21([later], "um okay sort the bills out").first?.due, .time(at(2026, 10, 21, 16)),
+                       "a stored answer's own time, not the prompt's Now, is kept as before")
+        XCTAssertTrue(TodoGrounding.isPromptNow(RawTodo(title: "x", dueISO8601: "2026-10-21T09:19:00", hasTime: true),
+                                                context: tomsNow), "two minutes either side")
+        XCTAssertFalse(TodoGrounding.isPromptNow(RawTodo(title: "x", dueISO8601: "2026-10-21T09:24:00", hasTime: true),
+                                                 context: tomsNow))
+        XCTAssertFalse(TodoGrounding.isPromptNow(RawTodo(title: "x", dueISO8601: "2026-10-21", hasTime: false),
+                                                 context: tomsNow), "a day is never a time")
+    }
+
+    func testTheWordsThatSayATimeAndTheWordsThatSayADay() {
+        func time(_ text: String) -> Bool { SpokenDayTime.saysTime(in: SpokenNote.tokens(of: text)) }
+        func day(_ text: String) -> Bool { SpokenDayTime.saysDay(in: SpokenNote.tokens(of: text)) }
+        for said in ["at 8", "by 4", "around 3", "before 5", "until 7", "till 9", "from 2", "4 pm", "4pm", "8 o'clock",
+                     "half past 3", "quarter past 4", "quarter to 4", "at nine", "noon", "midnight", "in 20 minutes",
+                     "in 2 hours", "at 6:30"] {
+            XCTAssertTrue(time(said), said)
+        }
+        for said in ["today", "tonight", "tomorrow", "Friday", "on Fri", "next week", "this evening", "the 23rd",
+                     "end of day", "in October"] {
+            XCTAssertTrue(day(said), said)
+            XCTAssertFalse(time(said), "\(said) is a day, never a clock time")
+        }
+        for said in ["Buy 6 eggs", "now", "I should now send the deck", "sat on the sofa", "book 2 tickets",
+                     "be in a calorie deficit"] {
+            XCTAssertFalse(time(said), said)
+            XCTAssertFalse(day(said), said)
+        }
+        XCTAssertTrue(SpokenDayTime.said(in: SpokenNote.tokens(of: "tomorrow at 9")))
+        XCTAssertTrue(SpokenNote("Noon.").isDayTimeHeader(0..<1), "a header may be a time alone")
+    }
+
     func testEachPartsTasksArePlacedInTheirOwnWordsAndASeamSplitJoinsAgain() {
         let note = "Order Reach toothbrushes. On Amazon. Call mum about the weekend and the plans for Sunday lunch at her place."
         let cut = SpokenNote(note).words.firstIndex { $0.key == "on" } ?? 0
