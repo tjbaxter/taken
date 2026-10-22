@@ -185,7 +185,8 @@ lands 47-todo-cap "tab=todo sheet=none todo=listening"
 # captures never have one): the evening nudge offered once, yesterday's repair line, the widget invite under the first
 # All taken, and the sheet it opens.
 shoot 50-today-nudge-offer today-nudge-offer
-lands 50-today-nudge-offer "tab=today sheet=none"
+# The Weight tab stays off, and its offer away, on every screen that does not ask for them (SPEC 3.12).
+lands 50-today-nudge-offer "tab=today sheet=none weight=0 offer=0"
 shoot 51-today-repair today-repair
 shoot 52-today-widget-invite today-widget-invite
 shoot 53-widget-help widget-help
@@ -196,6 +197,30 @@ shoot 54-trial-ask trial-ask
 lands 54-trial-ask "ask=1"
 shoot 54-trial-ask-blush trial-ask blush
 lands 54-trial-ask-blush "ask=1"
+# The Weight tab (SPEC 3.12; Debug and internal builds only until 1.2): the tab with a flat-to-gently-falling line and
+# weekly dose ticks in every look, the log sheet with the last weigh-in as its grey placeholder, the first weigh-in still
+# to come, All weigh-ins, Profile's switch and the weight CSV rows, and Today's one-time offer to a stack with a weekly
+# shot. Every other capture keeps the tab off (weight=0), so they still show the default app with three tabs. No name
+# here ends in a store frame's state (-log, -settings): the store-shots matcher takes any file ending in "-<state>".
+shoot 60-weight weight
+lands 60-weight "tab=weight sheet=none weight=1"
+for look in blush phosphor ice; do
+  shoot "60-weight-$look" weight "$look"
+done
+shoot 61-weigh-in weight-log
+lands 61-weigh-in "tab=weight sheet=weigh-in"
+shoot 61-weigh-in-blush weight-log blush
+shoot 62-weight-empty weight-empty
+lands 62-weight-empty "tab=weight sheet=none weight=1"
+shoot 63-weight-list weight-list
+lands 63-weight-list "tab=weight sheet=weigh-ins"
+shoot 63-weight-list-blush weight-list blush
+shoot 64-profile-weight weight-settings
+lands 64-profile-weight "sheet=settings weight=1"
+shoot 64-profile-weight-data weight-data
+shoot 65-today-weight-offer today-weight-offer
+lands 65-today-weight-offer "tab=today sheet=none weight=0 offer=1"
+shoot 65-today-weight-offer-blush today-weight-offer blush
 # Links reach the right screen with the quick action's scene delegate in place: Taken opens its own link after launch
 # (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). The demo app writes
 # what is in front to tmp/taken-ui-state.txt (DemoProbe), and the check fails unless the link landed there:
@@ -228,6 +253,10 @@ if cmp -s "$out/35-link-todo.png" "$out/04-settings.png"; then
   echo "::error::35-link-todo is the Profile screen it started on: taken://todo did not open the To-do tab"
   exit 1
 fi
+# taken://weight (SPEC 3.12): over All weigh-ins it closes the sheet onto the Weight tab; with the tab off it lands on
+# Today, never on a tab that is not there.
+link 66-link-weight weight-list "taken://weight" "tab=weight sheet=none weight=1"
+link 67-link-weight-off settings "taken://weight" "tab=today sheet=none weight=0"
 
 # The paywall on a 6.3 inch iPhone as well, where its compact layout must still show every plan above the button.
 if [ -n "$small" ] && [ "$small" != "$udid" ]; then
@@ -245,6 +274,9 @@ if [ -n "$small" ] && [ "$small" != "$udid" ]; then
   shoot 45-add-search-6.3in add-search
   # The one To-do list on the smaller iPhone: Done today and the mic above the tab bar.
   shoot 49-todo-6.3in todo
+  # The Weight tab and its log sheet with the keyboard up on the smaller iPhone.
+  shoot 68-weight-6.3in weight
+  shoot 68-weigh-in-6.3in weight-log
 fi
 
 # The paywall on a 6.1 inch iPhone, the smallest current size: every plan and the trial timeline above the button,
@@ -262,6 +294,11 @@ if [ -n "$compact" ] && [ "$compact" != "$udid" ]; then
   paywall_fits 55-paywall-6.1in-blush
   shoot 56-trial-ask-6.1in trial-ask
   lands 56-trial-ask-6.1in "ask=1"
+  # The Weight tab, its log sheet with the keyboard up, and Today's offer on the smallest current iPhone.
+  shoot 69-weight-6.1in weight
+  shoot 69-weigh-in-6.1in weight-log
+  lands 69-weigh-in-6.1in "tab=weight sheet=weigh-in"
+  shoot 69-today-weight-offer-6.1in today-weight-offer
 fi
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
