@@ -1,0 +1,62 @@
+It's late, and you can't remember: did I take it today? Taken is the source of truth for your daily pills and supplements. Tap when you take it. Look later and know for sure, down to the minute.
+
+ONE TAP
+• Tap the ring beside an item: it fills, with the time beside it.
+• Take all logs each pending item in a single tap.
+• A stray tap never un-logs a dose, and Undo is right there.
+
+KNOW FOR SURE
+• Remember twice in one day? The answer is on screen the moment you open the app.
+• Forgot to log? Set the real time, or fill in an earlier day in History.
+• Set your wake-up time and a late-night dose still counts for the day you were living.
+
+EVERY SCHEDULE
+• Daily, every other day, weekly, 2x or 3x daily, or the days you pick, set for each item as you add it.
+• A weekly shot such as semaglutide or tirzepatide sits on its day. Logged a few days late? It still counts for its week.
+• Items not due today wait under Not today, with the day they are next due.
+
+LOG IT FROM ANYWHERE
+• Home Screen widgets: log a dose or take all without opening the app.
+• Lock Screen widgets show 2/3 before you unlock.
+• Take all and New voice to-do controls for Control Center.
+• Siri: ask "Did I take my pills in Taken" and hear the answer with times. Say "Log my stack in Taken" to take everything.
+• Shortcuts: Did I take it?, Get to-dos and Add to-do hand their results to a shortcut you build. Taken itself sends nothing.
+
+VOICE TO-DOS
+• Tap the mic and say it the way it comes out: "Today by 4 I need to call the dentist, pick up the dry cleaning and email Sam."
+• With Apple Intelligence, Taken turns the ramble into a tidy list with the times you said; without it, the note is saved as said. Keep as one puts a note back together.
+• Nothing to choose: every note goes onto one list, soonest due first. Tap the circle when one is done.
+• Start a note from Siri ("Add to-dos in Taken"), the Action button, Control Center, the Lock Screen or the app icon.
+• Speech and sorting happen on your iPhone. The audio is never stored, and Taken never sends your words.
+
+A REMINDER THAT STAYS QUIET
+• One optional evening nudge at the time you choose.
+• It only fires if something is still pending. Already done? Silence.
+• Take all straight from the notification.
+
+FOUR LOOKS
+• Signal, Blush, Phosphor or Ice: pick one in your profile, and your widgets and the app icon follow.
+
+YOUR RECORD
+• History: five weeks of days at a glance, with your streak and 30-day completion.
+• Export every dose to CSV whenever you want it.
+
+NOTHING ELSE
+• No ads. No account. No onboarding funnel. A name and photo in your profile, if you add them, stay on your iPhone.
+• No typing needed: add your stack from quick-pick chips in a few taps. Or type the first letters and pick from suggestions, spelled right for you.
+• No tracking, no analytics, no third-party code. Taken has no servers and sends your log nowhere; purchases go through Apple.
+
+TAKEN PRO
+• Add your stack and log your first dose before you choose a plan.
+• Pro keeps you logging: taps in the app, Take all, Set time, past days, adding items, widgets, Lock Screen, Control Center, Siri and the nudge.
+• Your first voice note is on us. After it, voice to-dos are part of Pro.
+• Your record is never held back. Without Pro your log, history and CSV export stay open.
+• Start the yearly plan with 7 days on us, and Taken reminds you 3 days before the trial ends.
+• Downloaded Taken 1.0? You keep Pro for life.
+
+Taken Pro yearly: 7 days on us for new subscribers, then $19.99 a year. Or $3.99 a month, or $49.99 once. Payment is charged to your Apple Account. Subscriptions renew automatically unless you cancel at least 24 hours before the end of the period; manage or cancel in Settings.
+
+Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
+Privacy Policy: https://tjbaxter.github.io/taken/privacy.html
+
+Taken is a personal log, not medical advice. Always follow the directions from your doctor or pharmacist.

@@ -63,6 +63,18 @@ jobs:
             build/TakenTests.xcresult
           retention-days: 7
 
+  # The App Store pack (store/SUBMISSION-1.1.md): every field against Apple's limits, the copy rules, no medicine or
+  # price in the neutral set, generic names only in English (U.S.), and the screenshot captions.
+  store-metadata:
+    name: Store metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the listing, review notes, in-app purchases and captions
+        run: python3 scripts/check-store-metadata.py
+
   device-build:
     name: Release build for device (unsigned)
     runs-on: macos-26
