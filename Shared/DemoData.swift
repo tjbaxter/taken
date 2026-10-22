@@ -92,6 +92,41 @@ extension DemoData {
         return out
     }
 
+    /// The goal screens' history (REDESIGN.md, "Goal and moments"): the first weigh-in exactly 97.8 kg, 231 days before the
+    /// demo day, then about six mornings in seven, falling about 0.3 kg a week with a fixed swing of up to 0.45 kg, to a
+    /// trend of 88.08 today: one point (5%) and "1.1 kg to 87.0" with the goal 87.0 and 180 cm. `extraWeeks` starts it
+    /// that much earlier and carries on down 0.24 kg a week, to a trend of about 86.8 and all three points
+    /// (`weight-goal-reached`). `momentKg` adds one more weigh-in today (`weight-goal-moment`: 87.1 takes the trend below
+    /// 88.02, the 10% point). WeightGoalTests pins all three.
+    static func goalWeighIns(now: Date, extraWeeks: Int = 0, momentKg: Double? = nil,
+                             timeZone: TimeZone = .current) -> [WeighIn] {
+        let clock = DayClock(dayStartHour: settings.dayStartHour, timeZone: timeZone)
+        let today = clock.day(for: now)
+        var random = SeededRandom(seed: 0x60A1_0701)
+        let base = 231
+        let span = base + 7 * extraWeeks
+        var out: [WeighIn] = []
+        for offset in stride(from: span, through: 0, by: -1) {
+            let day = span - offset
+            // About one morning in seven goes without a weigh-in; the first and today never do.
+            let skipped = random.next() % 7 == 0 && offset != 0 && day != 0
+            let swing = Double(random.next() % 91) / 100 - 0.45
+            let minute = 5 + Int(random.next() % 45)
+            guard !skipped else { continue }
+            let level = day <= base
+                ? 97.8 - 0.3 * Double(day) / 7
+                : 97.8 - 0.3 * Double(base) / 7 - 0.24 * Double(day - base) / 7
+            let kg = day == 0 ? 97.8 : ((level + swing) * 20).rounded() / 20
+            let at = clock.date(on: today.adding(-offset), hour: 7, minute: minute)
+            out.append(WeighIn(kg: kg, weighedAt: at, utcOffset: timeZone.secondsFromGMT(for: at)))
+        }
+        if let momentKg {
+            let at = clock.date(on: today, hour: 7, minute: 58)
+            out.append(WeighIn(kg: momentKg, weighedAt: at, utcOffset: timeZone.secondsFromGMT(for: at)))
+        }
+        return out
+    }
+
     /// The stack with a weekly shot added: Semaglutide on today's weekday, logged at 08:00 every week for 26 weeks,
     /// today included, for the chart's dose ticks and Today's one-time weight offer.
     static func withWeeklyShot(_ state: StackState, now: Date, timeZone: TimeZone = .current) -> StackState {

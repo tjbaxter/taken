@@ -34,6 +34,8 @@ enum SheetRoute: Identifiable, Hashable {
     case weighIn
     /// All weigh-ins: edit one, or swipe it away.
     case weighIns
+    /// Set Goal or Change Goal, from the Weight tab's More menu.
+    case weightGoal
     #endif
 
     var id: String {
@@ -49,6 +51,7 @@ enum SheetRoute: Identifiable, Hashable {
         #if DEBUG || TAKEN_INTERNAL
         case .weighIn: return "weigh-in"
         case .weighIns: return "weigh-ins"
+        case .weightGoal: return "weight-goal"
         #endif
         }
     }
@@ -67,6 +70,8 @@ enum UndoStep: Equatable, Sendable {
     case restoreWeighIn(WeighIn)
     /// Bring the Weight tab back after Hide Weight Tab.
     case showWeightTab
+    /// Put the goal back after Clear Goal, start included.
+    case restoreWeightGoal(WeightGoal)
     #endif
 }
 
@@ -542,6 +547,7 @@ final class AppModel {
         case "weight-log": sheet = .weighIn
         case "weight-list": sheet = .weighIns
         case "weight-settings", "weight-data": sheet = .settings
+        case "weight-goal-sheet", "weight-goal-low": sheet = .weightGoal
         #endif
         default: break
         }
@@ -965,7 +971,7 @@ final class AppModel {
                 for dose in doses { state.restore(dose) }
             }
         #if DEBUG || TAKEN_INTERNAL
-        case .removeWeighIn, .restoreWeighIn, .showWeightTab:
+        case .removeWeighIn, .restoreWeighIn, .showWeightTab, .restoreWeightGoal:
             undoWeight(step)
         #endif
         }

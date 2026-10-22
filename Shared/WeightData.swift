@@ -145,14 +145,15 @@ enum WeightFormat {
         return Double(fraction.isEmpty ? whole : "\(whole).\(fraction)")
     }
 
-    /// The field as it is typed: digits and one separator, two decimals at most; anything else is dropped as it comes.
-    static func sanitize(_ text: String, locale: Locale = .current) -> String {
+    /// The field as it is typed: digits and one separator, two decimals at most (one in the Goal sheet); anything else is
+    /// dropped as it comes.
+    static func sanitize(_ text: String, locale: Locale = .current, maxDecimals: Int = 2) -> String {
         let separators = decimalSeparators(locale)
         var out = ""
         var decimals = -1
         for character in text {
             if asciiDigit(character) != nil {
-                if decimals >= 2 || (decimals < 0 && out.count >= 4) { continue }
+                if decimals >= maxDecimals || (decimals < 0 && out.count >= 4) { continue }
                 out.append(character)
                 if decimals >= 0 { decimals += 1 }
             } else if separators.contains(character), decimals < 0, !out.isEmpty {
@@ -242,19 +243,25 @@ struct WeightState: Codable, Hashable, Sendable {
     var offerAnswered: Bool = false
     /// The first weigh-in ever saved. That one needs no Taken Pro; after it, logging does (`WeightGate`). Erase keeps it.
     var firstWeighInAt: Date?
+    /// The optional goal, from the More menu's Set Goal (`WeightGoal`, REDESIGN.md "Goal and moments"). Erase removes it.
+    var goal: WeightGoal?
+    /// Centimetres, asked only in the Goal sheet, used only for the BMI 18.5 floor and the BMI 25 check. Erase removes it.
+    var heightCm: Double?
 
     init(weighIns: [WeighIn] = [], showsTab: Bool? = nil, unit: WeightUnit? = nil, range: WeightRange? = nil,
-         offerAnswered: Bool = false, firstWeighInAt: Date? = nil) {
+         offerAnswered: Bool = false, firstWeighInAt: Date? = nil, goal: WeightGoal? = nil, heightCm: Double? = nil) {
         self.weighIns = weighIns
         self.showsTab = showsTab
         self.unit = unit
         self.range = range
         self.offerAnswered = offerAnswered
         self.firstWeighInAt = firstWeighInAt
+        self.goal = goal
+        self.heightCm = heightCm
     }
 
     private enum CodingKeys: String, CodingKey {
-        case schemaVersion, weighIns, showsTab, unit, range, offerAnswered, firstWeighInAt
+        case schemaVersion, weighIns, showsTab, unit, range, offerAnswered, firstWeighInAt, goal, heightCm
     }
 
     /// Every field has a default, an unknown unit or range reads as none, and one unreadable weigh-in never costs the rest.
@@ -268,6 +275,9 @@ struct WeightState: Codable, Hashable, Sendable {
         range = try? c.decodeIfPresent(WeightRange.self, forKey: .range)
         offerAnswered = (try? c.decodeIfPresent(Bool.self, forKey: .offerAnswered)) ?? false
         firstWeighInAt = try? c.decodeIfPresent(Date.self, forKey: .firstWeighInAt)
+        // A goal or height that cannot be read is none, so older and newer files still read.
+        goal = (try? c.decodeIfPresent(WeightGoal.self, forKey: .goal)) ?? nil
+        heightCm = (try? c.decodeIfPresent(Double.self, forKey: .heightCm)).flatMap { $0 }.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
     }
 
     private struct LossyWeighIn: Decodable {
@@ -346,11 +356,18 @@ struct WeightState: Codable, Hashable, Sendable {
         return (added, already)
     }
 
-    /// Erase all data: the weigh-ins go, and so does the chart's range. The tab setting, the unit, the offer's answer and
-    /// the first weigh-in's date stay, like the look and the date of the first voice note.
+    /// Erase all data: the weigh-ins go, and so do the chart's range, the goal and the height. The tab setting, the unit,
+    /// the offer's answer and the first weigh-in's date stay, like the look and the date of the first voice note.
     mutating func eraseAll() {
         weighIns = []
         range = nil
+        goal = nil
+        heightCm = nil
+    }
+
+    /// The days that have a weigh-in, the only days a goal's points can land on.
+    func weighInDays(clock: DayClock) -> Set<DayKey> {
+        Set(weighIns.map { clock.day(of: $0) })
     }
 }
 
@@ -520,14 +537,25 @@ struct WeightWindow: Hashable, Sendable {
     /// The y axis, in kilograms.
     let lower: Double
     let upper: Double
+    /// The goal, in kilograms, and whether the y axis takes it in. It joins only if the padded span with it is at most twice
+    /// the span without it, so the data always keeps at least half the plot (own rule); otherwise its label is pinned to
+    /// the edge and nothing squashes the line.
+    let goalKg: Double?
+    let goalInDomain: Bool
 
     /// The least the y axis is padded by, either side, in kilograms (own choice).
     static let minimumPadding = 0.4
 
     var isEmpty: Bool { dots.isEmpty && trend.isEmpty }
 
+    /// The y axis around `low` and `high`: 15% of the span, at least `minimumPadding`, never below zero.
+    static func padded(low: Double, high: Double) -> (lower: Double, upper: Double) {
+        let padding = max(minimumPadding, (high - low) * 0.15)
+        return (max(0, low - padding), high + padding)
+    }
+
     static func make(weighIns: [WeighIn], trend: [WeightPoint], ticks: [DayKey], range: WeightRange, today: DayKey,
-                     clock: DayClock) -> WeightWindow {
+                     clock: DayClock, goalKg: Double? = nil) -> WeightWindow {
         let days = weighIns.map { clock.day(of: $0) }
         let lastDay = max(today, days.max() ?? today)
         var firstDay = range.days.map { lastDay.adding(-($0 - 1)) } ?? (days.min() ?? lastDay)
@@ -540,10 +568,22 @@ struct WeightWindow: Hashable, Sendable {
         let values = dots.map(\.kg) + shownTrend.map(\.kg)
         let low = values.min() ?? 0
         let high = values.max() ?? 0
-        let padding = max(minimumPadding, (high - low) * 0.15)
+        var bounds = padded(low: low, high: high)
+        var goalInDomain = false
+        if let goalKg, !values.isEmpty {
+            let with = padded(low: min(low, goalKg), high: max(high, goalKg))
+            if with.upper - with.lower <= 2 * (bounds.upper - bounds.lower) + 1e-9 {
+                bounds = with
+                goalInDomain = true
+            }
+        }
         return WeightWindow(firstDay: firstDay, lastDay: lastDay, trend: shownTrend, dots: dots,
-                            ticks: ticks.filter(inView), lower: max(0, low - padding), upper: high + padding)
+                            ticks: ticks.filter(inView), lower: bounds.lower, upper: bounds.upper, goalKg: goalKg,
+                            goalInDomain: goalInDomain)
     }
+
+    /// Whether a day is inside the window.
+    func contains(_ day: DayKey) -> Bool { day >= firstDay && day <= lastDay }
 }
 
 // MARK: - Taken Pro
@@ -1040,10 +1080,12 @@ enum WeightCopy {
     static let notFound = "No weigh-ins found. Taken reads a date column and a weight column in kg or lb."
     static let couldNotOpen = "Could not open that file."
 
-    /// Under the title: "Last weigh-in yesterday, 07:42", "Last weigh-in Tuesday, 07:42", "Last weigh-in 14 Oct, 07:42".
-    static func lastLine(_ weighIn: WeighIn?, now: Date, clock: DayClock) -> String {
+    /// Under the title, with the last weigh-in's value: "Last 88.35 kg · yesterday, 07:42", "Last 88.35 kg · Tuesday,
+    /// 07:42", "Last 88.35 kg · 14 Oct, 07:42".
+    static func lastLine(_ weighIn: WeighIn?, unit: WeightUnit, now: Date, clock: DayClock, locale: Locale = .current) -> String {
         guard let weighIn else { return noWeighIns }
-        return "Last weigh-in \(dayWord(clock.day(of: weighIn), today: clock.day(for: now), clock: clock)), \(Fmt.clock(weighIn.weighedAt, clock))"
+        let day = dayWord(clock.day(of: weighIn), today: clock.day(for: now), clock: clock)
+        return "\(last) \(WeightFormat.withUnit(weighIn.kg, unit: unit, locale: locale)) \u{00B7} \(day), \(Fmt.clock(weighIn.weighedAt, clock))"
     }
 
     /// "today", "yesterday", "Tuesday" this past week, then "14 Oct", and "14 Oct 2025" from another year.
@@ -1086,19 +1128,16 @@ enum WeightCopy {
         return parts.joined(separator: " ")
     }
 
-    /// The chart for VoiceOver: "Trend 88.1 kilograms, down 1.2 over 30 days".
-    static func chartSummary(trendKg: Double?, changes: [WeightChange], unit: WeightUnit, locale: Locale = .current) -> String {
-        guard let trendKg else { return noWeighIns }
-        var text = "Trend \(WeightFormat.trend(trendKg, unit: unit, locale: locale)) \(unit.spoken)"
-        if let change = changes.first(where: { $0.days == 30 }) ?? changes.first {
-            let amount = WeightFormat.trend(abs(change.kg), unit: unit, locale: locale)
-            switch change.direction(unit: unit) {
-            case .down: text += ", down \(amount) over \(change.days) days"
-            case .up: text += ", up \(amount) over \(change.days) days"
-            case .flat: text += ", no change over \(change.days) days"
-            }
-        }
-        return text
+    /// The chart's first sentence for VoiceOver: "Trend 88.1 kilograms."
+    static func spokenTrend(_ trendKg: Double?, unit: WeightUnit, locale: Locale = .current) -> String {
+        guard let trendKg else { return "\(noWeighIns)." }
+        return "Trend \(WeightFormat.trend(trendKg, unit: unit, locale: locale)) \(unit.spoken)."
+    }
+
+    /// The chart for VoiceOver, with the selected range's change: "Trend 88.1 kilograms. Down 1.2 kilograms over 30 days."
+    /// The goal's clauses (`WeightGoalCopy`) go in between when there is a goal.
+    static func chartSummary(trendKg: Double?, change: String?, unit: WeightUnit, locale: Locale = .current) -> String {
+        [spokenTrend(trendKg, unit: unit, locale: locale), change.map { "\($0)." }].compactMap { $0 }.joined(separator: " ")
     }
 
     /// Every fixed line, for the copy rules test.
@@ -1115,14 +1154,27 @@ enum WeightCopy {
 // MARK: - Demo
 
 /// `-demo` screens for the Weight tab (CI screenshots only): `weight`, `weight-log`, `weight-list`, `weight-empty`,
-/// `weight-settings` and `weight-data` (Profile at the Weight switch and at the weight CSV rows), and
-/// `today-weight-offer`.
+/// `weight-settings` and `weight-data` (Profile at the Weight switch and at the weight CSV rows), `today-weight-offer`, and
+/// the goal's: `weight-goal` (one point), `weight-goal-moment` (the 10% point just lit), `weight-goal-reached` (three points,
+/// holding), `weight-goal-sheet` (Change Goal) and `weight-goal-low` (55.0 typed, too low for 180 cm).
 enum WeightDemo {
+    static let goalScreens = ["weight-goal", "weight-goal-moment", "weight-goal-reached", "weight-goal-sheet", "weight-goal-low"]
+
     /// The screens that open on the Weight tab.
     static func opensOnWeight(_ screen: String?) -> Bool {
         guard let screen else { return false }
         return ["weight", "weight-log", "weight-list", "weight-empty", "weight-settings", "weight-data"].contains(screen)
+            || goalScreens.contains(screen)
     }
+
+    /// The goal screens: Tom-like history from 97.8 kg, the goal 87.0 and 180 cm (`DemoData.goalWeighIns`).
+    static func hasGoal(_ screen: String?) -> Bool { screen.map(goalScreens.contains) ?? false }
+
+    /// The Goal sheet opens over the tab.
+    static func opensGoalSheet(_ screen: String?) -> Bool { screen == "weight-goal-sheet" || screen == "weight-goal-low" }
+
+    /// What the goal field holds on `weight-goal-low`.
+    static func typedGoal(_ screen: String?) -> String? { screen == "weight-goal-low" ? "55.0" : nil }
 
     /// The tab is on for every Weight screen and off everywhere else, so the other captures still show the default app.
     static func showsTab(_ screen: String?) -> Bool { opensOnWeight(screen) }

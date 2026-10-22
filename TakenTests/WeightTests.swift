@@ -95,8 +95,9 @@ final class WeightTests: XCTestCase {
         XCTAssertEqual(down.spoken(unit: .kg, locale: enGB), "Down 1.2 kilograms over 30 days")
         XCTAssertEqual(WeightChange(days: 7, kg: 0.04).direction(unit: .kg), .flat, "0.0 at one decimal is flat")
         XCTAssertEqual(WeightChange(days: 7, kg: 0.5).symbol(unit: .lb), "arrow.up")
-        XCTAssertEqual(WeightCopy.chartSummary(trendKg: 88.1, changes: [down], unit: .kg, locale: enGB),
-                       "Trend 88.1 kilograms, down 1.2 over 30 days")
+        XCTAssertEqual(WeightCopy.chartSummary(trendKg: 88.1, change: "Down 1.2 kilograms over 30 days", unit: .kg, locale: enGB),
+                       "Trend 88.1 kilograms. Down 1.2 kilograms over 30 days.")
+        XCTAssertEqual(WeightCopy.chartSummary(trendKg: 88.1, change: nil, unit: .kg, locale: enGB), "Trend 88.1 kilograms.")
     }
 
     // MARK: Units
@@ -483,11 +484,14 @@ final class WeightTests: XCTestCase {
         }
         let clock = londonClock()
         let now = at(2026, 10, 22, 9)
-        XCTAssertEqual(WeightCopy.lastLine(nil, now: now, clock: clock), "No weigh-ins yet")
-        XCTAssertEqual(WeightCopy.lastLine(weighIn(88, 22, 7, 42), now: now, clock: clock), "Last weigh-in today, 07:42")
-        XCTAssertEqual(WeightCopy.lastLine(weighIn(88, 21, 7, 42), now: now, clock: clock), "Last weigh-in yesterday, 07:42")
-        XCTAssertEqual(WeightCopy.lastLine(weighIn(88, 19, 7, 42), now: now, clock: clock), "Last weigh-in Monday, 07:42")
-        XCTAssertEqual(WeightCopy.lastLine(weighIn(88, 14, 7, 42), now: now, clock: clock), "Last weigh-in 14 Oct, 07:42")
+        func last(_ weighIn: WeighIn?) -> String { WeightCopy.lastLine(weighIn, unit: .kg, now: now, clock: clock, locale: enGB) }
+        XCTAssertEqual(last(nil), "No weigh-ins yet")
+        XCTAssertEqual(last(weighIn(88.35, 22, 7, 42)), "Last 88.35 kg \u{00B7} today, 07:42")
+        XCTAssertEqual(last(weighIn(88.35, 21, 7, 42)), "Last 88.35 kg \u{00B7} yesterday, 07:42")
+        XCTAssertEqual(last(weighIn(88, 19, 7, 42)), "Last 88.0 kg \u{00B7} Monday, 07:42")
+        XCTAssertEqual(last(weighIn(88, 14, 7, 42)), "Last 88.0 kg \u{00B7} 14 Oct, 07:42")
+        XCTAssertEqual(WeightCopy.lastLine(WeighIn(kg: 88, weighedAt: at(2025, 3, 3, 7, 42), utcOffset: 0), unit: .kg, now: now,
+                                           clock: clock, locale: enGB), "Last 88.0 kg \u{00B7} 3 Mar 2025, 07:42")
         XCTAssertEqual(WeightCopy.listDay(day(20), today: day(22)), "Tue 20 Oct")
         XCTAssertEqual(WeightCopy.listDay(DayKey(year: 2025, month: 3, day: 3), today: day(22)), "Mon 3 Mar 2025")
     }

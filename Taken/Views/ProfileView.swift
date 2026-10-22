@@ -168,7 +168,7 @@ struct ProfileView: View {
 
     /// What Erase all data takes, said before it does.
     #if DEBUG || TAKEN_INTERNAL
-    static let eraseMessage = "This removes your stack, every logged dose, all your to-dos, your weigh-ins and your profile from this iPhone. It cannot be undone."
+    static let eraseMessage = "This removes your stack, every logged dose, all your to-dos, your weigh-ins, your weight goal and your profile from this iPhone. It cannot be undone."
     #else
     static let eraseMessage = "This removes your stack, every logged dose, all your to-dos and your profile from this iPhone. It cannot be undone."
     #endif

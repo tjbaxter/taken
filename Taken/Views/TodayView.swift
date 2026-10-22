@@ -127,6 +127,8 @@ struct RootView: View {
             WeighInSheet()
         case .weighIns:
             WeighInList()
+        case .weightGoal:
+            WeightGoalSheet()
         #endif
         }
     }

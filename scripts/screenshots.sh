@@ -64,6 +64,22 @@ fit_file() {
   echo "$(xcrun simctl get_app_container "$udid" "$bundle_id" data)/tmp/taken-paywall-fit.txt"
 }
 
+# The Weight tab's chart card against the top of the tab bar (DemoProbe.recordWeightFit).
+weight_fit_file() {
+  echo "$(xcrun simctl get_app_container "$udid" "$bundle_id" data)/tmp/taken-weight-fit.txt"
+}
+
+# The Weight tab's chart card must end above the tab bar on the 6.1 inch iPhone (REDESIGN.md, "Goal and moments").
+weight_fits() {
+  local name="$1" fit
+  fit="$(cat "$(weight_fit_file)" 2>/dev/null || true)"
+  echo "$name weight chart: $(echo "$fit" | tr '\n' ' ')"
+  if ! grep -qx "fits=1" <<<"$fit"; then
+    echo "::error::$name: the Weight tab's chart card runs under the tab bar: $(echo "$fit" | tr '\n' ' ')"
+    exit 1
+  fi
+}
+
 # The paywall must show every plan and the trial timeline above the button without scrolling (SPEC 3.9).
 paywall_fits() {
   local name="$1" fit
@@ -78,7 +94,7 @@ paywall_fits() {
 shoot() {
   local name="$1" screen="$2" look="${3:-signal}"
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
-  rm -f "$(probe_file)" "$(fit_file)"
+  rm -f "$(probe_file)" "$(fit_file)" "$(weight_fit_file)"
   sleep 1
   xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" >/dev/null
   sleep 6
@@ -203,24 +219,41 @@ lands 54-trial-ask-blush "ask=1"
 # shot. Every other capture keeps the tab off (weight=0), so they still show the default app with three tabs. No name
 # here ends in a store frame's state (-log, -settings): the store-shots matcher takes any file ending in "-<state>".
 shoot 60-weight weight
-lands 60-weight "tab=weight sheet=none weight=1"
+lands 60-weight "tab=weight sheet=none weight=1 goal=0 points=0"
 for look in blush phosphor ice; do
   shoot "60-weight-$look" weight "$look"
 done
 shoot 61-weigh-in weight-log
-lands 61-weigh-in "tab=weight sheet=weigh-in"
+lands 61-weigh-in "tab=weight sheet=weigh-in goal=0"
 shoot 61-weigh-in-blush weight-log blush
 shoot 62-weight-empty weight-empty
-lands 62-weight-empty "tab=weight sheet=none weight=1"
+lands 62-weight-empty "tab=weight sheet=none weight=1 goal=0"
 shoot 63-weight-list weight-list
-lands 63-weight-list "tab=weight sheet=weigh-ins"
+lands 63-weight-list "tab=weight sheet=weigh-ins goal=0"
 shoot 63-weight-list-blush weight-list blush
 shoot 64-profile-weight weight-settings
-lands 64-profile-weight "sheet=settings weight=1"
+lands 64-profile-weight "sheet=settings weight=1 goal=0"
 shoot 64-profile-weight-data weight-data
 shoot 65-today-weight-offer today-weight-offer
 lands 65-today-weight-offer "tab=today sheet=none weight=0 offer=1"
 shoot 65-today-weight-offer-blush today-weight-offer blush
+# The optional goal (REDESIGN.md, "Goal and moments"): Tom-like history from 97.8 kg with the goal 87.0 and 180 cm in every
+# look (one lit point, "1.1 kg to 87.0"), the 10% point just lit, the goal reached and holding, the Goal sheet, and a goal
+# too low for the height. The other weight screens check goal=0.
+shoot 70-weight-goal weight-goal
+lands 70-weight-goal "tab=weight sheet=none weight=1 goal=1 points=1"
+for look in blush phosphor ice; do
+  shoot "70-weight-goal-$look" weight-goal "$look"
+done
+shoot 71-weight-goal-moment weight-goal-moment
+lands 71-weight-goal-moment "tab=weight sheet=none goal=1 points=2"
+shoot 72-weight-goal-reached weight-goal-reached
+lands 72-weight-goal-reached "tab=weight sheet=none goal=1 points=3"
+shoot 73-weight-goal-sheet weight-goal-sheet
+lands 73-weight-goal-sheet "tab=weight sheet=weight-goal goal=1"
+shoot 73-weight-goal-sheet-blush weight-goal-sheet blush
+shoot 74-weight-goal-low weight-goal-low
+lands 74-weight-goal-low "tab=weight sheet=weight-goal"
 # Links reach the right screen with the quick action's scene delegate in place: Taken opens its own link after launch
 # (-open-url, demo only, as a widget tap does; simctl openurl stops at an "Open in Taken?" prompt). The demo app writes
 # what is in front to tmp/taken-ui-state.txt (DemoProbe), and the check fails unless the link landed there:
@@ -299,6 +332,10 @@ if [ -n "$compact" ] && [ "$compact" != "$udid" ]; then
   shoot 69-weigh-in-6.1in weight-log
   lands 69-weigh-in-6.1in "tab=weight sheet=weigh-in"
   shoot 69-today-weight-offer-6.1in today-weight-offer
+  # The goal page on the smallest current iPhone: the chart card must end above the tab bar.
+  shoot 75-weight-goal-6.1in weight-goal
+  lands 75-weight-goal-6.1in "tab=weight sheet=none goal=1"
+  weight_fits 75-weight-goal-6.1in
 fi
 
 xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
