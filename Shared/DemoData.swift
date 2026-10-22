@@ -66,6 +66,49 @@ enum DemoData {
     }
 }
 
+#if DEBUG || TAKEN_INTERNAL
+// The Weight tab's demo (SPEC 3.12, CI screenshots only), compiled only where the tab is.
+extension DemoData {
+    /// About 26 weeks of morning weigh-ins, most days: a flat-to-gently-falling line from about 92.6 kg that levels off
+    /// near 88.9 kg, with the day-to-day swings a scale shows, to the nearest 0.05 kg. Today's is at 07:xx.
+    static func weighIns(now: Date, timeZone: TimeZone = .current) -> [WeighIn] {
+        let clock = DayClock(dayStartHour: settings.dayStartHour, timeZone: timeZone)
+        let today = clock.day(for: now)
+        var random = SeededRandom(seed: 0x5CA1_2026)
+        let span = 181
+        var out: [WeighIn] = []
+        for offset in stride(from: span, through: 0, by: -1) {
+            // About one morning in seven goes without a weigh-in; today never does.
+            let skipped = random.next() % 7 == 0 && offset != 0
+            let swing = Double(random.next() % 90) / 100 - 0.45
+            let minute = 5 + Int(random.next() % 45)
+            guard !skipped else { continue }
+            let progress = Double(span - offset) / Double(span)
+            let level = 92.6 - 3.7 * (1 - pow(1 - progress, 1.6))
+            let at = clock.date(on: today.adding(-offset), hour: 7, minute: minute)
+            out.append(WeighIn(kg: ((level + swing) * 20).rounded() / 20, weighedAt: at,
+                               utcOffset: timeZone.secondsFromGMT(for: at)))
+        }
+        return out
+    }
+
+    /// The stack with a weekly shot added: Semaglutide on today's weekday, logged at 08:00 every week for 26 weeks,
+    /// today included, for the chart's dose ticks and Today's one-time weight offer.
+    static func withWeeklyShot(_ state: StackState, now: Date, timeZone: TimeZone = .current) -> StackState {
+        let clock = DayClock(dayStartHour: settings.dayStartHour, timeZone: timeZone)
+        let today = clock.day(for: now)
+        let shot = Item(name: "Semaglutide", code: "SEM", frequency: .weekdays([today.weekday]),
+                        createdAt: clock.start(of: today.adding(-182)), sortIndex: state.items.count)
+        var next = state
+        next.items.append(shot)
+        for week in 0...25 {
+            next.doses.append(Dose(itemId: shot.id, takenAt: clock.date(on: today.adding(-7 * week), hour: 8, minute: 0)))
+        }
+        return next
+    }
+}
+#endif
+
 /// Small deterministic generator so demo history looks the same on every run.
 struct SeededRandom: Sendable {
     private var state: UInt64
