@@ -69,7 +69,27 @@ weight_fit_file() {
   echo "$(xcrun simctl get_app_container "$udid" "$bundle_id" data)/tmp/taken-weight-fit.txt"
 }
 
-# The Weight tab's chart card must end above the tab bar on the 6.1 inch iPhone (REDESIGN.md, "Goal and moments").
+# The keypad up on the Weight tab: the small line clear of the Weigh in bar, and with "still", the number unmoved
+# (DemoProbe.recordWeightEntryFit; REDESIGN.md, "Weight tab page: entry first").
+weight_entry_fit_file() {
+  echo "$(xcrun simctl get_app_container "$udid" "$bundle_id" data)/tmp/taken-weight-entry-fit.txt"
+}
+
+weight_entry_fits() {
+  local name="$1" still="${2:-}" fit
+  fit="$(cat "$(weight_entry_fit_file)" 2>/dev/null || true)"
+  echo "$name weight entry: $(echo "$fit" | tr '\n' ' ')"
+  if ! grep -qx "fits=1" <<<"$fit"; then
+    echo "::error::$name: the small line comes within 16 pt of the Weigh in bar: $(echo "$fit" | tr '\n' ' ')"
+    exit 1
+  fi
+  if [ "$still" = "still" ] && ! grep -qx "still=1" <<<"$fit"; then
+    echo "::error::$name: the number moved when the keypad came up: $(echo "$fit" | tr '\n' ' ')"
+    exit 1
+  fi
+}
+
+# The Weight tab's chart card, on screen two, must end above the tab bar on the 6.1 inch iPhone.
 weight_fits() {
   local name="$1" fit
   fit="$(cat "$(weight_fit_file)" 2>/dev/null || true)"
@@ -92,11 +112,13 @@ paywall_fits() {
 }
 
 shoot() {
-  local name="$1" screen="$2" look="${3:-signal}"
+  # An optional fourth argument carries extra launch arguments ("-type ax3").
+  local name="$1" screen="$2" look="${3:-signal}" extra="${4:-}"
   xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
-  rm -f "$(probe_file)" "$(fit_file)" "$(weight_fit_file)"
+  rm -f "$(probe_file)" "$(fit_file)" "$(weight_fit_file)" "$(weight_entry_fit_file)"
   sleep 1
-  xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" >/dev/null
+  # shellcheck disable=SC2086
+  xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" $extra >/dev/null
   sleep 6
   local attempt size
   for attempt in 1 2 3 4; do
@@ -109,7 +131,8 @@ shoot() {
     if [ "$attempt" -eq 2 ]; then
       xcrun simctl terminate "$udid" "$bundle_id" >/dev/null 2>&1 || true
       sleep 1
-      xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" >/dev/null
+      # shellcheck disable=SC2086
+      xcrun simctl launch "$udid" "$bundle_id" -demo -screen "$screen" -theme "$look" $extra >/dev/null
     fi
     sleep 4
   done
@@ -213,21 +236,27 @@ shoot 54-trial-ask trial-ask
 lands 54-trial-ask "ask=1"
 shoot 54-trial-ask-blush trial-ask blush
 lands 54-trial-ask-blush "ask=1"
-# The Weight tab (SPEC 3.12; Debug and internal builds only until 1.2): the tab with a flat-to-gently-falling line and
-# weekly dose ticks in every look, the log sheet with the last weigh-in as its grey placeholder, the first weigh-in still
-# to come, All weigh-ins, Profile's switch and the weight CSV rows, and Today's one-time offer to a stack with a weekly
-# shot. Every other capture keeps the tab off (weight=0), so they still show the default app with three tabs. No name
-# here ends in a store frame's state (-log, -settings): the store-shots matcher takes any file ending in "-<state>".
+# The Weight tab (SPEC 3.12; REDESIGN.md, "Weight tab page: entry first"; Debug and internal builds only until 1.2). Screen
+# one: the grey last weigh-in with the caret in every look, typing (the number must not move, and the line must clear the
+# Weigh in bar), the range hint, never weighed in, weighed in today, locked, and pounds. Screen two: the first weigh-in's
+# single dot, the trend in every look, All weigh-ins, Profile's switch and CSV rows, and Today's one-time offer. Every other
+# capture keeps the tab off (weight=0), so they still show the default app with three tabs. No name here ends in a store
+# frame's state (today, today-done, add, day, log, settings): the store-shots matcher takes any file ending in "-<state>".
 shoot 60-weight weight
-lands 60-weight "tab=weight sheet=none weight=1 goal=0 points=0"
+lands 60-weight "tab=weight sheet=none weight=1 goal=0 focus=0 figure=ghost line=last scroll=entry"
 for look in blush phosphor ice; do
   shoot "60-weight-$look" weight "$look"
 done
-shoot 61-weigh-in weight-log
-lands 61-weigh-in "tab=weight sheet=weigh-in goal=0"
-shoot 61-weigh-in-blush weight-log blush
+shoot 61-weight-entry weight-entry
+lands 61-weight-entry "tab=weight sheet=none weight=1 focus=1 figure=typing line=last"
+weight_entry_fits 61-weight-entry still
+shoot 61-weight-entry-blush weight-entry blush
+shoot 61-weight-entry-range weight-entry-range
+lands 61-weight-entry-range "tab=weight sheet=none weight=1 focus=1 line=range"
 shoot 62-weight-empty weight-empty
-lands 62-weight-empty "tab=weight sheet=none weight=1 goal=0"
+lands 62-weight-empty "tab=weight sheet=none weight=1 goal=0 focus=0 figure=empty"
+shoot 62-weight-first weight-first
+lands 62-weight-first "tab=weight sheet=none weight=1 scroll=trend"
 shoot 63-weight-list weight-list
 lands 63-weight-list "tab=weight sheet=weigh-ins goal=0"
 shoot 63-weight-list-blush weight-list blush
@@ -237,18 +266,34 @@ shoot 64-profile-weight-data weight-data
 shoot 65-today-weight-offer today-weight-offer
 lands 65-today-weight-offer "tab=today sheet=none weight=0 offer=1"
 shoot 65-today-weight-offer-blush today-weight-offer blush
-# The optional goal (REDESIGN.md, "Goal and moments"): Tom-like history from 97.8 kg with the goal 87.0 and 180 cm in every
-# look (one lit point, "1.1 kg to 87.0"), the 10% point just lit, the goal reached and holding, the Goal sheet, and a goal
-# too low for the height. The other weight screens check goal=0.
+shoot 76-weight-weighed weight-weighed
+lands 76-weight-weighed "tab=weight sheet=none weight=1 figure=today line=last"
+shoot 77-weight-trend weight-trend
+lands 77-weight-trend "tab=weight sheet=none weight=1 goal=0 scroll=trend"
+for look in blush phosphor ice; do
+  shoot "77-weight-trend-$look" weight-trend "$look"
+done
+shoot 78-weight-locked weight-locked
+lands 78-weight-locked "tab=weight sheet=none weight=1 weightlock=1 figure=ghost"
+shoot 79-weight-lb weight-lb
+lands 79-weight-lb "tab=weight sheet=none weight=1 figure=ghost"
+# The optional goal (REDESIGN.md, "Goal and moments"): Tom-like history from 97.8 kg with the goal 87.0 and 180 cm. Screen
+# two with one lit point and "1.1 kg to 87.0" in every look; screen one after a save ("Trend 1.1 kg to 87.0") and with
+# the 10% point just lit; the goal reached and holding on screen two and as screen one's moment; the Goal sheet; and a
+# goal too low for the height.
 shoot 70-weight-goal weight-goal
-lands 70-weight-goal "tab=weight sheet=none weight=1 goal=1 points=1"
+lands 70-weight-goal "tab=weight sheet=none weight=1 goal=1 points=1 scroll=trend"
 for look in blush phosphor ice; do
   shoot "70-weight-goal-$look" weight-goal "$look"
 done
 shoot 71-weight-goal-moment weight-goal-moment
-lands 71-weight-goal-moment "tab=weight sheet=none goal=1 points=2"
+lands 71-weight-goal-moment "tab=weight sheet=none weight=1 goal=1 points=2 figure=today line=moment"
+shoot 71-weight-goal-saved weight-goal-saved
+lands 71-weight-goal-saved "tab=weight sheet=none weight=1 goal=1 figure=today line=closing"
 shoot 72-weight-goal-reached weight-goal-reached
-lands 72-weight-goal-reached "tab=weight sheet=none goal=1 points=3"
+lands 72-weight-goal-reached "tab=weight sheet=none weight=1 goal=1 points=3 scroll=trend"
+shoot 72-weight-goal-reached-moment weight-goal-reached-moment
+lands 72-weight-goal-reached-moment "tab=weight sheet=none weight=1 goal=1 points=3 line=moment"
 shoot 73-weight-goal-sheet weight-goal-sheet
 lands 73-weight-goal-sheet "tab=weight sheet=weight-goal goal=1"
 shoot 73-weight-goal-sheet-blush weight-goal-sheet blush
@@ -309,7 +354,8 @@ if [ -n "$small" ] && [ "$small" != "$udid" ]; then
   shoot 49-todo-6.3in todo
   # The Weight tab and its log sheet with the keyboard up on the smaller iPhone.
   shoot 68-weight-6.3in weight
-  shoot 68-weigh-in-6.3in weight-log
+  shoot 68-weight-entry-6.3in weight-entry
+  weight_entry_fits 68-weight-entry-6.3in still
 fi
 
 # The paywall on a 6.1 inch iPhone, the smallest current size: every plan and the trial timeline above the button,
@@ -329,12 +375,16 @@ if [ -n "$compact" ] && [ "$compact" != "$udid" ]; then
   lands 56-trial-ask-6.1in "ask=1"
   # The Weight tab, its log sheet with the keyboard up, and Today's offer on the smallest current iPhone.
   shoot 69-weight-6.1in weight
-  shoot 69-weigh-in-6.1in weight-log
-  lands 69-weigh-in-6.1in "tab=weight sheet=weigh-in"
+  shoot 69-weight-entry-6.1in weight-entry
+  lands 69-weight-entry-6.1in "tab=weight sheet=none focus=1"
+  weight_entry_fits 69-weight-entry-6.1in still
+  # Accessibility size 3: the small line must still clear the Weigh in bar (the page may scroll up to make room).
+  shoot 69-weight-entry-ax3-6.1in weight-entry signal "-type ax3"
+  weight_entry_fits 69-weight-entry-ax3-6.1in
   shoot 69-today-weight-offer-6.1in today-weight-offer
   # The goal page on the smallest current iPhone: the chart card must end above the tab bar.
   shoot 75-weight-goal-6.1in weight-goal
-  lands 75-weight-goal-6.1in "tab=weight sheet=none goal=1"
+  lands 75-weight-goal-6.1in "tab=weight sheet=none goal=1 scroll=trend"
   weight_fits 75-weight-goal-6.1in
 fi
 

@@ -2,10 +2,10 @@ import SwiftUI
 
 #if DEBUG || TAKEN_INTERNAL
 /// Set Goal or Change Goal, from the Weight tab's More menu and nowhere else (REDESIGN.md, "Goal and moments"): the goal
-/// in the weigh-in sheet's own field, the start (the first weigh-in day unless the trend has already been at the goal,
+/// in a field like the big number's, the start (the first weigh-in day unless the trend has already been at the goal,
 /// movable here), the height (asked only here, to keep goals at or above BMI 18.5), two footnotes and Save. No target date,
 /// rate, plan, forecast or start-weight field. A goal below the floor shows one line in the look's muted ink, never red,
-/// and no number. The weigh-in sheet does not change at all.
+/// and no number. Logging a weigh-in does not change at all.
 struct WeightGoalSheet: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -91,7 +91,7 @@ struct WeightGoalSheet: View {
         }
         .onAppear(perform: load)
         .task {
-            // Focus once the sheet is up, as the weigh-in sheet does.
+            // Focus once the sheet is up: a field inserted with the sheet takes focus after one main-actor hop.
             try? await Task.sleep(for: .milliseconds(80))
             focused = true
         }
@@ -105,7 +105,7 @@ struct WeightGoalSheet: View {
 
     // MARK: Pieces
 
-    /// The weigh-in sheet's field: Geist Mono 44 in a raised box whose border lights while focused, the unit beside it,
+    /// The goal's field: Geist Mono 44 in a raised box whose border lights while focused, the unit beside it,
     /// the decimal pad, one decimal at most. The placeholder is the current trend.
     private func field(unit: WeightUnit, placeholder: String) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 10) {

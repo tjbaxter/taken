@@ -332,7 +332,6 @@ final class WeightGoalTests: XCTestCase {
         XCTAssertEqual(WeightGoalCopy.marked([WeightMoment(kind: .percent(5), day: day(3, month: 8), trendKg: 92.9)]),
                        "Marked: 5 percent below where you started, 3 August.")
         XCTAssertEqual(WeightGoalCopy.goalSet(87, unit: .kg, locale: enGB), "Goal set, 87.0 kilograms.")
-        XCTAssertTrue(ProfileView.eraseMessage.contains("your weight goal"))
     }
 
     // MARK: 11. Storage
@@ -387,6 +386,7 @@ final class WeightGoalTests: XCTestCase {
         model.eraseAll()
         XCTAssertNil(model.weight.goal)
         XCTAssertNil(model.weight.state.heightCm)
+        XCTAssertTrue(ProfileView.eraseMessage.contains("your weight goal"), "the Erase dialog says so")
     }
 
     // MARK: 13. The Goal sheet's start

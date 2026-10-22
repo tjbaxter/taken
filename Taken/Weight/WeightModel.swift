@@ -13,9 +13,24 @@ final class WeightModel {
     let isDemo: Bool
     @ObservationIgnored private let clockNow: @Sendable () -> Date
     private(set) var state: WeightState
-    /// The point the weigh-in just saved lit, for this visit only: the slot shows its sentence until the Weight tab
-    /// disappears, the app leaves the foreground, UNDO is tapped or the next weigh-in is saved. Never stored.
+    /// The point the weigh-in just saved lit, for this visit only: the small line under the number shows its sentence
+    /// until the Weight tab disappears, the app leaves the foreground, UNDO is tapped or the next weigh-in is saved.
     var justReached: WeightMoment?
+    // The page's in-memory state (REDESIGN.md, "Weight tab page: entry first"), never stored.
+    /// What is typed into the big number; cleared whenever focus ends.
+    var draft = ""
+    /// Mirrors the page's focus, for DemoProbe.
+    var entryFocused = false
+    /// The weigh-in saved on this visit: the small line then says how close the trend is to the goal.
+    var justSaved: UUID?
+    /// The lit dot springs once per visit.
+    var momentPlayed = false
+    /// Edit… on today's number: All weigh-ins opens straight at this weigh-in.
+    var editOnOpen: UUID?
+    /// DemoProbe: screen two is at the top.
+    var onTrend = false
+    /// A tap on the number asked for the keypad and Pro allowed it (`requireWeightPro`): the page focuses the field.
+    var entryRequested = false
     /// `-demo` only: what the Goal sheet's field holds when it opens (`weight-goal-low`).
     @ObservationIgnored private(set) var demoTypedGoal: String?
     @ObservationIgnored private var observer: DarwinObserver?
@@ -33,35 +48,50 @@ final class WeightModel {
     }
 
     /// `-demo`: a temporary file, the tab on for the Weight screens with a flat-to-gently-falling line of weigh-ins
-    /// (`DemoData.weighIns`), in kilograms so every capture reads the same; off and empty for every other screen.
+    /// (`DemoData.weighIns`, ending yesterday unless the screen is about today), in kilograms (pounds on `weight-lb`) so
+    /// every capture reads the same; off and empty for every other screen. The goal screens get Tom-like history, the
+    /// goal and the height, and the in-memory state their line needs (a save on this visit, a point just lit).
     static func demo(screen: String?, now: Date) -> WeightModel {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("weights-demo-\(UUID().uuidString).json")
         let store = WeightStore(fileURL: url, postsChangeNotifications: false)
+        let clock = DayClock(dayStartHour: DemoData.settings.dayStartHour)
         var state = WeightState()
         if WeightDemo.showsTab(screen) {
             state.showsTab = true
-            state.unit = .kg
+            state.unit = WeightDemo.unit(screen)
         }
         if WeightDemo.hasGoal(screen) {
             // Tom-like history from 97.8 kg with the goal 87.0 and 180 cm (REDESIGN.md, "Goal and moments").
-            state.weighIns = DemoData.goalWeighIns(now: now, extraWeeks: screen == "weight-goal-reached" ? 6 : 0,
+            state.weighIns = DemoData.goalWeighIns(now: now, extraWeeks: WeightDemo.goalReached(screen) ? 6 : 0,
                                                    momentKg: screen == "weight-goal-moment" ? 87.1 : nil)
-            state.firstWeighInAt = state.weighIns.map(\.weighedAt).min()
-            let clock = DayClock(dayStartHour: DemoData.settings.dayStartHour)
             if let first = state.weighIns.map({ clock.day(of: $0) }).min() {
                 state.goal = WeightGoal(kg: 87.0, startDay: first)
                 state.heightCm = 180
             }
+        } else if screen == "weight-first" {
+            // The first weigh-in, this morning: screen two with one dot.
+            let at = clock.date(on: clock.day(for: now), hour: 7, minute: 6)
+            state.weighIns = [WeighIn(kg: 88.35, weighedAt: at, utcOffset: TimeZone.current.secondsFromGMT(for: at))]
         } else if WeightDemo.hasWeighIns(screen) {
-            state.weighIns = DemoData.weighIns(now: now)
-            state.firstWeighInAt = state.weighIns.map(\.weighedAt).min()
+            state.weighIns = DemoData.weighIns(now: now, includeToday: WeightDemo.includesToday(screen))
         }
+        state.firstWeighInAt = state.weighIns.map(\.weighedAt).min()
         try? store.replace(with: state)
         let model = WeightModel(store: store, isDemo: true, clockNow: { now })
         model.demoTypedGoal = WeightDemo.typedGoal(screen)
-        if screen == "weight-goal-moment" {
-            let clock = DayClock(dayStartHour: DemoData.settings.dayStartHour)
-            model.justReached = model.moments(clock: clock).first { $0.kind == .percent(10) }
+        model.draft = WeightDemo.draft(screen) ?? ""
+        let moments = model.moments(clock: clock)
+        switch screen {
+        case "weight-goal-moment":
+            model.justReached = moments.first { $0.kind == .percent(10) }
+            model.justSaved = model.state.last?.id
+        case "weight-goal-reached-moment":
+            model.justReached = moments.first(where: \.isGoal)
+            model.justSaved = model.state.last?.id
+        case "weight-goal-saved":
+            model.justSaved = model.state.last?.id
+        default:
+            break
         }
         return model
     }
@@ -94,6 +124,14 @@ final class WeightModel {
         let trend = WeightTrend.trend(state.weighIns, clock: clock)
         return WeightGoals.moments(goal: goal, trend: trend, weighInDays: state.weighInDays(clock: clock),
                                    heightCm: state.heightCm)
+    }
+
+    /// The end of a visit to the tab (it disappears, the app leaves the foreground): the line's sentence and the draft go.
+    func endVisit() {
+        justReached = nil
+        justSaved = nil
+        momentPlayed = false
+        draft = ""
     }
 
     func csv(timeZone: TimeZone = .current) -> String {
@@ -233,14 +271,33 @@ extension AppModel {
         }
     }
 
-    /// Log weigh-in: the sheet, or the paywall first once the first weigh-in is used.
-    func openWeighIn() {
-        requireWeightPro { [weak self] in self?.sheet = .weighIn }
+    /// Edit… on today's number: All weigh-ins, open straight at this weigh-in (editing follows the weigh-in rule).
+    func editWeighIn(_ id: UUID) {
+        requireWeightPro { [weak self] in
+            guard let self else { return }
+            self.weight.editOnOpen = id
+            self.sheet = .weighIns
+        }
     }
 
-    /// Save in the sheet: the dot and the trend move, and "Weighed in 88.35 kg" with UNDO. If this weigh-in lights a goal
-    /// point dated its own day (`WeightGoals.fresh`), the slot shows its sentence for this visit; reaching the goal plays
-    /// the success haptic All taken plays, 0.35 s after Save, in place of the soft one. One announcement 0.5 s after Save.
+    /// The big number right now (`WeightEntry.figure`).
+    var weightFigure: WeightFigure {
+        WeightEntry.figure(last: weight.state.last, today: today.day, clock: clock, draft: weight.draft,
+                           focused: weight.entryFocused)
+    }
+
+    /// The small line under it right now (`WeightEntry.line`).
+    func weightLine(locale: Locale = .current) -> WeightLine {
+        let readout = weight.goal == nil ? nil : weightPicture(range: weight.range).readout
+        return WeightEntry.line(focused: weight.entryFocused, draft: weight.draft, unit: weight.unit, locale: locale,
+                                hasGoal: weight.goal != nil, justSaved: weight.justSaved != nil,
+                                justReached: weight.justReached, readout: readout)
+    }
+
+    /// Weigh in on the page: the number stays as today's, the trend moves, and "Weighed in" with UNDO. If this weigh-in
+    /// lights a goal point dated its own day (`WeightGoals.fresh`), the small line shows its sentence for this visit;
+    /// reaching the goal plays the success haptic All taken plays, 0.35 s later, in place of the soft one. One
+    /// announcement 0.5 s after the save.
     func saveWeighIn(kg: Double) {
         let clock = self.clock
         let before = weight.moments(clock: clock)
@@ -250,6 +307,8 @@ extension AppModel {
         }
         let fresh = WeightGoals.fresh(before: before, after: weight.moments(clock: clock), savedDay: clock.day(of: saved))
         weight.justReached = fresh
+        weight.justSaved = saved.id
+        weight.momentPlayed = false
         let unit = weight.unit
         if fresh?.isGoal == true {
             let haptics = hapticsOn
@@ -260,8 +319,7 @@ extension AppModel {
         } else {
             Haptics.soft(hapticsOn)
         }
-        show(Toast(message: WeightCopy.weighedIn, time: WeightFormat.withUnit(saved.kg, unit: unit),
-                   undo: .removeWeighIn(saved.id)))
+        show(Toast(message: WeightCopy.weighedIn, undo: .removeWeighIn(saved.id)))
         var announcement = "Weighed in, \(WeightFormat.spoken(saved.kg, unit: unit))."
         if let fresh, let goal = weight.goal {
             announcement += " " + WeightGoalCopy.spokenMoment(fresh, goalKg: goal.kg, unit: unit)
@@ -364,8 +422,9 @@ extension AppModel {
     func undoWeight(_ step: UndoStep) {
         switch step {
         case .removeWeighIn(let id):
-            // The point that weigh-in lit, and its sentence, go with it; saving the same number again lights it again.
+            // The point that weigh-in lit, and its line, go with it; saving the same number again lights it again.
             weight.justReached = nil
+            weight.justSaved = nil
             _ = weight.delete(id)
         case .restoreWeightGoal(let goal):
             weight.restoreGoal(goal)

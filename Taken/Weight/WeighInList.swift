@@ -75,6 +75,14 @@ struct WeighInList: View {
         .tint(theme.signalInk)
         .presentationDetents([.large])
         .presentationBackground(theme.bg)
+        .onAppear {
+            // Edit… on today's number: the editor is already open, and Back leads to the list.
+            guard let id = model.weight.editOnOpen else { return }
+            model.weight.editOnOpen = nil
+            var transaction = Transaction()
+            transaction.disablesAnimations = true
+            withTransaction(transaction) { path = [id] }
+        }
     }
 
     /// Changing a weigh-in follows the weigh-in rule: without Pro after the first one, the paywall comes over this sheet.

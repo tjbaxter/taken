@@ -60,6 +60,10 @@ struct RootView: View {
         }
         .opensTodoTab { model.openTodoTab() }
         .paywallHost(.root)
+        #if DEBUG || TAKEN_INTERNAL
+        // `-demo -type ax3`: CI's large-text capture of the Weight tab.
+        .modifier(DemoTypeSize(enabled: model.isDemo))
+        #endif
         .sheet(item: sheetBinding, onDismiss: { model.rootSheetDidDismiss() }) { route in
             sheetContent(route)
                 .paywallHost(.sheet)
@@ -123,8 +127,6 @@ struct RootView: View {
         case .widgetHelp:
             WidgetHelpSheet()
         #if DEBUG || TAKEN_INTERNAL
-        case .weighIn:
-            WeighInSheet()
         case .weighIns:
             WeighInList()
         case .weightGoal:

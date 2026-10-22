@@ -8,7 +8,8 @@ import SwiftUI
 /// the baseline on each day a weekly dose was logged, and a y axis fitted to what is in view, never from zero. With a
 /// goal: one quiet solid line at the goal, its number on the trailing axis one step brighter than the other labels (or
 /// pinned to the top or bottom edge with an arrow when it is far off the data), and at most three lit points on the trend
-/// line, the newest percent point labelled "−5%" or "−10%". A scrub shows the day's trend, weigh-in and point. No
+/// line, always drawn lit (the moment itself plays on screen one), the newest percent point labelled "−5%" or "−10%". It
+/// lives on screen two (REDESIGN.md, "Weight tab page: entry first"). A scrub shows the day's trend, weigh-in and point. No
 /// stars, badges, dashed lines, forecast, BMI, expand button, red or green. Swift Charts gives VoiceOver an element per
 /// weigh-in and an Audio Graph; the chart adds its title and a summary with the goal and the points.
 struct WeightChart: View {
@@ -19,23 +20,19 @@ struct WeightChart: View {
     let clock: DayClock
     let today: DayKey
     let goalKg: Double?
-    /// The point the weigh-in just saved lit: it springs in once, 0.35 s after Save.
-    let justReached: WeightMoment?
 
     @State private var selection: Date?
 
     /// The plot's height, fixed so the points per kilogram are known (own choice).
     static let plotHeight: CGFloat = 196
 
-    init(picture: WeightPicture, unit: WeightUnit, range: WeightRange, clock: DayClock, today: DayKey, goalKg: Double?,
-         justReached: WeightMoment?) {
+    init(picture: WeightPicture, unit: WeightUnit, range: WeightRange, clock: DayClock, today: DayKey, goalKg: Double?) {
         self.picture = picture
         self.unit = unit
         self.range = range
         self.clock = clock
         self.today = today
         self.goalKg = goalKg
-        self.justReached = justReached
     }
 
     private var window: WeightWindow { picture.window }
@@ -221,7 +218,7 @@ struct WeightChart: View {
             ForEach(points) { moment in
                 if let position = proxy.position(for: (x: clock.noon(of: moment.day),
                                                        y: unit.value(fromKilograms: moment.trendKg))) {
-                    WeightLitPoint(springs: moment.id == justReached?.id)
+                    WeightLitPoint(springs: false)
                         .position(x: plot.minX + position.x, y: plot.minY + position.y)
                         .accessibilityElement()
                         .accessibilityLabel(WeightGoalCopy.pointLabel(moment))
@@ -321,25 +318,30 @@ struct WeightChart: View {
     }
 }
 
-/// A lit point on the trend: an 8 pt circle in the look's signal colour with its glow, on a 12 pt circle in the card's
-/// colour that cuts the line, so it sits in it like a bead. The point a weigh-in just lit springs in 0.35 s after Save,
-/// once the sheet is down, with Today's All taken spring (a fade under Reduce Motion). Never hit-testable.
+/// A lit point: an 8 pt circle in the look's signal colour with its glow. On the chart it sits on a 12 pt circle in the
+/// card's colour that cuts the line, like a bead; beside the moment sentence on screen one it stands alone and springs in
+/// 0.35 s after the save, once the keypad is down, with Today's All taken spring (a fade under Reduce Motion). Never
+/// hit-testable.
 struct WeightLitPoint: View {
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     let springs: Bool
+    let bead: Bool
     @State private var lit: Bool
 
-    init(springs: Bool) {
+    init(springs: Bool, bead: Bool = true) {
         self.springs = springs
+        self.bead = bead
         _lit = State(initialValue: !springs)
     }
 
     var body: some View {
         ZStack {
-            Circle()
-                .fill(theme.bgRaised)
-                .frame(width: 12, height: 12)
+            if bead {
+                Circle()
+                    .fill(theme.bgRaised)
+                    .frame(width: 12, height: 12)
+            }
             Circle()
                 .fill(theme.signal)
                 .frame(width: 8, height: 8)

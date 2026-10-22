@@ -30,8 +30,6 @@ enum SheetRoute: Identifiable, Hashable {
     /// How to add the Lock Screen widget, from Today's one-time invite.
     case widgetHelp
     #if DEBUG || TAKEN_INTERNAL
-    /// Log weigh-in: one focused field and Save (SPEC 3.12).
-    case weighIn
     /// All weigh-ins: edit one, or swipe it away.
     case weighIns
     /// Set Goal or Change Goal, from the Weight tab's More menu.
@@ -49,7 +47,6 @@ enum SheetRoute: Identifiable, Hashable {
         case .todoType: return "todo-type"
         case .widgetHelp: return "widget-help"
         #if DEBUG || TAKEN_INTERNAL
-        case .weighIn: return "weigh-in"
         case .weighIns: return "weigh-ins"
         case .weightGoal: return "weight-goal"
         #endif
@@ -260,7 +257,10 @@ final class AppModel {
         try? store.replace(with: seeded)
         // Store screenshots show Taken with Pro; -screen paywall, locked and settings-locked show it without, and
         // paywall-no-yearly shows the paywall when the App Store returned every plan but yearly.
-        let lockedScreens: Set<String> = ["paywall", "locked", "settings-locked", "paywall-no-yearly"]
+        var lockedScreens: Set<String> = ["paywall", "locked", "settings-locked", "paywall-no-yearly"]
+        #if DEBUG || TAKEN_INTERNAL
+        lockedScreens.insert("weight-locked")
+        #endif
         var offers = DemoOffers.all
         if screen == "paywall-no-yearly" { offers[.yearly] = nil }
         let demoLocked = screen.map { lockedScreens.contains($0) } ?? false
@@ -544,7 +544,6 @@ final class AppModel {
         case "widget-help": sheet = .widgetHelp
         case "trial-ask": trialAsk = .root
         #if DEBUG || TAKEN_INTERNAL
-        case "weight-log": sheet = .weighIn
         case "weight-list": sheet = .weighIns
         case "weight-settings", "weight-data": sheet = .settings
         case "weight-goal-sheet", "weight-goal-low": sheet = .weightGoal

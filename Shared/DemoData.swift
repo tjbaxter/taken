@@ -70,19 +70,20 @@ enum DemoData {
 // The Weight tab's demo (SPEC 3.12, CI screenshots only), compiled only where the tab is.
 extension DemoData {
     /// About 26 weeks of morning weigh-ins, most days: a flat-to-gently-falling line from about 92.6 kg that levels off
-    /// near 88.9 kg, with the day-to-day swings a scale shows, to the nearest 0.05 kg. Today's is at 07:xx.
-    static func weighIns(now: Date, timeZone: TimeZone = .current) -> [WeighIn] {
+    /// near 88.9 kg, with the day-to-day swings a scale shows, to the nearest 0.05 kg. Today's is at 07:xx; without
+    /// `includeToday` the history ends yesterday at 07:xx, and yesterday is never skipped.
+    static func weighIns(now: Date, includeToday: Bool = true, timeZone: TimeZone = .current) -> [WeighIn] {
         let clock = DayClock(dayStartHour: settings.dayStartHour, timeZone: timeZone)
         let today = clock.day(for: now)
         var random = SeededRandom(seed: 0x5CA1_2026)
         let span = 181
         var out: [WeighIn] = []
         for offset in stride(from: span, through: 0, by: -1) {
-            // About one morning in seven goes without a weigh-in; today never does.
-            let skipped = random.next() % 7 == 0 && offset != 0
+            // About one morning in seven goes without a weigh-in; the last one never does.
+            let skipped = random.next() % 7 == 0 && offset != 0 && (includeToday || offset != 1)
             let swing = Double(random.next() % 90) / 100 - 0.45
             let minute = 5 + Int(random.next() % 45)
-            guard !skipped else { continue }
+            guard !skipped, includeToday || offset != 0 else { continue }
             let progress = Double(span - offset) / Double(span)
             let level = 92.6 - 3.7 * (1 - pow(1 - progress, 1.6))
             let at = clock.date(on: today.adding(-offset), hour: 7, minute: minute)

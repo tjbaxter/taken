@@ -484,14 +484,19 @@ final class WeightTests: XCTestCase {
         }
         let clock = londonClock()
         let now = at(2026, 10, 22, 9)
-        func last(_ weighIn: WeighIn?) -> String { WeightCopy.lastLine(weighIn, unit: .kg, now: now, clock: clock, locale: enGB) }
+        func last(_ weighIn: WeighIn?) -> String { WeightCopy.lastLine(weighIn, now: now, clock: clock) }
         XCTAssertEqual(last(nil), "No weigh-ins yet")
-        XCTAssertEqual(last(weighIn(88.35, 22, 7, 42)), "Last 88.35 kg \u{00B7} today, 07:42")
-        XCTAssertEqual(last(weighIn(88.35, 21, 7, 42)), "Last 88.35 kg \u{00B7} yesterday, 07:42")
-        XCTAssertEqual(last(weighIn(88, 19, 7, 42)), "Last 88.0 kg \u{00B7} Monday, 07:42")
-        XCTAssertEqual(last(weighIn(88, 14, 7, 42)), "Last 88.0 kg \u{00B7} 14 Oct, 07:42")
-        XCTAssertEqual(WeightCopy.lastLine(WeighIn(kg: 88, weighedAt: at(2025, 3, 3, 7, 42), utcOffset: 0), unit: .kg, now: now,
-                                           clock: clock, locale: enGB), "Last 88.0 kg \u{00B7} 3 Mar 2025, 07:42")
+        XCTAssertEqual(last(weighIn(88.35, 22, 7, 42)), "Last weigh-in today, 07:42")
+        XCTAssertEqual(last(weighIn(88.35, 21, 7, 42)), "Last weigh-in yesterday, 07:42")
+        XCTAssertEqual(last(weighIn(88, 19, 7, 42)), "Last weigh-in Monday, 07:42")
+        XCTAssertEqual(last(weighIn(88, 14, 7, 42)), "Last weigh-in 14 Oct, 07:42")
+        XCTAssertEqual(last(WeighIn(kg: 88, weighedAt: at(2025, 3, 3, 7, 42), utcOffset: 0)), "Last weigh-in 3 Mar 2025, 07:42")
+        func spoken(_ weighIn: WeighIn?) -> String {
+            WeightCopy.spokenLastLine(weighIn, unit: .kg, now: now, clock: clock, locale: enGB)
+        }
+        XCTAssertEqual(spoken(weighIn(88.35, 21, 7, 42)), "Last weigh-in 88.35 kilograms, yesterday at 07:42")
+        XCTAssertEqual(spoken(weighIn(89.3, 22, 7, 6)), "Last weigh-in today at 07:06")
+        XCTAssertEqual(spoken(nil), "No weigh-ins yet")
         XCTAssertEqual(WeightCopy.listDay(day(20), today: day(22)), "Tue 20 Oct")
         XCTAssertEqual(WeightCopy.listDay(DayKey(year: 2025, month: 3, day: 3), today: day(22)), "Mon 3 Mar 2025")
     }
@@ -557,32 +562,106 @@ final class WeightTests: XCTestCase {
         XCTAssertNil(AppModel.demoRow(forScreen: "today", settings: StackSettings(), today: DayKey(ordinal: 0)))
     }
 
-    /// The first weigh-in opens the sheet without Pro; the next opens the paywall. Save shows the weight with UNDO.
+    /// The first weigh-in needs no Pro: a tap on the number brings the keypad at once. Weigh in saves it with "Weighed in"
+    /// and UNDO; after it, a tap opens the paywall instead.
     @MainActor
     func testLoggingFollowsTheWeighInRuleAndUndoRemovesIt() throws {
         let model = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "locked"])
         XCTAssertEqual(model.weightAccess, .firstSession)
-        model.openWeighIn()
-        XCTAssertEqual(model.sheet, .weighIn)
-        XCTAssertEqual(SheetRoute.weighIn.id, "weigh-in")
-        model.sheet = nil
+        let opened = RanFlag()
+        model.requireWeightPro { opened.ran = true }
+        XCTAssertTrue(opened.ran, "the first weigh-in runs at once")
 
         model.saveWeighIn(kg: 88.35)
         let toast = try XCTUnwrap(model.toast)
         XCTAssertEqual(toast.message, "Weighed in")
-        XCTAssertEqual(toast.time, WeightFormat.withUnit(88.35, unit: model.weight.unit))
-        XCTAssertEqual(model.weight.state.weighIns.count, 1)
+        XCTAssertNil(toast.time, "the value lives in the big number, not the toast")
+        XCTAssertNotNil(toast.undo)
+        let saved = try XCTUnwrap(model.weight.state.weighIns.first)
+        XCTAssertEqual(model.weight.justSaved, saved.id)
         XCTAssertNotNil(model.weight.state.firstWeighInAt)
         XCTAssertEqual(model.weightAccess, .locked, "after the first weigh-in, logging needs Pro")
 
         model.undo(toast)
         XCTAssertTrue(model.weight.isEmpty, "UNDO removes it")
+        XCTAssertNil(model.weight.justSaved)
+        XCTAssertNil(model.weight.justReached)
         XCTAssertEqual(model.weightAccess, .locked, "and the first weigh-in stays used")
 
-        model.openWeighIn()
-        XCTAssertNil(model.sheet)
-        XCTAssertNotNil(model.paywall, "the paywall instead of the sheet")
+        let again = RanFlag()
+        model.requireWeightPro { again.ran = true }
+        XCTAssertFalse(again.ran)
+        XCTAssertNotNil(model.paywall, "the paywall instead of the keypad")
         XCTAssertNotEqual(model.access, .firstSession)
+    }
+
+    /// Edit… on today's number opens All weigh-ins at that weigh-in; when locked, the paywall opens and no sheet does.
+    @MainActor
+    func testEditOpensAllWeighInsAtTodaysWeighIn() throws {
+        let model = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-weighed"])
+        let today = try XCTUnwrap(model.weight.state.last)
+        model.editWeighIn(today.id)
+        XCTAssertEqual(model.sheet, .weighIns)
+        XCTAssertEqual(model.weight.editOnOpen, today.id)
+
+        let locked = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-locked"])
+        XCTAssertEqual(locked.weightAccess, .locked)
+        let id = try XCTUnwrap(locked.weight.state.last?.id)
+        locked.editWeighIn(id)
+        XCTAssertNil(locked.sheet)
+        XCTAssertNotNil(locked.paywall)
+        XCTAssertNil(locked.weight.editOnOpen)
+    }
+
+    /// A visit's line and draft go when it ends.
+    @MainActor
+    func testEndVisitClearsTheVisit() {
+        let model = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-goal-moment"])
+        XCTAssertNotNil(model.weight.justReached)
+        XCTAssertNotNil(model.weight.justSaved)
+        model.weight.momentPlayed = true
+        model.weight.draft = "88.1"
+        model.weight.endVisit()
+        XCTAssertNil(model.weight.justReached)
+        XCTAssertNil(model.weight.justSaved)
+        XCTAssertFalse(model.weight.momentPlayed)
+        XCTAssertEqual(model.weight.draft, "")
+    }
+
+    /// The demo screens open on Weight with the tab on, and hold what their captures need.
+    @MainActor
+    func testTheEntryDemoScreens() throws {
+        let screens = ["weight", "weight-entry", "weight-entry-range", "weight-empty", "weight-first", "weight-weighed",
+                       "weight-trend", "weight-locked", "weight-lb", "weight-goal-saved", "weight-goal-reached-moment"]
+        for screen in screens {
+            let model = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", screen])
+            XCTAssertEqual(model.tab, .weight, screen)
+            XCTAssertTrue(model.weight.showsTab, screen)
+        }
+        let plain = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight"])
+        let last = try XCTUnwrap(plain.weight.state.last)
+        XCTAssertEqual(plain.clock.day(of: last), plain.today.day.adding(-1), "the history ends yesterday")
+        XCTAssertEqual(plain.weightFigure, .ghost(kg: last.kg))
+        XCTAssertEqual(plain.weightLine(), .last)
+
+        let first = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-first"])
+        XCTAssertEqual(first.weight.state.weighIns.count, 1)
+
+        let saved = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-goal-saved"])
+        XCTAssertNotNil(saved.weight.justSaved)
+        guard case .closing(.toGo(let left)) = saved.weightLine() else { return XCTFail("closing, to go") }
+        XCTAssertGreaterThanOrEqual(WeightGoalCopy.roundedUp(left), 1.1)
+        XCTAssertLessThanOrEqual(WeightGoalCopy.roundedUp(left), 1.3)
+
+        let locked = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-locked"])
+        XCTAssertEqual(locked.weightAccess, .locked)
+        XCTAssertEqual(AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-lb"]).weight.unit, .lb)
+        XCTAssertEqual(AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-entry"]).weight.draft, "88.1")
+        XCTAssertEqual(AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-empty"]).weightFigure, .empty)
+        let weighed = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-weighed"])
+        guard case .today = weighed.weightFigure else { return XCTFail("today's number") }
+        let moment = AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", "weight-goal-reached-moment"])
+        XCTAssertEqual(moment.weight.justReached?.id, "goal")
     }
 
     /// Erase all data takes the weigh-ins and keeps the tab setting, the unit, the offer's answer and the first
@@ -606,4 +685,10 @@ final class WeightTests: XCTestCase {
         XCTAssertEqual(kept.firstWeighInAt, first)
         XCTAssertNil(kept.range, "the chart's range goes back to All")
     }
+}
+
+/// Whether an action handed to `requireWeightPro` ran.
+@MainActor
+private final class RanFlag {
+    var ran = false
 }

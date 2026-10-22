@@ -433,6 +433,28 @@ enum WeightGoalCopy {
         }
     }
 
+    /// Screen one's small line after a save on this visit: the slot with "Trend" in front, so it never reads as
+    /// arithmetic on the big number. "Trend 1.1 kg to 87.0", "Trend holding near 87.0". Nil for "Goal 87.0".
+    static func visit(_ readout: GoalReadout, goalKg: Double, unit: WeightUnit, locale: Locale = .current) -> [Part]? {
+        switch readout {
+        case .goalOnly:
+            return nil
+        case .holding:
+            return [Part("Trend holding near "), Part(goal(goalKg, unit: unit, locale: locale), number: true)]
+        default:
+            return [Part("Trend ")] + slot(readout, goalKg: goalKg, unit: unit, locale: locale)
+        }
+    }
+
+    /// For VoiceOver: "Trend 1.1 kilograms to your goal, 87.0", "Trend holding near your goal, 87.0". Nil for goal only.
+    static func spokenVisit(_ readout: GoalReadout, goalKg: Double, unit: WeightUnit, locale: Locale = .current) -> String? {
+        switch readout {
+        case .goalOnly: return nil
+        case .holding: return "Trend holding near your goal, \(goal(goalKg, unit: unit, locale: locale))"
+        default: return "Trend \(spokenSlot(readout, goalKg: goalKg, unit: unit, locale: locale))"
+        }
+    }
+
     // MARK: Moments
 
     /// The slot for one visit after a crossing: "Trend is now 10% below where you started.", "Trend reached 87.0."
@@ -571,6 +593,8 @@ enum WeightGoalCopy {
                      setHeight(183, unit: .centimetres), setHeight(183, unit: .feetInches)]
         lines += readouts.map { text(slot($0, goalKg: 87, unit: .kg)) }
         lines += readouts.map { spokenSlot($0, goalKg: 87, unit: .kg) }
+        lines += readouts.compactMap { visit($0, goalKg: 87, unit: .kg).map(text) }
+        lines += readouts.compactMap { spokenVisit($0, goalKg: 87, unit: .kg) }
         lines += moments.map { text(moment($0, goalKg: 87, unit: .kg)) }
         lines += moments.map { spokenMoment($0, goalKg: 87, unit: .kg) }
         lines += moments.map(pointLabel) + moments.map { pointValue($0, unit: .kg) }

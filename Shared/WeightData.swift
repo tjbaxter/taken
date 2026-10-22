@@ -1046,13 +1046,19 @@ enum WeightCopy {
     /// The tab's SF Symbol.
     static let symbol = "scalemass"
     static let noWeighIns = "No weigh-ins yet"
-    static let empty = "Log your first weigh-in. Your trend starts here."
-    static let logWeighIn = "Log weigh-in"
+    /// The bar above the decimal pad: Tom's word.
+    static let weighIn = "Weigh in"
     static let save = "Save"
-    static let now = "Now"
     static let trend = "Trend"
     static let trendCaption = "smooths daily swings"
-    static let last = "Last"
+    /// Screen two under its single dot, after the first weigh-in.
+    static let trendStarts = "Your trend starts here."
+    /// The chevron at the bottom of screen one, for VoiceOver.
+    static let showTrend = "Show trend"
+    /// The long-press menu on today's number, and its VoiceOver actions.
+    static let edit = "Edit\u{2026}"
+    static let delete = "Delete"
+    static let editWeighIn = "Edit weigh-in"
     static let ticks = "Ticks: weekly doses"
     static let emptyRange = "No weigh-ins in this range"
     static let allWeighIns = "All weigh-ins"
@@ -1060,7 +1066,7 @@ enum WeightCopy {
     static let hideTab = "Hide Weight Tab"
     /// The toast after Hide Weight Tab, on Today, with UNDO.
     static let hidden = "Weight tab hidden. Profile brings it back."
-    /// The toast after Save, before the weight in Geist Mono: "Weighed in" "88.35 kg".
+    /// The toast after a weigh-in is saved, with UNDO.
     static let weighedIn = "Weighed in"
     static let deleted = "Weigh-in deleted"
     static let updated = "Weigh-in updated"
@@ -1079,13 +1085,42 @@ enum WeightCopy {
     static let couldNotSave = "Could not save. Try again."
     static let notFound = "No weigh-ins found. Taken reads a date column and a weight column in kg or lb."
     static let couldNotOpen = "Could not open that file."
+    /// The field's VoiceOver hints.
+    static let typeHint = "Double-tap to type today's weight."
+    static let anotherHint = "Double-tap to log another weigh-in."
+    static let lockedHint = "Logging needs Taken Pro. Opens Taken Pro."
+    /// The field's label once today has a weigh-in.
+    static let todaysWeighIn = "Today's weigh-in"
 
-    /// Under the title, with the last weigh-in's value: "Last 88.35 kg · yesterday, 07:42", "Last 88.35 kg · Tuesday,
-    /// 07:42", "Last 88.35 kg · 14 Oct, 07:42".
-    static func lastLine(_ weighIn: WeighIn?, unit: WeightUnit, now: Date, clock: DayClock, locale: Locale = .current) -> String {
+    /// The field's label: "Today's weight in kilograms", "Today's weight in pounds".
+    static func fieldLabel(_ unit: WeightUnit) -> String { "Today's weight in \(unit.spoken)" }
+
+    /// While typing, a finished-looking number outside the bounds: "Between 20 and 350 kg", "Between 44 and 770 lb".
+    static func rangeHint(_ unit: WeightUnit) -> String {
+        "Between \(Int(unit.bounds.lowerBound)) and \(Int(unit.bounds.upperBound)) \(unit.symbol)"
+    }
+
+    /// "Between 20 and 350 kilograms"
+    static func spokenRangeHint(_ unit: WeightUnit) -> String {
+        "Between \(Int(unit.bounds.lowerBound)) and \(Int(unit.bounds.upperBound)) \(unit.spoken)"
+    }
+
+    /// Under the big number: "Last weigh-in yesterday, 07:42", "Last weigh-in Tuesday, 07:42", "Last weigh-in 14 Oct,
+    /// 07:42", "Last weigh-in 3 Mar 2025, 07:42". It never counts missed days.
+    static func lastLine(_ weighIn: WeighIn?, now: Date, clock: DayClock) -> String {
         guard let weighIn else { return noWeighIns }
-        let day = dayWord(clock.day(of: weighIn), today: clock.day(for: now), clock: clock)
-        return "\(last) \(WeightFormat.withUnit(weighIn.kg, unit: unit, locale: locale)) \u{00B7} \(day), \(Fmt.clock(weighIn.weighedAt, clock))"
+        return "Last weigh-in \(dayWord(clock.day(of: weighIn), today: clock.day(for: now), clock: clock)), \(Fmt.clock(weighIn.weighedAt, clock))"
+    }
+
+    /// The small line for VoiceOver, with the number the grey digits show: "Last weigh-in 88.35 kilograms, yesterday at
+    /// 07:42"; on a day already weighed in, "Last weigh-in today at 07:06".
+    static func spokenLastLine(_ weighIn: WeighIn?, unit: WeightUnit, now: Date, clock: DayClock, locale: Locale = .current) -> String {
+        guard let weighIn else { return noWeighIns }
+        let day = clock.day(of: weighIn)
+        let today = clock.day(for: now)
+        let time = Fmt.clock(weighIn.weighedAt, clock)
+        if day == today { return "Last weigh-in today at \(time)" }
+        return "Last weigh-in \(WeightFormat.spoken(weighIn.kg, unit: unit, locale: locale)), \(dayWord(day, today: today, clock: clock)) at \(time)"
     }
 
     /// "today", "yesterday", "Tuesday" this past week, then "14 Oct", and "14 Oct 2025" from another year.
@@ -1142,33 +1177,44 @@ enum WeightCopy {
 
     /// Every fixed line, for the copy rules test.
     static var all: [String] {
-        [tab, noWeighIns, empty, logWeighIn, save, now, trend, trendCaption, last, ticks, emptyRange, allWeighIns, more,
-         hideTab, hidden,
+        [tab, noWeighIns, weighIn, save, trend, trendCaption, trendStarts, showTrend, edit, delete, editWeighIn, ticks,
+         emptyRange, allWeighIns, more, hideTab, hidden,
          weighedIn, deleted, updated, offer, addTab, notNow, profileSection, profileSwitch, profileFootnote, exportCSV,
-         importCSV, editTitle, weightField, when, deleteWeighIn, couldNotSave, notFound, couldNotOpen,
+         importCSV, editTitle, weightField, when, deleteWeighIn, couldNotSave, notFound, couldNotOpen, typeHint, anotherHint,
+         lockedHint, todaysWeighIn,
          imported(added: 214, already: 3, unreadable: 2, unit: .kg), imported(added: 0, already: 5, unreadable: 0, unit: .lb)]
             + WeightUnit.allCases.map(\.menuTitle) + WeightRange.allCases.map(\.spoken)
+            + WeightUnit.allCases.flatMap { [fieldLabel($0), rangeHint($0), spokenRangeHint($0)] }
     }
 }
 
 // MARK: - Demo
 
-/// `-demo` screens for the Weight tab (CI screenshots only): `weight`, `weight-log`, `weight-list`, `weight-empty`,
-/// `weight-settings` and `weight-data` (Profile at the Weight switch and at the weight CSV rows), `today-weight-offer`, and
-/// the goal's: `weight-goal` (one point), `weight-goal-moment` (the 10% point just lit), `weight-goal-reached` (three points,
-/// holding), `weight-goal-sheet` (Change Goal) and `weight-goal-low` (55.0 typed, too low for 180 cm).
+/// `-demo` screens for the Weight tab (CI screenshots only; REDESIGN.md, "Weight tab page: entry first"): screen one as
+/// it opens (`weight`), typing (`weight-entry`, `weight-entry-range`), never weighed in (`weight-empty`), weighed in today
+/// (`weight-weighed`), locked (`weight-locked`), in pounds (`weight-lb`); screen two (`weight-first`, `weight-trend`);
+/// All weigh-ins (`weight-list`); Profile at the Weight switch and the CSV rows (`weight-settings`, `weight-data`); the
+/// goal's (`weight-goal`, `weight-goal-saved`, `weight-goal-moment`, `weight-goal-reached`, `weight-goal-reached-moment`,
+/// `weight-goal-sheet`, `weight-goal-low`); and `today-weight-offer`.
 enum WeightDemo {
-    static let goalScreens = ["weight-goal", "weight-goal-moment", "weight-goal-reached", "weight-goal-sheet", "weight-goal-low"]
+    static let pageScreens = ["weight", "weight-entry", "weight-entry-range", "weight-empty", "weight-first", "weight-weighed",
+                              "weight-trend", "weight-locked", "weight-lb", "weight-list", "weight-settings", "weight-data"]
+    static let goalScreens = ["weight-goal", "weight-goal-saved", "weight-goal-moment", "weight-goal-reached",
+                              "weight-goal-reached-moment", "weight-goal-sheet", "weight-goal-low"]
 
     /// The screens that open on the Weight tab.
     static func opensOnWeight(_ screen: String?) -> Bool {
         guard let screen else { return false }
-        return ["weight", "weight-log", "weight-list", "weight-empty", "weight-settings", "weight-data"].contains(screen)
-            || goalScreens.contains(screen)
+        return pageScreens.contains(screen) || goalScreens.contains(screen)
     }
 
     /// The goal screens: Tom-like history from 97.8 kg, the goal 87.0 and 180 cm (`DemoData.goalWeighIns`).
     static func hasGoal(_ screen: String?) -> Bool { screen.map(goalScreens.contains) ?? false }
+
+    /// The goal's history six weeks on, down to about 86.8 and holding.
+    static func goalReached(_ screen: String?) -> Bool {
+        screen == "weight-goal-reached" || screen == "weight-goal-reached-moment"
+    }
 
     /// The Goal sheet opens over the tab.
     static func opensGoalSheet(_ screen: String?) -> Bool { screen == "weight-goal-sheet" || screen == "weight-goal-low" }
@@ -1176,10 +1222,32 @@ enum WeightDemo {
     /// What the goal field holds on `weight-goal-low`.
     static func typedGoal(_ screen: String?) -> String? { screen == "weight-goal-low" ? "55.0" : nil }
 
+    /// What the entry screens type; the page takes focus 450 ms after it appears.
+    static func draft(_ screen: String?) -> String? {
+        switch screen {
+        case "weight-entry": return "88.1"
+        case "weight-entry-range": return "883"
+        default: return nil
+        }
+    }
+
+    /// The screens shown scrolled to screen two, 450 ms after the page appears.
+    static func opensOnTrend(_ screen: String?) -> Bool {
+        ["weight-first", "weight-trend", "weight-goal", "weight-goal-reached"].contains(screen ?? "")
+    }
+
+    /// The history includes a weigh-in today; elsewhere it ends yesterday, so the line reads "yesterday".
+    static func includesToday(_ screen: String?) -> Bool {
+        ["weight-weighed", "weight-list", "weight-settings", "weight-data"].contains(screen ?? "")
+    }
+
+    /// Pounds (`weight-lb`); every other capture is in kilograms, so they read the same everywhere.
+    static func unit(_ screen: String?) -> WeightUnit { screen == "weight-lb" ? .lb : .kg }
+
     /// The tab is on for every Weight screen and off everywhere else, so the other captures still show the default app.
     static func showsTab(_ screen: String?) -> Bool { opensOnWeight(screen) }
 
-    /// A flat-to-gently-falling line of weigh-ins, everywhere the tab is on but `weight-empty`.
+    /// Weigh-ins everywhere the tab is on but `weight-empty`.
     static func hasWeighIns(_ screen: String?) -> Bool { opensOnWeight(screen) && screen != "weight-empty" }
 
     /// A weekly shot in the stack, for the chart's dose ticks and the offer's medicine.

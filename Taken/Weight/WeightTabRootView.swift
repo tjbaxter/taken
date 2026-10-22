@@ -1,203 +1,329 @@
 import SwiftUI
 
 #if DEBUG || TAKEN_INTERNAL
-/// The Weight tab (SPEC 3.12; REDESIGN.md, "Weight tab, 2026-10-22" and "Goal and moments"): the last weigh-in under the
-/// title, the trend as the headline with one slot line under it (the caption, how close the trend is to the goal, or for
-/// one visit the sentence for a point just lit) and Log weigh-in, then the chart card with its ranges, the change line for
-/// the range and weekly dose ticks, then All weigh-ins. Off until the person turns it on in Profile or from Today's
-/// one-time offer; its More menu sets kilograms or pounds, sets, changes or clears the optional goal, and hides the tab,
-/// with UNDO. Weight never shows on Today (apart from the offer), in the widgets, the control, Siri, the nudge, the streak
-/// or History. Compiled only into Debug and the owner's internal builds until 1.2: this type's name is the marker
+/// The Weight tab (SPEC 3.12; REDESIGN.md, "Weight tab page: entry first, 2026-10-22"): one ScrollView with two screens.
+/// Screen one (`WeightEntryPage`) is the big number, the small line under it and a chevron; screen two (`WeightTrendPage`)
+/// is the trend, how close it is to the goal, the chart card and All weigh-ins, one scroll down. The page height is
+/// measured once (status bar to tab bar, keyboard ignored) and frozen while typing, so the number never moves; the Weigh
+/// in bar rides on the decimal pad. Off until the person turns it on in Profile or from Today's one-time offer. Weight
+/// never shows on Today (apart from the offer), in the widgets, the control, Siri, the nudge, the streak or History.
+/// Compiled only into Debug and the owner's internal builds until 1.2: this type's name is the marker
 /// scripts/check-app-store-build.sh looks for, so an App Store build is proven not to contain the tab.
 struct WeightTabRootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
+    @Environment(\.locale) private var locale
     @Environment(\.scenePhase) private var scenePhase
-    /// `-demo` only: where the chart card ends and where the tab bar begins, for the fit probe.
-    @State private var chartBottom: CGFloat = 0
-    @State private var visibleBottom: CGFloat = 0
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @FocusState private var focused: Bool
+    /// The status bar's bottom and the tab bar's top, in global points, measured with the keyboard ignored.
+    @State private var pageTop: CGFloat = 0
+    @State private var tabBarTop: CGFloat = 0
+    /// Status bar to tab bar, frozen while typing.
+    @State private var pageHeight: CGFloat = 0
+    /// Screen one's height: where the snap's fold is.
+    @State private var fold: CGFloat = 0
+    @State private var blockMid: CGFloat = 0
+    @State private var blockMidBefore: CGFloat = 0
+    @State private var lineBottom: CGFloat = 0
+    @State private var buttonTop: CGFloat = 0
+    /// The range hint is announced once per typing session.
+    @State private var rangeAnnounced = false
 
     init() {}
 
     var body: some View {
         let weight = model.weight
-        ScrollView {
-            VStack(alignment: .leading, spacing: 0) {
-                TabHeader(title: WeightCopy.tab,
-                          subtitle: WeightCopy.lastLine(weight.state.last, unit: weight.unit, now: model.now,
-                                                        clock: model.clock)) {
-                    WeightMoreMenu()
+        ScrollViewReader { proxy in
+            ScrollView {
+                VStack(spacing: 0) {
+                    WeightEntryPage(focused: $focused, hasTrend: !weight.isEmpty, blockMid: $blockMid,
+                                    lineBottom: $lineBottom, save: save, showTrend: { showTrend(proxy) })
+                        .frame(minHeight: pageHeight, alignment: .top)
+                        .background {
+                            GeometryReader { geometry in
+                                Color.clear.onChange(of: geometry.size.height, initial: true) { _, height in fold = height }
+                            }
+                        }
+                        .id(WeightAnchor.entry)
+                    if !weight.isEmpty {
+                        WeightTrendPage(pageTop: pageTop, tabBarTop: tabBarTop)
+                            .frame(minHeight: pageHeight, alignment: .top)
+                            .id(WeightAnchor.trend)
+                    }
                 }
-                if weight.isEmpty {
-                    emptyCard
-                        .padding(.top, 22)
-                } else {
-                    content(weight)
-                }
+                .padding(.horizontal, 20)
+                // Shown once measured, so there is no first-frame jump.
+                .opacity(pageHeight > 0 ? 1 : 0)
             }
-            .padding(.horizontal, 20)
-            .padding(.bottom, 28)
-        }
-        .scrollIndicators(.hidden)
-        .background {
-            if model.isDemo {
-                // The top of the tab bar: the scroll view's visible bottom less its bottom safe-area inset.
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear { visibleBottom = proxy.frame(in: .global).maxY - proxy.safeAreaInsets.bottom }
-                        .onChange(of: proxy.size) { _, _ in
-                            visibleBottom = proxy.frame(in: .global).maxY - proxy.safeAreaInsets.bottom
+            .scrollIndicators(.hidden)
+            .scrollBounceBehavior(.basedOnSize)
+            .scrollDismissesKeyboard(.immediately)
+            .scrollTargetBehavior(WeightFoldSnap(fold: fold, enabled: !focused))
+            .background(theme.bg.ignoresSafeArea())
+            .safeAreaInset(edge: .bottom, spacing: 0) {
+                if focused {
+                    PrimaryButton(title: WeightCopy.weighIn, enabled: kilograms != nil) { save() }
+                        .padding(.horizontal, 20)
+                        .padding(.top, 8)
+                        .padding(.bottom, 12)
+                        .background {
+                            GeometryReader { geometry in
+                                Color.clear.onChange(of: geometry.frame(in: .global).minY, initial: true) { _, top in
+                                    buttonTop = top + 8
+                                }
+                            }
+                        }
+                        .transition(.opacity)
+                } else {
+                    // The dock sits on the bottom safe area, so its bottom is the top of the tab bar.
+                    WeightToastDock()
+                        .background {
+                            GeometryReader { geometry in
+                                Color.clear.onChange(of: geometry.frame(in: .global).maxY, initial: true) { _, bottom in
+                                    tabBarTop = bottom
+                                    measure()
+                                }
+                            }
                         }
                 }
             }
+            .background {
+                // The status bar's bottom: the scroll view's top plus its top inset, whichever way the frame lies.
+                GeometryReader { geometry in
+                    Color.clear.onChange(of: geometry.frame(in: .global).minY + geometry.safeAreaInsets.top, initial: true) { _, top in
+                        pageTop = top
+                        measure()
+                    }
+                }
+                .ignoresSafeArea(.keyboard)
+            }
+            .onChange(of: focused) { _, now in
+                model.weight.entryFocused = now
+                if now {
+                    blockMidBefore = blockMid
+                    keepLineClear(proxy)
+                } else {
+                    model.weight.draft = ""
+                    rangeAnnounced = false
+                }
+                record()
+            }
+            .task { await applyDemo(proxy) }
         }
-        .background(theme.bg.ignoresSafeArea())
-        .safeAreaInset(edge: .bottom, spacing: 0) { WeightToastDock() }
-        .onAppear { weight.refresh() }
-        // The sentence for a point just lit lasts one visit.
-        .onDisappear { weight.justReached = nil }
+        .onChange(of: model.weight.draft) { _, typed in
+            let unit = model.weight.unit
+            let clean = WeightFormat.sanitize(typed, locale: locale, maxDecimals: unit.decimals)
+            if clean != typed { model.weight.draft = clean }
+            if focused, !rangeAnnounced, WeightEntry.showsRangeHint(clean, unit: unit, locale: locale) {
+                rangeAnnounced = true
+                if !model.isDemo { UIAccessibility.post(notification: .announcement, argument: WeightCopy.spokenRangeHint(unit)) }
+            }
+        }
+        .onChange(of: model.weightFigure.kind) { _, _ in record() }
+        .onChange(of: model.weightLine(locale: locale).kind) { _, _ in record() }
+        .onChange(of: model.weight.onTrend) { _, _ in record() }
+        .onAppear { model.weight.refresh() }
+        .onDisappear {
+            focused = false
+            model.weight.endVisit()
+        }
         .onChange(of: scenePhase) { _, phase in
-            if phase != .active { weight.justReached = nil }
+            if phase != .active {
+                focused = false
+                model.weight.endVisit()
+            }
         }
-        .onChange(of: chartBottom) { _, _ in recordFit() }
-        .onChange(of: visibleBottom) { _, _ in recordFit() }
     }
 
-    private var locked: Bool { model.weightAccess == .locked }
+    private var kilograms: Double? {
+        WeightFormat.kilograms(model.weight.draft, unit: model.weight.unit, locale: locale)
+    }
+
+    /// The page height, measured while not typing.
+    private func measure() {
+        guard !focused, pageTop > 0, tabBarTop > pageTop else { return }
+        let height = tabBarTop - pageTop
+        if abs(height - pageHeight) > 0.5 { pageHeight = height }
+    }
+
+    /// Weigh in: read the number, close the keypad, then save, so the digits stay as today's without a flash.
+    private func save() {
+        guard let kg = kilograms else { return }
+        focused = false
+        model.saveWeighIn(kg: kg)
+    }
+
+    private func showTrend(_ proxy: ScrollViewProxy) {
+        withAnimation(reduceMotion ? nil : .snappy(duration: 0.35)) {
+            proxy.scrollTo(WeightAnchor.trend, anchor: .top)
+        }
+    }
+
+    /// On small phones or with large text: 0.35 s after focus, if the small line comes within 16 of the Weigh in bar,
+    /// the page scrolls up just enough. Under -demo the fit is written for CI afterwards.
+    private func keepLineClear(_ proxy: ScrollViewProxy) {
+        Task { @MainActor in
+            try? await Task.sleep(for: .milliseconds(350))
+            guard focused else { return }
+            if buttonTop > 0, lineBottom > buttonTop - 16 {
+                withAnimation(.snappy(duration: 0.25)) {
+                    proxy.scrollTo(WeightAnchor.block, anchor: .bottom)
+                }
+            }
+            guard model.isDemo else { return }
+            try? await Task.sleep(for: .milliseconds(600))
+            DemoProbe.recordWeightEntryFit(lineBottom: lineBottom, buttonTop: buttonTop, shift: blockMid - blockMidBefore)
+        }
+    }
+
+    /// `-demo`: the entry screens take focus, and the trend screens scroll to screen two, 450 ms after appearing.
+    private func applyDemo(_ proxy: ScrollViewProxy) async {
+        guard model.isDemo else { return }
+        let screen = model.launchScreen
+        guard WeightDemo.draft(screen) != nil || WeightDemo.opensOnTrend(screen) else { return }
+        try? await Task.sleep(for: .milliseconds(450))
+        if WeightDemo.draft(screen) != nil { focused = true }
+        if WeightDemo.opensOnTrend(screen) { proxy.scrollTo(WeightAnchor.trend, anchor: .top) }
+    }
+
+    private func record() {
+        guard model.isDemo else { return }
+        DemoProbe.record(model)
+    }
+}
+
+/// Screen two: "Trend" and its value, how close it is to the goal (the slot), the chart card with its ranges, the change
+/// line and weekly dose ticks, and All weigh-ins. With one weigh-in day: the single dot and "Your trend starts here.".
+struct WeightTrendPage: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+    @Environment(\.locale) private var locale
+    /// The status bar's bottom and the tab bar's top: screen two at the top, and the fit probe.
+    let pageTop: CGFloat
+    let tabBarTop: CGFloat
+
+    init(pageTop: CGFloat, tabBarTop: CGFloat) {
+        self.pageTop = pageTop
+        self.tabBarTop = tabBarTop
+    }
+
+    var body: some View {
+        let weight = model.weight
+        let unit = weight.unit
+        let picture = model.weightPicture(range: weight.range)
+        let firstDay = picture.trend.count <= 1
+        VStack(alignment: .leading, spacing: 0) {
+            headline(weight, picture: picture, unit: unit)
+            Card {
+                VStack(alignment: .leading, spacing: 14) {
+                    if !firstDay {
+                        WeightRangePicker(selection: weight.range) { range in
+                            model.setWeightRange(range)
+                        }
+                        if let change = picture.change {
+                            changeLine(change, unit: unit)
+                        }
+                    }
+                    WeightChart(picture: picture, unit: unit, range: weight.range, clock: model.clock, today: model.today.day,
+                                goalKg: weight.goal?.kg)
+                    if firstDay {
+                        Text(WeightCopy.trendStarts)
+                            .font(.sans(15, .sans, relativeTo: .subheadline))
+                            .foregroundStyle(theme.fgSubtle)
+                    } else if !picture.window.ticks.isEmpty {
+                        Text(WeightCopy.ticks)
+                            .font(.sans(13, .sans, relativeTo: .footnote))
+                            .foregroundStyle(theme.fgSubtle)
+                    }
+                }
+                .padding(16)
+            }
+            .background {
+                if model.isDemo {
+                    GeometryReader { geometry in
+                        Color.clear.onChange(of: geometry.frame(in: .global).maxY, initial: true) { _, bottom in
+                            guard tabBarTop > 0 else { return }
+                            DemoProbe.recordWeightFit(chartBottom: bottom, visibleBottom: tabBarTop)
+                        }
+                    }
+                }
+            }
+            .padding(.top, 16)
+            allWeighInsRow(count: weight.state.weighIns.count)
+                .padding(.top, 16)
+        }
+        .padding(.top, 20)
+        .padding(.bottom, 28)
+        .background {
+            GeometryReader { geometry in
+                Color.clear.onChange(of: geometry.frame(in: .global).minY, initial: true) { _, top in
+                    let atTop = pageTop > 0 && abs(top - pageTop) <= 1
+                    if model.weight.onTrend != atTop { model.weight.onTrend = atTop }
+                }
+            }
+        }
+    }
 
     private var shape: RoundedRectangle {
         RoundedRectangle(cornerRadius: theme.radius.card, style: .continuous)
     }
 
-    private func recordFit() {
-        guard model.isDemo, chartBottom > 0, visibleBottom > 0 else { return }
-        DemoProbe.recordWeightFit(chartBottom: chartBottom, visibleBottom: visibleBottom)
-    }
-
-    // MARK: Content
-
-    @ViewBuilder
-    private func content(_ weight: WeightModel) -> some View {
-        let unit = weight.unit
-        let picture = model.weightPicture(range: weight.range)
-        headlineCard(weight, picture: picture, unit: unit)
-            .padding(.top, 22)
-        Card {
-            VStack(alignment: .leading, spacing: 14) {
-                WeightRangePicker(selection: weight.range) { range in
-                    model.setWeightRange(range)
-                }
-                if let change = picture.change {
-                    changeLine(change, unit: unit)
-                }
-                WeightChart(picture: picture, unit: unit, range: weight.range, clock: model.clock, today: model.today.day,
-                            goalKg: weight.goal?.kg, justReached: weight.justReached)
-                if !picture.window.ticks.isEmpty {
-                    Text(WeightCopy.ticks)
-                        .font(.sans(13, .sans, relativeTo: .footnote))
-                        .foregroundStyle(theme.fgSubtle)
-                }
-            }
-            .padding(16)
-        }
-        .background {
-            if model.isDemo {
-                GeometryReader { proxy in
-                    Color.clear
-                        .onAppear { chartBottom = proxy.frame(in: .global).maxY }
-                        .onChange(of: proxy.size) { _, _ in chartBottom = proxy.frame(in: .global).maxY }
-                }
-            }
-        }
-        .padding(.top, 16)
-        allWeighInsRow(count: weight.state.weighIns.count)
-            .padding(.top, 16)
-    }
-
-    /// One column: "Trend", the trend in Geist Mono, the slot, and the one big button. The slot is always there, so the
-    /// card never changes height. One neutral colour: nothing turns red or green.
-    private func headlineCard(_ weight: WeightModel, picture: WeightPicture, unit: WeightUnit) -> some View {
+    /// "Trend", the trend in Geist Mono 34, and the slot: "smooths daily swings", or how close it is to the goal. One
+    /// VoiceOver heading.
+    private func headline(_ weight: WeightModel, picture: WeightPicture, unit: WeightUnit) -> some View {
         let trendKg = picture.trend.last?.kg
-        return Card {
-            VStack(alignment: .leading, spacing: 16) {
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(WeightCopy.trend)
-                        .font(.sans(14, .sansMedium, relativeTo: .footnote))
-                        .foregroundStyle(theme.fgSubtle)
-                    if let trendKg {
-                        HStack(alignment: .firstTextBaseline, spacing: 6) {
-                            Text(WeightFormat.trend(trendKg, unit: unit))
-                                .font(.mono(40, .monoMedium, relativeTo: .largeTitle))
-                                .foregroundStyle(theme.fg)
-                                .contentTransition(.numericText())
-                                .lineLimit(1)
-                                .minimumScaleFactor(0.7)
-                            Text(unit.symbol)
-                                .font(.sans(18, .sansMedium, relativeTo: .title3))
-                                .foregroundStyle(theme.fgMuted)
-                        }
-                    }
-                    slot(weight, picture: picture, unit: unit)
-                        .lineLimit(2)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .frame(maxWidth: .infinity, alignment: .leading)
+        return VStack(alignment: .leading, spacing: 2) {
+            Text(WeightCopy.trend)
+                .font(.sans(14, .sansMedium, relativeTo: .footnote))
+                .foregroundStyle(theme.fgSubtle)
+            if let trendKg {
+                HStack(alignment: .firstTextBaseline, spacing: 6) {
+                    Text(WeightFormat.trend(trendKg, unit: unit))
+                        .font(.mono(34, .monoMedium, relativeTo: .largeTitle))
+                        .foregroundStyle(theme.fg)
+                        .contentTransition(.numericText())
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.7)
+                    Text(unit.symbol)
+                        .font(.sans(18, .sansMedium, relativeTo: .title3))
+                        .foregroundStyle(theme.fgMuted)
                 }
-                .accessibilityElement(children: .ignore)
-                .accessibilityLabel(headlineSpoken(weight, picture: picture, trendKg: trendKg, unit: unit))
-                PrimaryButton(title: WeightCopy.logWeighIn, locked: locked) {
-                    model.openWeighIn()
-                }
-                .accessibilityHint(locked ? "Opens Taken Pro." : "Opens a field for today's weight.")
             }
-            .padding(16)
+            slot(weight, picture: picture, unit: unit)
+                .lineLimit(2)
+                .fixedSize(horizontal: false, vertical: true)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(spoken(weight, picture: picture, trendKg: trendKg, unit: unit))
+        .accessibilityAddTraits(.isHeader)
     }
 
-    /// The caption, the closing-in line, or for one visit the sentence for a point just lit.
     private func slot(_ weight: WeightModel, picture: WeightPicture, unit: WeightUnit) -> Text {
-        if let goal = weight.goal, let moment = weight.justReached {
-            return lineText(WeightGoalCopy.moment(moment, goalKg: goal.kg, unit: unit), words: theme.fg)
-        }
         if let goal = weight.goal, let readout = picture.readout {
-            return lineText(WeightGoalCopy.slot(readout, goalKg: goal.kg, unit: unit), words: theme.fgMuted)
+            return WeightEntryPage.lineText(WeightGoalCopy.slot(readout, goalKg: goal.kg, unit: unit, locale: locale),
+                                            numbers: theme.fg, words: theme.fgMuted, wordsFace: .sans)
         }
         return Text(WeightCopy.trendCaption)
             .font(.sans(15, .sans, relativeTo: .subheadline))
             .foregroundStyle(theme.fgSubtle)
     }
 
-    /// Numbers with their units in Geist Mono Medium 15 and the look's ink; words in Geist 15.
-    private func lineText(_ parts: [WeightGoalCopy.Part], words: Color) -> Text {
-        var line = AttributedString()
-        for part in parts {
-            var run = AttributedString(part.text)
-            let font: Font = part.isNumber ? .mono(15, .monoMedium, relativeTo: .subheadline)
-                : .sans(15, .sans, relativeTo: .subheadline)
-            let color: Color = part.isNumber ? theme.fg : words
-            run.font = font
-            run.foregroundColor = color
-            line += run
-        }
-        return Text(line)
-    }
-
     /// "Trend 88.1 kilograms. 1.1 kilograms to your goal, 87.0."
-    private func headlineSpoken(_ weight: WeightModel, picture: WeightPicture, trendKg: Double?, unit: WeightUnit) -> String {
+    private func spoken(_ weight: WeightModel, picture: WeightPicture, trendKg: Double?, unit: WeightUnit) -> String {
         let trend = WeightCopy.spokenTrend(trendKg, unit: unit)
-        guard let goal = weight.goal else {
+        guard let goal = weight.goal, let readout = picture.readout else {
             return "\(trend.hasSuffix(".") ? String(trend.dropLast()) : trend), \(WeightCopy.trendCaption)"
         }
-        if let moment = weight.justReached {
-            return "\(trend) \(WeightGoalCopy.spokenMoment(moment, goalKg: goal.kg, unit: unit))"
-        }
-        guard let readout = picture.readout else { return trend }
         return "\(trend) \(WeightGoalCopy.spokenSlot(readout, goalKg: goal.kg, unit: unit))."
     }
 
     /// "−1.2 kg over 30 days", "−9.7 kg since 4 Mar", "No change over 7 days": one neutral colour, no arrow.
     private func changeLine(_ change: (kg: Double, span: WeightChangeLine.Span), unit: WeightUnit) -> some View {
         let today = model.today.day
-        return lineText(WeightGoalCopy.changeLine(change.kg, span: change.span, unit: unit, today: today), words: theme.fgMuted)
+        return WeightEntryPage.lineText(WeightGoalCopy.changeLine(change.kg, span: change.span, unit: unit, today: today),
+                                        numbers: theme.fg, words: theme.fgMuted, wordsFace: .sans)
             .lineLimit(1)
             .minimumScaleFactor(0.85)
             .contentTransition(.numericText())
@@ -229,35 +355,6 @@ struct WeightTabRootView: View {
         .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
         .accessibilityLabel("\(WeightCopy.allWeighIns), \(count)")
         .accessibilityHint("Edit or delete a weigh-in.")
-    }
-
-    // MARK: Empty
-
-    /// "Log your first weigh-in. Your trend starts here." with the one button.
-    private var emptyCard: some View {
-        VStack(spacing: 18) {
-            Image(systemName: WeightCopy.symbol)
-                .font(.system(size: 26, weight: .regular))
-                .foregroundStyle(theme.signalInk)
-                .frame(width: 64, height: 64)
-                .background(theme.signalWash, in: Circle())
-                .overlay(Circle().strokeBorder(theme.signalEdge, lineWidth: 1))
-                .padding(.top, 8)
-                .accessibilityHidden(true)
-            Text(WeightCopy.empty)
-                .font(.sans(17, .sans, relativeTo: .body))
-                .foregroundStyle(theme.fgMuted)
-                .multilineTextAlignment(.center)
-                .fixedSize(horizontal: false, vertical: true)
-            PrimaryButton(title: WeightCopy.logWeighIn, locked: locked) {
-                model.openWeighIn()
-            }
-            .padding(.top, 6)
-        }
-        .padding(24)
-        .frame(maxWidth: .infinity)
-        .background(theme.bgRaised, in: shape)
-        .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
     }
 }
 
