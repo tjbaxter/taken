@@ -26,12 +26,26 @@ struct ProfileView: View {
     @State private var loadingPhoto = false
     #if DEBUG || TAKEN_INTERNAL
     @State private var showVoiceLog = false
+    /// Profile > Data > Import weight CSV: the file picker, and the line under the row once it has read the file.
+    @State private var importingWeights = false
+    @State private var weightNote: String?
     #endif
 
     init() {}
 
     /// The Look row, which `-demo -screen look` scrolls to.
     static let lookAnchor = "look"
+
+    /// Where `-demo` opens Profile scrolled to: the Look row for `-screen look`, and in builds with the Weight tab the
+    /// Weight switch (`weight-settings`) and the weight CSV rows (`weight-data`).
+    static func demoAnchor(_ screen: String?) -> String? {
+        if screen == "look" { return lookAnchor }
+        #if DEBUG || TAKEN_INTERNAL
+        if screen == "weight-settings" { return weightAnchor }
+        if screen == "weight-data" { return weightDataAnchor }
+        #endif
+        return nil
+    }
 
     var body: some View {
         NavigationStack {
@@ -43,6 +57,9 @@ struct ProfileView: View {
                     reminderSection
                     wakeSection
                     hapticsSection
+                    #if DEBUG || TAKEN_INTERNAL
+                    weightSection
+                    #endif
                     proSection
                     dataSection
                     #if DEBUG || TAKEN_INTERNAL
@@ -55,11 +72,22 @@ struct ProfileView: View {
                 .background(theme.bg)
                 .environment(\.editMode, $editMode)
                 .photosPicker(isPresented: $pickingPhoto, selection: $photoItem, matching: .images)
+                #if DEBUG || TAKEN_INTERNAL
+                // Import weight CSV: a CSV, TSV or plain text file from Files (MyNetDiary's Data Export, another weight
+                // app, or Taken's own taken-weight.csv).
+                .fileImporter(isPresented: $importingWeights,
+                              allowedContentTypes: [.commaSeparatedText, .tabSeparatedText, .plainText]) { result in
+                    switch result {
+                    case .success(let url): weightNote = model.importWeights(from: url)
+                    case .failure: weightNote = WeightCopy.couldNotOpen
+                    }
+                }
+                #endif
                 .task {
                     // `-demo -screen look`: the Look section in view, for the screenshots.
-                    guard model.isDemo && model.launchScreen == "look" else { return }
+                    guard model.isDemo, let anchor = Self.demoAnchor(model.launchScreen) else { return }
                     try? await Task.sleep(for: .milliseconds(500))
-                    proxy.scrollTo(Self.lookAnchor, anchor: .center)
+                    proxy.scrollTo(anchor, anchor: .center)
                 }
             }
             .navigationBarTitleDisplayMode(.inline)
@@ -139,7 +167,11 @@ struct ProfileView: View {
     }
 
     /// What Erase all data takes, said before it does.
+    #if DEBUG || TAKEN_INTERNAL
+    static let eraseMessage = "This removes your stack, every logged dose, all your to-dos, your weigh-ins, your weight goal and your profile from this iPhone. It cannot be undone."
+    #else
     static let eraseMessage = "This removes your stack, every logged dose, all your to-dos and your profile from this iPhone. It cannot be undone."
+    #endif
 
     // MARK: Profile
 
@@ -438,6 +470,64 @@ struct ProfileView: View {
         }
     }
 
+    #if DEBUG || TAKEN_INTERNAL
+    // MARK: Weight
+
+    /// The Weight switch, which `-demo -screen weight-settings` scrolls to.
+    static let weightAnchor = "weight"
+    /// The weight CSV rows in Data, which `-demo -screen weight-data` scrolls to.
+    static let weightDataAnchor = "weight-data"
+
+    /// The way in and the way back for the Weight tab (SPEC 3.12): one switch, off until the person turns it on. Turning
+    /// it off never deletes a weigh-in.
+    private var weightSection: some View {
+        Section {
+            Toggle(isOn: Binding(get: { model.weight.showsTab }, set: { model.setWeightTab($0) })) {
+                ProfileRowTitle(WeightCopy.profileSwitch)
+            }
+            .tint(theme.signal)
+            .profileRow()
+            .id(Self.weightAnchor)
+        } header: {
+            ProfileSectionTitle(WeightCopy.profileSection)
+        } footer: {
+            ProfileFootnote(WeightCopy.profileFootnote)
+        }
+    }
+
+    /// Export weight CSV (always open, PRO.md: the record is never held back) and Import weight CSV (bulk backdating, so
+    /// it follows the weigh-in rule), once the tab is on or there are weigh-ins. Never on the capture path.
+    @ViewBuilder
+    private var weightDataRows: some View {
+        if model.weight.showsDataRows {
+            if !model.weight.isEmpty {
+                ShareLink(item: WeightCSVFile(text: model.weight.csv(timeZone: model.clock.calendar.timeZone)),
+                          preview: SharePreview(WeightCSV.fileName)) {
+                    ProfileLinkRow(title: WeightCopy.exportCSV, symbol: "square.and.arrow.up")
+                }
+                .profileRow()
+                .id(Self.weightDataAnchor)
+            }
+            Button {
+                weightNote = nil
+                let importing = $importingWeights
+                model.requireWeightPro(paywallAnchor) { importing.wrappedValue = true }
+            } label: {
+                ProfileLinkRow(title: WeightCopy.importCSV, symbol: "square.and.arrow.down")
+            }
+            .profileRow()
+            .id(model.weight.isEmpty ? Self.weightDataAnchor : "weight-import")
+            if let weightNote {
+                Text(weightNote)
+                    .font(.sans(15, .sans, relativeTo: .subheadline))
+                    .foregroundStyle(theme.fgSubtle)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .profileRow()
+            }
+        }
+    }
+    #endif
+
     // MARK: Taken Pro
 
     private var proActive: Bool { model.pro.isActive(at: model.now) }
@@ -566,6 +656,10 @@ struct ProfileView: View {
                 ProfileLinkRow(title: "Export CSV", symbol: "square.and.arrow.up")
             }
             .profileRow()
+
+            #if DEBUG || TAKEN_INTERNAL
+            weightDataRows
+            #endif
 
             Button {
                 confirmErase = true
@@ -759,6 +853,21 @@ struct CSVFile: Transferable {
         }
     }
 }
+
+#if DEBUG || TAKEN_INTERNAL
+/// Export weight CSV as a shareable file: taken-weight.csv (date, time, kg).
+struct WeightCSVFile: Transferable {
+    let text: String
+
+    static var transferRepresentation: some TransferRepresentation {
+        FileRepresentation(exportedContentType: .commaSeparatedText) { file in
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(WeightCSV.fileName)
+            try Data(file.text.utf8).write(to: url, options: .atomic)
+            return SentTransferredFile(url)
+        }
+    }
+}
+#endif
 
 /// The item sheet: tap an item's name on Today (or its row in Profile) to rename it, change how often it is taken,
 /// archive it or delete it. No trip to settings.
