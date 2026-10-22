@@ -9,13 +9,19 @@ import Foundation
 enum DemoStack: String, Sendable, CaseIterable {
     case standard, us, neutral
 
+    /// Read only in Debug builds, which CI's screenshot job runs (ci.yml); a Release build, and so every App Store build,
+    /// always seeds `standard` and never reads the argument (Guideline 2.5.19: nothing hidden or dormant ships).
     init(arguments: [String]) {
+        #if DEBUG
         guard let index = arguments.firstIndex(of: "-demo-stack"), index + 1 < arguments.count,
               let stack = DemoStack(rawValue: arguments[index + 1]) else {
             self = .standard
             return
         }
         self = stack
+        #else
+        self = .standard
+        #endif
     }
 
     /// The store sets show a Thursday, the day their weekly row is due, so it reads "Weekly · Thu" with its time.

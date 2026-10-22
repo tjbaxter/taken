@@ -179,8 +179,8 @@ lands() {
 }
 
 # The 1.1 feedback build (SPEC 3.3): the Add sheet in type mode with "tum" typed (Turmeric suggested), in every look.
-# The chip grid shows under the field, Semaglutide and Tirzepatide among the chips: keep these out of UK store
-# screenshots (REDESIGN.md, Open).
+# The chip grid shows under the field, Semaglutide and Tirzepatide among the chips, so the store sets take their own
+# captures below (the neutral set types "mag").
 shoot 43-add-search add-search
 lands 43-add-search "sheet=add"
 for look in blush phosphor ice; do
