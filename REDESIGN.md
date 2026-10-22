@@ -500,7 +500,7 @@ Tom is the first user: he weighs in every day and opens MyNetDiary for nothing e
 - 1.1 stays as built: build 23, its screenshots and its listing do not change, and no weight code reaches main until 1.1 is approved. Taken stays "Did I take it? Know for sure."
 - In 1.2 weight is a quiet extra: not in the name, subtitle, keywords or screenshots. The default app still has three tabs, so the 1.1 screenshot sets still show the real default (Guideline 2.3).
 - What's New must list new features (Guideline 2.3.12) and is set per localization (App Store Connect: "This property can be localized"), so every localization gets one neutral line, translated: "New: an optional Weight tab. Log a weigh-in in a few taps and watch a smoothed trend form. Turn it on in Profile." No medicine, no "loss", no results. This is one written exception to REDESIGN.md's neutral-set rule for the 1.1 store screenshots (no "weight language" outside English (U.S.)): that rule exists because most countries ban promoting prescription medicines, and a feature name with no medicine in it promotes none. Outside What's New, non-U.S. descriptions, keywords and screenshots stay free of weight words.
-- Notes for Review (Guideline 2.3.1(a)): where the switch is, the GLP-1 offer, on-device storage. The English (U.S.) description may add: "Optional weight log with a smoothed trend, kept on your iPhone."
+- Notes for Review (Guideline 2.3.1(a)): where the switch is, the GLP-1 offer, on-device storage, and one sentence for the goal (Goal and moments, care rule 11): "An optional weight goal is in the Weight tab's More menu; it cannot be set below BMI 18.5, the sheet says goals are for adults, and nothing about it is prompted or sent." The English (U.S.) description may add: "Optional weight log with a smoothed trend, kept on your iPhone."
 - Never show a drug name and a weight chart in the same screenshot, ad or custom product page (FTC net impression; ASA, July 2025, on implied weight-loss prescription medicines; Meta and TikTok require 18+ targeting for weight claims). With dose ticks, a real chart from a GLP-1 stack is exactly that pairing, so marketing never uses one. No "lose weight" or results claims (Guideline 2.3.7). "Taken is a personal log, not medical advice" stays (Guideline 1.4.1).
 - Age rating stays 13+ (Health or Wellness Topics is already Yes). The privacy label stays Data Not Collected.
 - docs/privacy.html: weigh-ins in sections 03 (what the app stores), 09 (CSV) and 11 (Erase, listing the tab setting, unit, offer answer and first weigh-in date as kept). Section 12 still says Taken "is suitable for all ages", which is wrong from 1.1's 13+: it belongs in the 1.1 store pack, and the 1.2 edit fixes it if it is still there.
@@ -584,7 +584,7 @@ Tom is the first user: he weighs in every day and opens MyNetDiary for nothing e
 - The offer's rule is an overload of `TodayPrompts.pick` with a `weightOffer` argument, so 1.1's `pick` is untouched. Following the extras policy below, it also waits for a later day than the first dose and than the widget invite's day, so it never shows in the first session or on the invite's day.
 - Added beyond the spec: Profile, Data, "Import weight CSV" (below), behind the weigh-in Pro rule because it backdates in bulk; `WeightModel` holds weights.json for the app model.
 - Screenshots (scripts/screenshots.sh): 60-weight in every look, 61-weigh-in, 62-weight-empty, 63-weight-list, 64-profile-weight, 64-profile-weight-data, 65-today-weight-offer, the links 66-link-weight and 67-link-weight-off, and the tab, sheet and offer on the 6.3 and 6.1 inch iPhones. No file name ends in a store frame's state (-log, -settings), because tools/store-shots matches any file ending in "-<state>". Every other capture checks `weight=0`, so the 1.1 screenshots still show three tabs.
-- Not in this branch: docs/privacy.html (sections 03, 09, 11 and 12) and brand/appstore.py (What's New, Notes for Review, the English (U.S.) description line). docs/ is the public site and appstore.py holds 1.1's store text, and neither may change before 1.1 is approved. Both belong to the 1.2 store pack, with the What's New line above.
+- Not in this branch: docs/privacy.html (sections 03, 09, 11 and 12; section 03 also names the optional weight goal and the height kept with it) and brand/appstore.py (What's New, Notes for Review with the goal sentence above, the English (U.S.) description line). docs/ is the public site and appstore.py holds 1.1's store text, and neither may change before 1.1 is approved. Both belong to the 1.2 store pack, with the What's New line above.
 
 ### Importing history (CSV)
 - Shipping weight apps bring old weigh-ins in by CSV or through Apple Health. Weigh In lists "Import and export CSV files" and shipped a "New CSV importer" in 2.2.0; ScaleTrack lists "Import from CSV"; Libra fixed "importing from .csv files" in 4.6.3. Happy Scale imports only from Apple Health, taking the lowest entry of a day.
@@ -610,6 +610,555 @@ Tom is the first user: he weighs in every day and opens MyNetDiary for nothing e
 - Local check on this Mac (Foundation): UnitMass(forLocale:usage: .personWeight) gives lb for en_US and es_US, st for en_GB, kg for en_IE, en_AU, en_CA, de_DE, fr_FR, ja_JP and en_IN; personWeight formatting rounds 88.35 kg to "88 kg", "195 lb" and "13 st, 13 lb"
 - Tom's MyNetDiary screenshots 1.webp to 7.webp, 22 Oct 2026
 - Import: https://www.mynetdiary.com/faq.do ("Data export", "How do I download my log?", "How to email reports directly from the app", Apple Health), http://files.mynetdiary.com/MyNetDiaryHealthcareProfessionalGuide.pdf, https://happyscale.com/support, https://apps.apple.com/us/app/weigh-in-weight-tracker/id1082115351, https://apps.apple.com/app/id6782255261 (ScaleTrack), https://apps.apple.com/us/app/libra-weight-manager/id1644353761
+
+### Goal and moments, 2026-10-22 (design for the Weight tab above; built on feat/weight-tab, internal builds only)
+
+Tom asked for a weight goal to work towards, to see himself "getting closer to the line", and for the important points to be marked "so it's not super generic", while the page stays "enter weight, done" and the chart stays one chart at the right size, without MyNetDiary's awkward zoom. He was just as clear that MyNetDiary is what he uses, not a design to copy: he said its gold stars look like emojis. Three concepts came from three research passes (the behaviour-change and eating-disorder evidence; how careful apps and Apple show progress; Taken's own tokens and Swift Charts on iOS 17). A judge scored them. This is the winner, Lit Points, with the judge's grafts applied and the mistakes all three shared fixed. It replaces v1's "Left out of v1: goal line, percent-lost milestones" for the goal and its moments only. Forecast, BMI on screen, and red and green stay out.
+
+#### Verdict
+An optional goal, set only from the Weight tab's More menu. It adds three things to the page and nothing to the weigh-in:
+1. One quiet solid line on the chart at the goal, labelled with its number.
+2. One line under the trend that says how close you are: "1.1 kg to 87.0".
+3. At most three lit points on your own trend line: where the trend first sat 5% and 10% below where you started, and where it reached the goal.
+
+When a weigh-in you have just saved crosses one of those points, you get one plain sentence for that visit. Reaching the goal also plays the success haptic Taken already plays for All taken. There are no stars, badges, praise, target dates, pace, forecast, expand button or second chart. It ships with the tab in 1.2, inside the same `#if DEBUG || TAKEN_INTERNAL` gate.
+
+#### Why each element earns its place
+- **A goal.** Goal setting, self-monitoring and feedback are the components that predict effect in weight-loss trials (Samdal et al. 2017, 48 RCTs). The harms documented in apps come from the form a goal takes: prompted goals, guilt over missed targets, praise for use, and unsafe or ever-lower targets (Honary et al. 2019; National Alliance for Eating Disorders 2026; Frontiers in Computer Science 2023). So the goal is never prompted, has no deadline, has a floor, and earns no praise.
+- **The closing-in line.** Effort rises as people near a goal, and it follows the share of the distance left (Kivetz, Urminsky and Zheng 2006). Pointing attention at the smaller part motivates most: what is done early on, what is left near the end (Koo and Fishbach 2012). The middle is where motivation dips (Bonezzi, Brendl and De Angelis 2011). One figure whose wording changes at halfway does all of that. It replaces MyNetDiary's progress bar, percentage and three change rows.
+- **5% and 10%.** The guideline for adults with overweight or obesity recommends "sustained weight loss of 5 percent to 10 percent" and says even 3% gives clinically meaningful falls in triglycerides and blood glucose (ACC/AHA 2013). CDC: "even modest weight loss can help improve your blood pressure, cholesterol, and blood sugar levels", with a 5% example. The thresholds are the same for everyone, so a mark there states a fact about health. It is not generic praise.
+- **A lit point, not a star.** Positive feedback that informs raises motivation (d = 0.33 for free-choice behaviour), while expected rewards undermine it (Deci, Koestner and Ryan 1999). Regulators cited Robinhood's confetti as gamification, and Robinhood removed it (CNBC 2021). Taken already has a mark for "this happened": lit (Theme.swift: "Lit = taken"; the paywall timeline's lit 8 pt dot; the lit dose disc). On iOS a star reads as a rating or a favourite. Choosing the lit point is my judgement, built on those sources.
+- **A solid line, not a dashed one.** 1.1 removed dashed rules (REDESIGN.md line 19), and a reference line stays distinct from the grid when it carries its own label (leancrew 2025, on Apple Stocks against Google's chart).
+
+#### The page, top to bottom (goal set, Signal look, Tom's numbers)
+Changes from the v1 layout are marked NEW.
+1. **TabHeader** "Weight", as v1. NEW subtitle: "Last 88.35 kg · yesterday, 07:42" in Geist 15, fgSubtle. It stays a plain String, so TabHeader does not change. The last weigh-in's value moves up from the card, so "Last" appears once and the card's third line gets the card's full width. Day words are as v1: "today", "yesterday", a weekday within the past week, then "14 Oct", and "14 Oct 2025" from another year. The More button and the avatar are as v1.
+2. **Headline card** (Card, padding 16), now one column:
+   - "Trend", Geist Medium 14, fgSubtle (v1).
+   - The trend value in Geist Mono Medium 40, fg, `.contentTransition(.numericText())`, with "kg" in Geist Medium 18, fgMuted (v1).
+   - NEW, **the slot**, 2 pt below the value. It is one line at the default text size (lineLimit 2).
+     - No goal: v1's caption "smooths daily swings", now Geist 15, fgSubtle.
+     - Goal set: the closing-in line.
+     - For one visit after a crossing: the moment sentence.
+
+     The slot is always there, so the card never changes height. v1's right-hand "Last" column is removed.
+   - PrimaryButton "Log weigh-in", 16 pt below (v1).
+3. **Chart card** (Card, padding 16, VStack spacing 14):
+   - WeightRangePicker: W, 30D, 90D, Y, All (v1).
+   - NEW: the change line for the selected range. It replaces v1's row of 7, 30 and 90 day changes and its divider.
+   - The chart (below), with the plot at 196 pt.
+   - "Ticks: weekly doses", only when there are ticks (v1).
+4. **"All weigh-ins"** row (v1).
+
+On screen with Tom's goal set:
+- Numbers: 88.35 and 07:42 in the subtitle, 88.1 for the trend, 1.1 and 87.0 in the slot, −9.7 in the change line, the axis labels (87.0 among them) and one "−5%" label.
+- Controls: More, the avatar, Log weigh-in, the range control, the chart (scrub) and All weigh-ins. These are v1's six. The goal adds no control to the page.
+
+**Fit.** This is my estimate from the screenshots of CI run 39680393222, to be proved by the probe under CI. On the iPhone 16 (393 x 852 pt) at the default text size:
+- Content starts about 158 pt down, and the floating tab bar begins about 768 pt down.
+- The headline card is about 192 pt, then a 16 pt gap, then the chart card at about 365 pt.
+- So the chart card ends near 731 pt, above the tab bar. All weigh-ins is a short scroll below.
+
+The branch's current page (two-column card plus three change rows) is about 35 pt taller.
+
+#### The goal
+**Where it is set.** Only from the More menu, which becomes:
+- "Kilograms" and "Pounds" with a checkmark (v1)
+- a divider
+- "Set Goal…", or "Change Goal…" once a goal exists, then "Clear Goal" (only when a goal exists)
+- a divider
+- "Hide Weight Tab" (v1)
+
+HIG Menus asks for an ellipsis when an item needs more input, and allows one item whose label changes with state. "Set Goal…" stays dimmed until the first weigh-in exists (HIG Menus: "Show people when a menu item is unavailable"). Taken never asks for a goal anywhere else: not in onboarding, the Today offer, the empty state, the weigh-in sheet, Profile or a notification.
+
+**The Goal sheet.** A new `SheetRoute.weightGoal` (id "weight-goal"), presented from RootView like the other sheets and sized to its content like WeighInSheet. From top to bottom:
+- SheetHeader "Goal", with Close.
+- The goal field, exactly like WeighInSheet's:
+  - Geist Mono Medium 44 in a bgRaised box with card radius and a 1 pt `line` border that turns signalEdge while focused.
+  - The unit beside it in Geist Medium 22, fgMuted.
+  - Decimal pad, focused on appear with the same 80 ms task.
+  - At most one decimal: `WeightFormat.sanitize` gains `maxDecimals`, 2 by default and 1 here.
+  - Placeholder: the current trend, in fgFaint. Change Goal… opens with the goal filled in.
+- **"Start" row.**
+  - The label in Geist 15, fgMuted.
+  - The start value in Geist Mono Medium 15, fg ("97.8 kg").
+  - A compact, date-only `DatePicker` showing the start day, limited to the days from the first to the last weigh-in.
+- **"Height" row.**
+  - The label in Geist 15, fgMuted.
+  - A button reading "Set" in Geist SemiBold 15, signalInk, until a height is chosen. After that it shows the height in Geist Mono Medium 15, fg, with `chevron.up.chevron.down` at 11 pt, fgSubtle. This is the MonoTimeButton pattern.
+  - The button opens a small wheel sheet built like TimeWheelSheet:
+    - SheetHeader "Height".
+    - One wheel in centimetres (100 to 230), or two wheels for feet (3 to 7) and inches (0 to 11).
+    - PrimaryButton "Set 183 cm" or "Set 6 ft 0 in".
+    - The wheel starts at the stored height, or else at 170 cm or 5 ft 7 in. Nothing is kept until Set.
+  - The unit follows `UnitLength(forLocale: .current, usage: .personHeight)` (iOS 16): feet gives feet and inches, anything else gives centimetres. Checked on this Mac: en_GB, en_US, en_CA and en_IN give feet; en_IE, en_AU, de_DE and ja_JP give centimetres; fr_FR gives metres, shown as centimetres.
+  - Height is stored in centimetres.
+- Footnote, Geist 13, fgSubtle: "Shows as a line on your chart, measured on your trend, not single weigh-ins. No dates, no pace, no reminders. Goals are for adults."
+- Footnote, Geist 13, fgSubtle: "Height is used only to keep goals in a healthy range. Kept on this iPhone."
+- When the goal is below the floor: one line above Save in Geist 15, fgMuted, never red: "Too low for your height. Taken keeps goals in a healthy range." It names no number.
+- PrimaryButton "Save". It is enabled when all of these hold:
+  - the goal parses in the locale;
+  - it is inside the unit's bounds (20 to 350 kg, 44 to 770 lb, as v1);
+  - a height is set;
+  - the floor does not block it.
+
+  Save stores the goal (with the height, if new), closes the sheet, plays the soft haptic if haptics are on, and announces "Goal set, 87.0 kilograms." There is no toast.
+
+There is no target date, rate, plan, forecast or start-weight field. The weigh-in sheet does not change at all (Tom's rule).
+
+**The floor.** The lowest goal is 18.5 x (height in metres) squared, that is BMI 18.5.
+- Honary et al. 2019 propose blocking goals below BMI 18.5 and saying why.
+- Lifesum's shipped block reads "Goal weight too low. Please change your goal." and gives no number.
+- Beat welcomed the NHS weight app removing access for people with a low BMI instead of only telling them it was unsuitable.
+
+The message names no number because the number would hand an at-risk person the lowest target to aim for. The floor applies to goals in the lower and near directions. A goal above the start, gaining towards a healthier weight, is never blocked. That is my judgement: the floor exists to stop unsafe loss, not recovery.
+
+**Adults.** Adult BMI categories do not apply through age 19; CDC uses BMI-for-age percentiles for 2 through 19. Taken is rated 13+ and knows no ages, so the sheet says "Goals are for adults.", the kind of guidance Beat welcomed in the NHS app ("this product is only suitable for adults"). There is no age question: the double opt-in, the floor and that line are the mitigation (own judgement).
+
+**Start.** The start S is the trend on the start day, computed when the goal is saved and then stored.
+- **Default:** the first weigh-in day. MyNetDiary does the same: "MyNetDiary considers your first weigh-in date to be your start date".
+- **Exception:** if the goal lies between the lowest and the highest trend since the first weigh-in, the trend has already been at that weight. The start is then the last weigh-in day instead. This is my own rule. It stops a long imported history from turning a regain into a finished goal.
+- **Moving it:** the person can move the start in the Start row, as Happy Scale's start date does while keeping earlier entries. MyNetDiary's only way to change it is Start Over, which deletes earlier weigh-ins.
+- **In the sheet:** Set Goal… recomputes the default start as the goal is typed, until the Start row is touched. Change Goal… keeps the stored start if the value is unchanged. If the value changes, it recomputes the default unless the start was picked by hand (`startPicked`).
+- **After edits:** a start day that falls outside the weigh-ins after edits or deletes is clamped to the first or the last weigh-in day.
+- **For Tom:** import MyNetDiary's export first (Profile, Data, Import weight CSV on the branch). Then his first weigh-in is March's 97.8 kg, the goal 87.0 is below every trend since, and the start is 97.8.
+
+**Direction: inferred, never asked.** From S and the goal G:
+- lower, if G is more than 0.68 kg below S;
+- higher, if G is more than 0.68 kg above S;
+- otherwise near.
+
+0.68 kg is MacroFactor's maintenance tolerance (1.5 lb either way, judged on the trend weight). Allowing lower, higher and near follows Happy Scale and MacroFactor. Inferring the direction instead of offering a picker is my choice, so that the sheet stays one number.
+
+**Reached.**
+- Lower goal: reached on the first weigh-in day after the start on which the trend is at or below G + 0.05 kg.
+- Higher goal: reached when the trend is at or above G - 0.05 kg.
+- The 0.05 kg tolerance is my own, so "0.0 kg to 87.0" never shows.
+- A near goal starts out held.
+
+After that, the goal holds. There is no finish screen and no "set a new goal" prompt:
+- v1's care section records a Happy Scale reviewer saying its post-goal message "encourages disordered habits".
+- Honary describes apps that push ever-lower targets.
+- A year after semaglutide stopped, people had regained two-thirds of their loss (Wilding et al. 2022), so holding is the long game.
+
+**Clear and change.**
+- Clear Goal acts at once:
+  - the toast "Goal cleared" with UNDO (a new `UndoStep.restoreWeightGoal(WeightGoal)`);
+  - the soft haptic;
+  - VoiceOver: "Goal cleared."
+- It shows no alert, because nothing is deleted (HIG Alerts; NN/g on confirmation dialogs, as v1's Hide Weight Tab).
+- Changing or clearing a goal deletes no weigh-in and never asks for a reason.
+- Hide Weight Tab keeps the goal. Erase all data removes the goal and the height along with the weigh-ins.
+
+**Taken Pro.** Set, change and clear are open in every Pro state, like the unit and the range: a goal is a way of viewing the record, and the record is never held hostage (PRO.md). Logging stays gated as in v1, so a locked user gets no new moments. Own choice.
+
+#### The slot: closing in, in one line
+Everything is computed on the trend; T is the trend on the last weigh-in day. Numbers (with their units) are in Geist Mono Medium 15, fg; words are in Geist 15, fgMuted.
+
+| State | When | Shows |
+|---|---|---|
+| No goal | | "smooths daily swings" (fgSubtle) |
+| Not moving yet | less than 0.1 covered in the chosen unit, or the trend is on the far side of the start | "Goal 87.0" |
+| Closer | less than half the distance covered | "4.2 kg closer to 87.0" (covered, rounded down to 0.1) |
+| To go | half or more covered, not yet reached | "1.1 kg to 87.0" (left, rounded up to 0.1) |
+| Holding | reached, or a near goal, with the trend within 0.68 kg of G | "Holding near 87.0" |
+| From | reached, or a near goal, with the trend more than 0.68 kg away | "0.9 kg from 87.0" (never above, below, over or under) |
+| Moment | one visit, after a crossing on the weigh-in just saved | "Trend is now 10% below where you started." or "Trend reached 87.0." (all in fg) |
+
+How the numbers are worked out:
+- Covered is S - T for a lower goal and T - S for a higher one. Half is half of the distance from S to G.
+- Tom: S 97.8, T 88.1, G 87.0. He has covered 9.7 of 10.8 kg, which is past half, so the slot reads "1.1 kg to 87.0".
+- Numbers are converted to the chosen unit before rounding.
+
+At the default text size every state fits one line on a 375 pt iPhone. Measured with the repo's Geist files, the longest, the 10% sentence, is 299 pt in a 303 pt slot (321 pt on a 393 pt iPhone).
+
+#### Moments
+**Which.** There are at most three, and none without a goal.
+1. The trend 5% below the start.
+2. The trend 10% below the start.
+
+   Both percent points follow three rules:
+   - They exist only for a lower goal.
+   - The threshold must lie between the start and the goal, more than 0.05 kg from the goal. So nothing ever marks going past your own goal.
+   - The start must be at BMI 25 or more, using the height from the sheet. The 5% and 10% figures come from the guideline for adults with overweight or obesity (ACC/AHA 2013; CDC). Below BMI 25 they have no clinical basis, and marking loss there would mark it in exactly the people v1's care section protects. Tom keeps them unless he is taller than about 1.98 m.
+3. The goal reached, in either direction.
+
+Not marked:
+- Halfway. The slot's change of wording is the acknowledgement.
+- 15% and 20%. They are a trial responder ladder (STEP 1), not guideline thresholds; past 10% the person's own goal is the mark.
+- "Lowest since", personal bests, weekly praise, streaks and speed.
+
+A near goal gets no points. A higher goal gets only the goal point.
+
+**When a point counts.** On the first weigh-in day, on or after the start, on which the trend is at or past the threshold.
+- Only real weigh-in days count, never a day the trend filled in between weigh-ins (v1 fills gaps with straight lines). So a point never carries a date Tom did not weigh in.
+- Once a point exists it stays, even if the trend rises again, because the first such day stays the first.
+- Points are a pure function of the weigh-ins, the goal, its start and the height. Nothing is stored. Editing or deleting weigh-ins, or changing the goal, recomputes them, and a changed goal shows its own points only.
+- A point is never shown as upcoming, pending, missed or lost. NICE TA875 uses less than 5% after 6 months as the point to consider stopping semaglutide, so "not yet 5%" would read as a verdict of non-response.
+
+**The mark.** A lit point on the trend line on that day:
+- An 8 pt circle in `signal` with `theme.glow(0.35)` at radius 4.
+- Behind it, a 12 pt circle in `bgRaised`, the card's colour, which cuts the line so the point sits in it like a bead.
+- The tokens carry it into every look (amber, rose, green, ice). Blush's glowStrength of 0.35 softens it further.
+- It is drawn in `chartOverlay` (see the chart), above the line, and is never hit-testable.
+- Dose ticks stay on the baseline, so the two never meet.
+
+**Its label.** The chart carries at most one label: on the newest point in view, if that point is 5% or 10%.
+- Text: "−5%" or "−10%", using the U+2212 minus that Geist Mono has, in Geist Mono Medium 11, fgMuted.
+- Position: 8 pt right of and 12 pt above the point's centre, flipped to the left or below if it would leave the plot.
+- The goal point is never labelled, because the goal's own axis label names it. Once the goal is reached, no point carries a label.
+- Older points name themselves when scrubbed and to VoiceOver.
+
+**The one-time acknowledgement.** It happens only when a weigh-in saved from Log weigh-in creates a point that did not exist just before the save and is dated that weigh-in's day. Backdated weigh-ins, edits, imports, a goal set or changed, and a moved start all make points appear silently.
+- **Toast:** stays v1's "Weighed in 88.35 kg" with UNDO.
+- **Sentence:** for that visit the slot shows "Trend is now 5% below where you started.", "Trend is now 10% below where you started." or "Trend reached 87.0.".
+  - If two points arrive together after a gap, the goal outranks 10% and 10% outranks 5%.
+  - The closing-in line returns when the Weight tab disappears, the app leaves the foreground, UNDO is tapped or the next weigh-in is saved.
+  - Today's All taken already works this way: ProgressSummary swaps the progress line for the moment.
+- **Animation:** the new point draws in 0.35 s after Save, once the sheet is down, with the All taken spring: scale 0.55 to 1 with `.spring(response: 0.38, dampingFraction: 0.55)`, and the glow easing from `glow(0.7)` at radius 8 to `glow(0.35)` at radius 4. Under Reduce Motion it fades in with `.easeOut(duration: 0.18)`, as ItemRow's ring does.
+- **Haptics:** a 5% or 10% point keeps the ordinary soft save haptic. Reaching the goal plays `Haptics.success` instead, at the same 0.35 s; it is the haptic All taken plays. HIG Playing haptics: use system patterns for their documented meaning, consistently, not too often, and optionally. HIG Feedback: "match the significance of the information to the way it's delivered". Taken's Haptics switch applies.
+- **VoiceOver:** one announcement 0.5 s after Save, for example "Weighed in, 88.35 kilograms. Trend is now 10 percent below where you started." For the goal it ends "Trend reached your goal, 87.0 kilograms."
+- **UNDO:** undoing that weigh-in removes the point and the sentence. Saving the same number again acknowledges it again, so a typo cannot use up a moment.
+
+**What never happens:**
+- stars, emoji, badges, a badge shelf, trophies, confetti or sound;
+- a sheet or full-screen moment;
+- "Great job", "Keep it up" or "lost";
+- a list of what comes next, or a hollow or grey future point;
+- a notification, or anything in the widgets, History, the streak or Today;
+- any mark, copy or colour change when weight goes up;
+- red or green;
+- a prompt to set a lower goal.
+
+#### The chart
+**Size.** One chart, inline, at the full card width.
+- The plot is fixed at 196 pt with `chartPlotStyle { $0.frame(height: 196) }`, which replaces the branch's outer 220 pt frame. That way the points per kilogram are known.
+- There is no expand button, no full-screen view, no pinch and no scroll. Ranges set `chartXScale` and filter, as in v1.
+- WWDC22 session 110342: an interactive chart is "the width of your view, but not full-height", and a small chart sets up "the expectation that additional detail is just a tap away", which is MyNetDiary's zoom.
+
+**Y domain.** v1's fitted, padded domain, which never starts at zero (HIG Charts, dynamic range). With a goal:
+- The goal joins the domain only if the padded span with it is at most twice the padded span without it. So the data always keeps at least half the plot's height. Own rule.
+- On All, Tom's goal sits inside the domain, and the narrowing gap between the end of the line and the goal line is the "closing in" picture. Nothing is added to it.
+- On W or 30D, far from the goal, the goal stays out and its label is pinned to the edge (below). Nothing ever squashes the line to fit a far goal.
+
+**Goal line.**
+- `RuleMark(y:)`: 1 pt, solid, `fgFaint`.
+- Drawn after the dose ticks and before the weigh-in dots and the trend.
+- Accessibility label "Goal", value "87.0 kilograms".
+- Not dashed (REDESIGN.md line 19); no "Goal Weight" text, no flag, no green.
+
+**The goal's label.**
+- Its value sits on the trailing axis in Geist Mono Medium 11, `fgMuted`, one step brighter than the other axis labels in fgSubtle. It comes from a second `AxisMarks(position: .trailing, values: [goal])` with a custom `AxisValueLabel` and no grid line.
+- The regular y ticks become explicit values from a new pure function, `WeightAxis.ticks`. It picks the smallest step of 0.5, 1, 2, 5, 10 or 20 that gives four or fewer ticks inside the domain, and shows one decimal only for 0.5.
+- Any tick within 12 pt of the goal loses its label and its grid line. So the goal's label never overprints, and no grid line runs right next to the goal line.
+- v1's faint grid lines stay. HIG Charts: people who can inspect points need fewer grid lines and light labels, but too few grid lines make values hard to estimate.
+
+**Goal off the plot.**
+- The label sits 8 pt inside the top or the bottom of the trailing axis.
+- It shows SF Symbol `arrow.up` or `arrow.down` at 8 pt semibold, plus the value, both in fgMuted.
+- Ticks within 12 pt of it lose their label.
+- It is hidden from VoiceOver; the summary carries it.
+
+**Points.**
+- Drawn in `.chartOverlay { proxy in GeometryReader { geo in ... } }`.
+- Each sits at `proxy.position(for: (x: noon of its day, y: its trend))`, offset by `geo[proxy.plotFrame!].origin` (`plotFrame` is iOS 17), with `.allowsHitTesting(false)`.
+- The overlay avoids relying on view state inside `.symbol { }`, whose lifetime across range changes Apple does not document.
+
+**Scrub.** New for the chart, with or without a goal.
+- `chartXSelection(value:)` (iOS 17) on the whole plot, snapped to the nearest day that has a trend.
+- At that day, a 1 pt `lineStrong` `RuleMark(x:)` and a popover from `.annotation(position: .top, spacing: 0, overflowResolution: .init(x: .fit(to: .chart), y: .disabled))`, as in WWDC23 session 10037.
+- Popover style: `bgInset` fill, 1 pt `lineStrong` border, corner radius `theme.radius.card / 2`, padding 8 by 6.
+- Popover lines:
+  - the date ("3 Aug"), Geist 12, fgSubtle;
+  - "Trend" in Geist 12, fgMuted, with its value in Geist Mono Medium 15, fg;
+  - "Weigh-in" and its value in Geist Mono Medium 13, fgMuted, when there was one that day;
+  - on a point's day, its fact in Geist 12, signalInk: "5% below where you started", "10% below where you started" or "Reached 87.0".
+- Scrubbing adds detail only. The slot, the change line and the newest label carry what matters (HIG Charts: "don't require interaction to reveal critical information").
+- If the selection gesture stops the page scrolling when a drag starts on the chart, start the selection with a long press through `chartGesture` (iOS 17) instead. Untested.
+
+**Hierarchy.** The trend (signal, 2.5 pt) and the points are the only saturated marks. The goal line, the dots, the ticks and the grid recede (HIG Charts: the data most prominent).
+
+#### The change line
+One line under the range control. It replaces v1's three columns: Apple Stocks shows the change for the selected range above the chart, and HIG Charts says to summarise the main message.
+- **Spans:** W reads "over 7 days", 30D "over 30 days", 90D "over 90 days" and Y "over the year". Each is the trend's change over that span, ending on the last weigh-in day (v1's `WeightTrend.change(days:)` with 7, 30, 90 and 365).
+- **Since:** when the trend is shorter than the range, and always on All, it reads "since 4 Mar" ("since 4 Mar 2025" from another year), measured from the first trend day in view.
+- **Format:** the signed number and its unit in Geist Mono Medium 15, fg, with U+2212 for down and "+" for up ("−1.2 kg"), then " over 30 days" in Geist 15, fgMuted. There is one neutral colour both ways, no arrow, and no word like lost or gained.
+- **Edge cases:** a change that rounds to 0.0 reads "No change over 30 days". The line is hidden when fewer than two trend days are in view. It animates with numericText when the range changes.
+- **VoiceOver:** "Down 1.2 kilograms over 30 days", "Up 0.5 kilograms since 4 March", "No change over 30 days".
+
+#### Every new or changed string
+- Menu: "Set Goal…", "Change Goal…", "Clear Goal" (U+2026 ellipsis).
+- Goal sheet:
+  - "Goal", "Start", "Height", "Set", "Save"
+  - the footnotes and the too-low line quoted above
+  - "Set 183 cm" and "Set 6 ft 0 in"
+- Slot:
+  - "smooths daily swings", "Goal 87.0"
+  - "4.2 kg closer to 87.0", "1.1 kg to 87.0"
+  - "Holding near 87.0", "0.9 kg from 87.0"
+  - "Trend is now 5% below where you started.", "Trend is now 10% below where you started.", "Trend reached 87.0."
+- Change line: "−1.2 kg over 7 days", "over 30 days", "over 90 days", "over the year", "since 4 Mar", "No change over 30 days", "No change since 4 Mar".
+- Subtitle: "Last 88.35 kg · today, 07:42" (and the yesterday, weekday and date forms).
+- Chart: "−5%", "−10%"; popover "Trend", "Weigh-in", "5% below where you started", "10% below where you started", "Reached 87.0".
+- Toast: "Goal cleared" with UNDO.
+- VoiceOver:
+  - "Goal set, 87.0 kilograms."
+  - "Goal cleared."
+  - "4.2 kilograms closer to your goal, 87.0", "1.1 kilograms to your goal, 87.0", "Holding near your goal, 87.0", "0.9 kilograms from your goal, 87.0", "Goal, 87.0 kilograms"
+  - a point: "5 percent below where you started", with the value "3 August, trend 92.9 kilograms"
+  - "Trend reached your goal"
+  - the moment announcements above
+- Erase message, ProfileView: "This removes your stack, every logged dose, all your to-dos, your weigh-ins, your weight goal and your profile from this iPhone. It cannot be undone."
+
+Copy rules for all of them: never lose, lost, loss, ideal, great, should, missed, behind or off track, and no "!". The new strings live in a new `WeightGoalCopy`, with its own test: the same em and en dash, "free" and "!" checks as v1, plus those words matched as whole words, because "closer" contains "lose". `WeightCopy` keeps v1's test, which bans "goal" in the core copy, so the word appears only in the goal's own menu items, sheet, "Goal 87.0" state and VoiceOver. "Goal" is Tom's word and plain English. v1's ban existed because v1 had no goal.
+
+#### Storage and code (all inside `#if DEBUG || TAKEN_INTERNAL`; names from the branch's WIP commit 957d125)
+**New file `Shared/WeightGoal.swift`.** All pure, and unit tested like DayMath.
+
+Types:
+- `struct WeightGoal: Codable, Hashable, Sendable { var kg: Double; var startDay: DayKey; var startPicked: Bool }`. `kg` and `startDay` are required; `startPicked` defaults to false. A goal that cannot be read decodes as none.
+- `enum GoalDirection { case lower, higher, near }`.
+- `struct WeightMoment: Identifiable, Hashable, Sendable`, with `enum Kind { case percent(Int), goal }`, `kind`, `day: DayKey`, `trendKg: Double` and the ids "pct5", "pct10" and "goal".
+- `enum GoalReadout: Equatable { case goalOnly, closer(Double), toGo(Double), holding, from(Double) }`, in kilograms.
+
+`enum WeightGoals`:
+- Constants: `holdBandKg = 0.68`, `reachToleranceKg = 0.05`, `floorBMI = 18.5`, `percentPointsMinBMI = 25`, `percents = [5, 10]`.
+- Functions:
+  - `floorKg(heightCm:)`
+  - `defaultStartDay(goalKg:trend:)`
+  - `start(of:trend:)`, which applies the clamp
+  - `direction(startKg:goalKg:)`
+  - `floorBlocks(goalKg:startKg:heightCm:)`
+  - `moments(goal:trend:weighInDays:heightCm:)`
+  - `readout(goal:trend:moments:)`
+  - `fresh(before:after:savedDay:)`, which returns the highest-ranked new point dated `savedDay`, or nil.
+
+Also in this file:
+- `enum WeightAxis`: `ticks(lower:upper:)`, and `clear(_:of:lower:upper:plotHeight:gap:)`, which drops ticks within 12 pt.
+- `WeightWindow.make` gains `goalKg: Double?` and returns `goalInDomain`. The domain rule above lives there.
+- `enum WeightChangeLine { static func make(range:trend:window:) -> (kg: Double, span: Span)? }`, with `Span` as `.days(Int)`, `.year` or `.since(DayKey)`.
+- `enum WeightGoalCopy`.
+
+**Edited files.**
+- `WeightState` (`Shared/WeightData.swift`): add `goal: WeightGoal?` and `heightCm: Double?`, both decoded with `try?` so older files still read. `eraseAll()` clears both and keeps the tab setting, unit, offer answer and first weigh-in date, as v1. Also `WeightCopy.lastLine` takes the new subtitle format, and `WeightCopy.chartSummary` takes the selected range's change.
+- `WeightModel`:
+  - `var justReached: WeightMoment?`, in memory only;
+  - `setGoal(_:heightCm:)`, `clearGoal() -> WeightGoal?`, `restoreGoal(_:)`;
+  - a `moments(clock:)` helper.
+- `AppModel`:
+  - In the `WeightModel.swift` extension: `openWeightGoal()`, `saveWeightGoal(kg:startDay:startPicked:heightCm:)` and `clearWeightGoal()`. `saveWeighIn` computes the points before and after `weight.log`, sets `justReached` from `WeightGoals.fresh`, picks the haptic and posts the combined announcement. `undoWeight` handles `.restoreWeightGoal` and clears `justReached` on `.removeWeighIn`. `weightPicture(range:)` also returns the points, the domain and the change line.
+  - In `AppModel.swift`: `SheetRoute.weightGoal` and `UndoStep.restoreWeightGoal`, inside the gate.
+- `RootView` (`TodayView.swift`): `case .weightGoal: WeightGoalSheet()`.
+- New file `Taken/Weight/WeightGoalSheet.swift`: `WeightGoalSheet` and `HeightWheelSheet`.
+- `WeightTabRootView`:
+  - the subtitle, the one-column card with the slot, and the change line;
+  - the menu items;
+  - `justReached` cleared on `.onDisappear` and when `scenePhase` leaves `.active`.
+- `WeightChart`: the goal line, the axes, the overlay points, the scrub and accessibility. Update its header comment, which still says "No goal line ... milestones".
+- `ProfileView`: the Erase message.
+- `docs/privacy.html` section 03, in the 1.2 edit: weights.json also holds an optional weight goal and, with it, your height. The label stays Data Not Collected; on-device processing is not collection.
+
+**Size.** About 900 to 1,300 lines with tests (own estimate).
+
+#### Edge cases
+- **No goal.** v1's page with the new subtitle, the change line and the scrub. No goal line, no points; the slot shows the caption.
+- **No weigh-ins.**
+  - "Set Goal…" is dimmed.
+  - If every weigh-in is deleted while a goal exists: the empty card shows, "Change Goal…" is dimmed, "Clear Goal" still works, and the goal waits for the next weigh-in. Its start is then clamped to that day.
+- **Very few weigh-ins.** "Goal 87.0" until the trend has moved 0.1 towards the goal. On a one-week window the goal is usually pinned to the edge.
+- **Goal reached.** The holding states; the goal point stays; no label; no prompt.
+- **Goal changed.** Points recompute silently and the start follows the rules above.
+- **Gain goal.** The same slot wording and line. The only point is reaching it. The floor never blocks it.
+- **Maintain (near) goal.** "Holding near 87.0" or "0.9 kg from 87.0" from the first day. No points.
+- **Trend on the far side of the start.** "Goal 87.0", with no number in red and no words.
+- **Unit switch.** Goals are stored in kilograms and heights in centimetres. Everything on screen converts, the ticks recompute in the unit, and the percent labels do not change.
+- **Pro locked.** Goal actions stay open. There are no new points without logging. Everything already drawn stays.
+- **Import.** Points appear silently. A long history is handled by the start rule.
+- **Two crossings on one save.** Both points appear, and only the higher-ranked one springs and speaks.
+- **Larger text.** The slot wraps to two lines and the card grows. The fit claim is for the default size.
+- **Height edited in the sheet.** The floor and the BMI 25 check use the new height. Nothing is stored until Save.
+
+#### Accessibility
+- **Chart summary** (v1's "Weight chart." label): "Trend 88.1 kilograms. 1.1 kilograms to your goal, 87.0. Down 9.7 kilograms since 4 March. Marked: 5 percent below where you started, 3 August." The goal and marked clauses come from WeightGoalCopy and are appended in WeightChart, so WeightCopy's own test is untouched.
+- **Elements:** each point and the goal line are elements with a label and value. The goal's axis label and the pinned label are hidden from VoiceOver (HIG Charts: "Hide visible text labels for axes and ticks from assistive technologies").
+- **Headline card:** one element, for example "Trend 88.1 kilograms. 1.1 kilograms to your goal, 87.0."
+- **Moments:** spoken as values, never as animation alone (HIG Charts: help people notice important changes). The Audio Graph comes from Swift Charts, as in v1.
+- **Reduce Motion:** points fade in instead of springing.
+- **Haptics:** Taken's switch applies.
+
+#### Care rules this adds to "Designing for care"
+1. The goal is a second opt-in, reachable only from the More menu. It is never prompted, never on the capture path and never in onboarding (Alliance 2026; Honary 2019).
+2. No target date, pace, rate, ETA or forecast, ever. Nothing can be "behind".
+3. A BMI 18.5 floor for lower and near goals, from a height asked only in the goal sheet. The message gives no number (Honary 2019; Lifesum; Beat).
+4. "Goals are for adults." in the sheet (CDC; Beat).
+5. Percent points only from a start at BMI 25 or more, only between the start and the goal, and only 5% and 10% (ACC/AHA 2013).
+6. Points are information, not reward: a factual sentence, the haptic Taken already has, and a lit point. No praise words, no badges (Deci, Koestner and Ryan 1999; CNBC 2021).
+7. Points count on the trend, on real weigh-in days. They are permanent, and they are never shown as pending (NICE TA875).
+8. A gain away from the goal gets a number only (MacroFactor's listing: no warnings, red numbers or shaming).
+9. A reached goal holds, and nothing ever suggests a lower one.
+10. Clearing or changing a goal deletes nothing, asks nothing, and can be undone.
+11. Goals and points never appear in App Store screenshots, What's New or marketing, and never next to a drug name. What's New keeps v1's line, because the goal is part of the new tab. Notes for Review gain one sentence: "An optional weight goal is in the Weight tab's More menu; it cannot be set below BMI 18.5, the sheet says goals are for adults, and nothing about it is prompted or sent."
+
+#### What trend-only points cost (read before Tom's first test)
+- v1's 0.9 trend lags about 9 to 10 days and sits about 0.4 kg above the scale at Tom's 0.3 kg a week (Chart and trend, above). So a point lands roughly one to two weeks after the scale first shows that number.
+- On Tom's numbers today, 10% below 97.8 is 88.02 and the trend reads 88.1. So Taken shows one point (−5%), where MyNetDiary's chart already shows a "10.6% lost" star. The 10% point arrives when the trend gets there.
+- This is deliberate: one dehydrated morning cannot light a point and then take it back. It is not a bug.
+- If his side-by-side check moves the trend to v1's 7-day fallback (alpha 0.25, a lag of about 3 days), the points follow on their own.
+
+#### CI, demo screens and tests
+**Demo data.** `DemoData.goalWeighIns(now:)` uses the branch's SeededRandom pattern:
+- The first weigh-in is exactly 97.8 kg, 231 days before the demo day.
+- About six mornings in seven have a weigh-in, falling about 0.3 kg a week with a fixed swing of up to 0.45 kg.
+- The last trend lies between 88.05 and 88.3.
+- The goal is 87.0 and the height 180 cm (start BMI 30.2).
+- A test pins the result: exactly one point (pct5), and the slot reads "to go" between 1.1 and 1.3.
+
+**Screens.**
+
+| Screen | What it shows |
+|---|---|
+| `weight-goal` | the default demo state above |
+| `weight-goal-moment` | one more weigh-in on the demo day that takes the trend below 88.02, with `justReached` set to the 10% point |
+| `weight-goal-reached` | six more weeks down to about 86.8: three points, "Holding near 87.0", no label |
+| `weight-goal-sheet` | Change Goal…, with 87.0, the start and 180 cm |
+| `weight-goal-low` | 55.0 typed, showing the too-low line |
+
+**Shots** in scripts/screenshots.sh, after the branch's 60 to 69:
+- 70-weight-goal, plus Blush, Phosphor and Ice
+- 71-weight-goal-moment
+- 72-weight-goal-reached
+- 73-weight-goal-sheet, plus Blush
+- 74-weight-goal-low
+- on the 6.1 inch simulator, 75-weight-goal-6.1in, with the fit check
+
+DemoProbe adds `goal=0|1` and `points=N` (points in view) to taken-ui-state.txt. Example: `lands 70-weight-goal "tab=weight sheet=none weight=1 goal=1 points=1"`. Every other weight screen checks `goal=0`.
+
+**Fit probe.** `DemoProbe.recordWeightFit(chartBottom:visibleBottom:)` writes tmp/taken-weight-fit.txt (`chart=`, `visible=`, `fits=`). A new `weight_fits` in scripts/screenshots.sh, beside `paywall_fits`, fails CI on the 6.1 inch run when the chart card's bottom is below the top of the tab bar. The bottom is measured against the ScrollView's visible frame minus its bottom safe-area inset. The App Store build check needs no new marker: `WeightTabRootView` already proves the tab is absent.
+
+**Tests**, in a new `TakenTests/WeightGoalTests.swift` plus `WeightTests.swift` updates:
+1. Default start: the first weigh-in when the goal is outside the trend's range; the last weigh-in day when inside; clamping after deletes.
+2. Direction: the edges of the 0.68 kg band.
+3. Floor: 18.5 x h squared, feet and inches to centimetres; it blocks lower and near goals below the floor and never higher ones.
+4. Points:
+   - thresholds at S x 0.95 and S x 0.90, on weigh-in days only (a crossing inside a gap lands on the next weigh-in day);
+   - still there after the trend rises;
+   - only between the start and the goal, and not within 0.05 kg of it;
+   - start BMI 24.9 gives only the goal point, 25.0 gives all three;
+   - near goals give none, higher goals only the goal point;
+   - the 0.05 kg reach tolerance.
+5. Readout:
+   - "Goal 87.0" while less than 0.1 is covered and on the far side of the start;
+   - closer rounds down, to go rounds up, and the flip is at exactly half;
+   - holding within 0.68 kg, from beyond it;
+   - in kilograms and in pounds.
+6. Fresh:
+   - a crossing save returns its point;
+   - a second weigh-in the same day returns none;
+   - two at once return the higher rank;
+   - a point dated before the saved day returns none;
+   - UNDO then the same number returns it again.
+7. Domain: the twice-the-span rule in both directions, and the pinned edge.
+8. Axis: steps, four ticks or fewer, labels within 12 pt dropped.
+9. Change line: over N days, since a date, hidden, no change, and the U+2212 and "+" signs.
+10. Copy: WeightGoalCopy rules; WeightCopy still bans "goal"; the new lastLine format.
+11. Storage: round trip; a lossy file; Erase clears the goal and the height and keeps the tab and the unit.
+12. Clear then UNDO restores the same goal, start included.
+13. Sheet logic: Change Goal… with the same value keeps the start; a new value recomputes it unless `startPicked`.
+14. The demo screens show 1, 2 and 3 points.
+
+#### Where this differs (one line each)
+- From Tom's words:
+  - Stars become a lit point on his own line plus one plain sentence, because a star reads as a rating or emoji and rewards undermine motivation.
+  - The green dotted line becomes one solid quiet line with its number, because 1.1 removed dashed rules.
+  - "Lost 5%" becomes "5% below where you started", because the copy never says lost.
+  - Progress and weight changes become two single lines: the slot and the change line.
+  - The zoom becomes no zoom: no expand, no full-screen chart, and a far goal never squashes the line.
+- From the judged concept:
+  - The start can be moved, as Happy Scale's start date allows; MyNetDiary's only way deletes weigh-ins.
+  - Points use real weigh-in days only.
+  - Percent points need a start at BMI 25 or more.
+  - The floor message gives no number, and gain goals are exempt from the floor.
+  - "Goals are for adults." is added.
+  - Grid lines stay, and the goal line is fgFaint.
+  - No band is drawn when holding.
+  - Points are drawn in the overlay.
+  - The haptics are graded.
+  - The moment lands in the slot, not the toast.
+
+#### Own choices (no source found)
+- The start exception (goal inside the trend's range) and the clamp.
+- Inferring direction instead of asking.
+- The 0.05 kg reach tolerance, and rounding down for closer and up for to go.
+- The flip exactly at half.
+- Only real weigh-in days for points.
+- The 0.35 s and 0.5 s delays.
+- Ranking the goal above 10% above 5%.
+- One label on the newest point in view.
+- The fgFaint line and the fgMuted label; the 12 pt clearance; the twice-the-span domain rule; the 196 pt plot.
+- The bgInset popover.
+- The height wheel ranges and the 170 cm start; the floor not blocking gain goals.
+- No age question.
+- Goal actions open while locked.
+- "Goal" as the word.
+- The subtitle carrying the last value.
+- The fit estimate and the size estimate.
+
+#### Sources
+- Behaviour and motivation:
+  - https://pmc.ncbi.nlm.nih.gov/articles/PMC5370453/ (Samdal et al. 2017)
+  - https://business.columbia.edu/faculty/research/goal-gradient-hypothesis-resurrected-purchase-acceleration-illusionary-goal (Kivetz, Urminsky and Zheng 2006)
+  - https://ideas.repec.org/a/oup/jconrs/doi10.1086-663827.html (Koo and Fishbach 2012)
+  - https://www.kellogg.northwestern.edu/faculty/research/detail/2011/stuck-in-the-middle-the-psychophysics-of-goal-pursuit (Bonezzi et al. 2011)
+  - https://leeds-faculty.colorado.edu/dahe7472/deci%201999.pdf (Deci, Koestner and Ryan 1999)
+- Clinical thresholds:
+  - https://www.acc.org/About-ACC/Press-Releases/2013/11/12/15/20/111213ACC_AHA_Obesity_Guideline (ACC/AHA 2013, adults with overweight or obesity, 5 to 10%)
+  - https://www.cdc.gov/healthy-weight-growth/losing-weight/index.html
+  - https://pubmed.ncbi.nlm.nih.gov/33567185/ (STEP 1)
+  - https://www.wypartnership.co.uk/application/private_files/6216/8621/1661/NICE-TA875-Semaglutide-for-obesity-briefing-for-integrated-care-systems.pdf (NICE TA875)
+  - https://discovery.ucl.ac.uk/id/eprint/10149199/1/Diabetes%20Obesity%20Metabolism%20-%202022%20-%20Wilding%20-%20Weight%20regain%20and%20cardiometabolic%20effects%20after%20withdrawal%20of%20semaglutide.pdf (Wilding et al. 2022)
+- Care:
+  - https://mhealth.jmir.org/2019/6/e14239 and https://pmc.ncbi.nlm.nih.gov/articles/PMC6604512/ (Honary et al. 2019)
+  - https://www.allianceforeatingdisorders.com/health-tracking-apps-and-disordered-eating/
+  - https://beateatingdisorders.org.uk/news/beat-campaigners-celebrate-improvement-in-nhs-app
+  - https://help.lifesum.com/de/article/i-am-unable-to-enter-my-weight-when-creating-my-account-why-1c8068
+  - https://www.cdc.gov/bmi/child-teen-calculator/bmi-categories.html
+  - https://www.frontiersin.org/journals/computer-science/articles/10.3389/fcomp.2023.1215588/full
+  - https://pmc.ncbi.nlm.nih.gov/articles/PMC8643308 (Hahn et al. 2021)
+  - https://pmc.ncbi.nlm.nih.gov/articles/PMC4157390/ (Steinberg et al. 2014)
+- Apps:
+  - https://help.macrofactorapp.com/en/articles/22-get-to-know-your-dashboard
+  - https://macrofactor.com/goal-features/
+  - https://apps.apple.com/us/app/-/id1553503471
+  - https://www.iphonejd.com/?p=5491 (Happy Scale)
+  - https://www.runsforcookies.com/2021/12/happy-scale-app-giveaway-premium.html (Happy Scale start date)
+  - https://www.mynetdiary.com/ipad_help_plan.html (first weigh-in as start; Start Over)
+  - https://www.cnbc.com/2021/03/31/robinhood-gets-rid-of-confetti-feature-amid-scrutiny-over-gamification.html
+  - https://leancrew.com/all-this/2025/04/plotting-a-plunge/
+  - https://support.apple.com/en-nz/guide/stocks/stc4cfc704df/8.0/mac/27
+- Apple design guidance:
+  - https://developer.apple.com/design/human-interface-guidelines/charts
+  - https://developer.apple.com/design/human-interface-guidelines/charting-data
+  - https://developer.apple.com/design/human-interface-guidelines/playing-haptics
+  - https://developer.apple.com/design/human-interface-guidelines/feedback
+  - https://developer.apple.com/design/human-interface-guidelines/menus
+  - https://developer.apple.com/design/human-interface-guidelines/pull-down-buttons
+  - https://developer.apple.com/design/human-interface-guidelines/alerts
+  - https://developer.apple.com/videos/play/wwdc2022/110342/
+  - https://developer.apple.com/videos/play/wwdc2023/10037/
+- Apple API documentation:
+  - https://developer.apple.com/documentation/charts/rulemark
+  - https://developer.apple.com/documentation/charts/axismarks
+  - https://developer.apple.com/documentation/charts/chartproxy
+  - https://developer.apple.com/documentation/charts/annotationoverflowresolution
+  - https://developer.apple.com/documentation/swiftui/view/chartxselection(value:)
+  - https://developer.apple.com/documentation/swiftui/view/chartplotstyle(content:)
+  - https://developer.apple.com/documentation/swiftui/view/chartyscale(domain:type:)
+  - https://developer.apple.com/documentation/foundation/unitlength/init(forlocale:usage:)
+- Repo:
+  - origin/main 164a893: REDESIGN.md (lines 4, 19, 22); Shared/Theme.swift; Taken/Views/ProgressSummary.swift; Taken/Views/ItemRow.swift (line 205); Taken/Pro/PaywallView.swift (timelineDot); Taken/Views/Components.swift (TimeWheelSheet, MonoTimeButton); Taken/AppModel.swift (Haptics)
+  - the feat/weight-tab WIP commit 957d125, read only
+  - CI run 39680393222 screenshots
+  - Tom's MyNetDiary screenshots 1.webp to 7.webp
 
 ## Extras policy, 2026-10-22 (summary of the focus-vs-bundle decision)
 

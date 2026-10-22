@@ -176,10 +176,11 @@ final class WeightModel {
     /// Set Goal or Change Goal: the goal and, if one was chosen, the height.
     @discardableResult
     func setGoal(_ goal: WeightGoal, heightCm: Double?) -> Bool {
-        write { state in
+        let saved: Void? = write { (state: inout WeightState) -> Void in
             state.goal = goal
             if let heightCm { state.heightCm = heightCm }
-        } != nil
+        }
+        return saved != nil
     }
 
     /// Clear Goal: the goal as it was, for UNDO. The height stays for the next goal; Erase removes it.
