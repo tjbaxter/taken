@@ -3,11 +3,13 @@ import Observation
 import AppIntents
 import WidgetKit
 
-/// The tab bar's three tabs (REDESIGN.md).
+/// The tab bar's three tabs (REDESIGN.md), and the optional fourth, Weight, last (SPEC 3.12; off until the person turns
+/// it on).
 enum AppTab: String, Hashable, Sendable {
     case today
     case todo
     case history
+    case weight
 }
 
 /// Every sheet, presented above the tab bar, so one place can close it (a voice to-do request, the paywall).
@@ -25,6 +27,10 @@ enum SheetRoute: Identifiable, Hashable {
     case todoType
     /// How to add the Lock Screen widget, from Today's one-time invite.
     case widgetHelp
+    /// All weigh-ins: edit one, or swipe it away.
+    case weighIns
+    /// Set Goal or Change Goal, from the Weight tab's More menu.
+    case weightGoal
 
     var id: String {
         switch self {
@@ -36,6 +42,8 @@ enum SheetRoute: Identifiable, Hashable {
         case .todoEdit(let id): return "todo-\(id.uuidString)"
         case .todoType: return "todo-type"
         case .widgetHelp: return "widget-help"
+        case .weighIns: return "weigh-ins"
+        case .weightGoal: return "weight-goal"
         }
     }
 }
@@ -46,6 +54,14 @@ enum UndoStep: Equatable, Sendable {
     case remove(Set<UUID>)
     /// Put doses back exactly as they were: a removed dose, or a dose before its time was changed.
     case restore([Dose])
+    /// Remove a weigh-in that was just saved.
+    case removeWeighIn(UUID)
+    /// Put a weigh-in back as it was: deleted, or before an edit.
+    case restoreWeighIn(WeighIn)
+    /// Bring the Weight tab back after Hide Weight Tab.
+    case showWeightTab
+    /// Put the goal back after Clear Goal, start included.
+    case restoreWeightGoal(WeightGoal)
 }
 
 struct Toast: Identifiable, Equatable {
@@ -119,6 +135,8 @@ final class AppModel {
     /// Whether the Taken widget is on the Lock Screen already, as WidgetKit last said; nil until it has answered, and the
     /// widget invite waits for that answer.
     private(set) var lockScreenWidget: Bool?
+    /// The Weight tab (SPEC 3.12): weights.json, or a temporary file under `-demo` (Debug only).
+    @ObservationIgnored var weight: WeightModel
 
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var ticker: Task<Void, Never>?
@@ -157,6 +175,12 @@ final class AppModel {
         self.isDemo = isDemo
         self.launchScreen = launchScreen
         self.clockNow = clockNow
+        #if DEBUG
+        self.weight = isDemo ? WeightModel.demo(screen: launchScreen, now: clockNow())
+                             : WeightModel(store: .shared, isDemo: false, clockNow: clockNow)
+        #else
+        self.weight = WeightModel(store: .shared, isDemo: false, clockNow: clockNow)
+        #endif
         self.tab = Self.tab(forScreen: launchScreen)
         let addScreen = isDemo && launchScreen == "add"
         self.demoPreselect = addScreen ? ["Vitamin D3", "Fish Oil", "Finasteride"] : []
@@ -220,15 +244,19 @@ final class AppModel {
         let demoNow = DemoData.referenceNow(stack: stack)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("taken-demo-\(UUID().uuidString).json")
         let store = TakenStore(fileURL: url, postsChangeNotifications: false)
+        var allTaken = screen == "today-done" || screen == "today-widget-invite"
+        if WeightDemo.allTaken(screen) { allTaken = true }
         var seeded = screen == "add" || screen == "add-search" || screen == "empty"
             ? StackState(settings: StackSettings(reminderEnabled: true))
-            : DemoData.state(now: demoNow, allTaken: screen == "today-done" || screen == "today-widget-invite",
-                             yesterdayPartial: screen == "today-repair", stack: stack)
+            : DemoData.state(now: demoNow, allTaken: allTaken, yesterdayPartial: screen == "today-repair",
+                             stack: stack)
+        // The Weight screens' chart gets its weekly dose ticks, and the offer its weekly shot.
+        if WeightDemo.addsWeeklyShot(screen) { seeded = DemoData.withWeeklyShot(seeded, now: demoNow) }
         seeded.settings.theme = look
         try? store.replace(with: seeded)
         // Store screenshots show Taken with Pro; -screen paywall, locked and settings-locked show it without, and
         // paywall-no-yearly shows the paywall when the App Store returned every plan but yearly.
-        let lockedScreens: Set<String> = ["paywall", "locked", "settings-locked", "paywall-no-yearly"]
+        let lockedScreens: Set<String> = ["paywall", "locked", "settings-locked", "paywall-no-yearly", "weight-locked"]
         var offers = DemoOffers.all
         if screen == "paywall-no-yearly" { offers[.yearly] = nil }
         let demoLocked = screen.map { lockedScreens.contains($0) } ?? false
@@ -244,9 +272,13 @@ final class AppModel {
         #endif
     }
 
-    /// The tab a `-screen` opens on: the To-do screens on To-do, the log and the day sheet on History.
+    /// The tab a `-screen` opens on: the To-do screens on To-do, the log and the day sheet on History, the Weight screens
+    /// on Weight.
     static func tab(forScreen screen: String?) -> AppTab {
         if TodoModel.opensOnTodo(screen) { return .todo }
+        #if DEBUG
+        if WeightDemo.opensOnWeight(screen) { return .weight }
+        #endif
         switch screen {
         case "log", "history", "day": return .history
         default: return .today
@@ -285,8 +317,11 @@ final class AppModel {
     /// The one quiet row under Today's progress line, if any. Never in `-demo` unless its `-screen` asks for it.
     var todayPrompt: TodayPrompt? {
         if isDemo { return demoPrompt }
+        // The Weight tab's one-time offer comes last, after every other row (SPEC 3.12).
         return TodayPrompts.pick(settings: settings, hasStack: hasStack, today: today, repairDay: repairDay,
-                                 locked: isLocked, lockScreenWidget: lockScreenWidget ?? true, trialNotice: trialNotice)
+                                 locked: isLocked, lockScreenWidget: lockScreenWidget ?? true, trialNotice: trialNotice,
+                                 weightOffer: WeightOffer.shows(weight: weight.state, state: state, today: today,
+                                                                clock: clock))
     }
 
     /// The trial reminder's words for Today while notifications cannot carry them (`TrialReminder.notice`).
@@ -300,8 +335,22 @@ final class AppModel {
         case "today-nudge-offer": return .nudgeOffer(minutes: settings.reminderMinutes)
         case "today-repair": return .repair(today.adding(-1))
         case "today-widget-invite": return .widgetInvite
+        #if DEBUG
+        case "today-weight-offer": return .weightOffer
+        #endif
         default: return nil
         }
+    }
+
+    /// Add tab or Not now on Today's weight offer (SPEC 3.12). Either answer is final, and Add tab turns the tab on
+    /// without switching to it.
+    func answerWeightOffer(addTab: Bool) {
+        withAnimation(.snappy(duration: 0.22)) {
+            if isDemo { demoPrompt = nil }
+            weight.answerOffer(addTab: addTab)
+        }
+        if addTab { Haptics.selection(hapticsOn) }
+        if addTab && !isDemo { UIAccessibility.post(notification: .announcement, argument: "Weight tab added.") }
     }
 
     /// Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. Turn on is
@@ -449,6 +498,7 @@ final class AppModel {
     func didBecomeActive() {
         // Always rebuild: the time zone or the day may have changed while the app was away.
         apply(store.load())
+        weight.refresh()
         guard !isDemo else { return }
         let snapshot = state
         // A Taken widget added to the Lock Screen while Taken was away ends the widget invite before it shows. Its own
@@ -483,6 +533,11 @@ final class AppModel {
         case "paywall", "paywall-no-yearly": presentPaywall(origin: .intro)
         case "widget-help": sheet = .widgetHelp
         case "trial-ask": trialAsk = .root
+        #if DEBUG
+        case "weight-list": sheet = .weighIns
+        case "weight-settings", "weight-data": sheet = .settings
+        case "weight-goal-sheet", "weight-goal-low": sheet = .weightGoal
+        #endif
         default: break
         }
     }
@@ -515,6 +570,8 @@ final class AppModel {
             // taken://today (a widget), taken://todo (the To-do tab follows on its own): whatever was open closes.
             sheet = nil
             if url.host == "today" { tab = .today }
+            // taken://weight: the Weight tab, or Today while it is off.
+            if url.host == "weight" { openWeightTab() }
             return
         }
         // taken://pro from a locked widget: the tap it was, run once Pro is on.
@@ -900,6 +957,8 @@ final class AppModel {
             write { state in
                 for dose in doses { state.restore(dose) }
             }
+        case .removeWeighIn, .restoreWeighIn, .showWeightTab, .restoreWeightGoal:
+            undoWeight(step)
         }
         Haptics.soft(hapticsOn)
         dismissToast()
@@ -1117,6 +1176,8 @@ final class AppModel {
     func eraseAll() {
         write { $0.eraseAll() }
         TodoModel.shared.eraseAll()
+        // The weigh-ins go; the tab setting, the unit, the offer's answer and the first weigh-in's date stay.
+        weight.eraseAll()
         if !isDemo {
             profileStore.erase()
             store.removeSetAsideCopies()

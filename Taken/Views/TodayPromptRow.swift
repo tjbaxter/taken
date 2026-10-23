@@ -20,7 +20,64 @@ struct TodayPromptRow: View {
         case .repair(let day): repair(day)
         case .widgetInvite: widgetInvite
         case .trialEnds(let text): trialEnds(text)
+        case .weightOffer: weightOffer
         }
+    }
+
+    // MARK: Weight offer
+
+    /// The Weight tab offered once (SPEC 3.12): the nudge offer's shape, with Not now and Add tab. Add tab adds the tab
+    /// after History without switching to it.
+    private var weightOffer: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(alignment: .firstTextBaseline, spacing: 10) {
+                Image(systemName: WeightCopy.symbol)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.signalInk)
+                    .accessibilityHidden(true)
+                Text(WeightCopy.offer)
+                    .font(.sans(15, .sansMedium, relativeTo: .subheadline))
+                    .foregroundStyle(theme.fg)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            HStack(spacing: 4) {
+                Spacer(minLength: 0)
+                Button {
+                    model.answerWeightOffer(addTab: false)
+                } label: {
+                    Text(WeightCopy.notNow)
+                        .font(.sans(15, .sansMedium, relativeTo: .subheadline))
+                        .foregroundStyle(theme.fgMuted)
+                        .padding(.horizontal, 12)
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                Button {
+                    model.answerWeightOffer(addTab: true)
+                } label: {
+                    Text(WeightCopy.addTab)
+                        .font(.sans(15, .sansSemibold, relativeTo: .subheadline))
+                        .foregroundStyle(theme.signalInk)
+                        .padding(.horizontal, 14)
+                        .frame(height: 34)
+                        .background(theme.signalWash, in: Capsule())
+                        .overlay(Capsule().strokeBorder(theme.signalEdge, lineWidth: 1))
+                        .frame(minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(PressStyle())
+                .accessibilityHint("Adds a Weight tab after History. Profile can hide it again.")
+            }
+        }
+        .padding(.leading, 16)
+        .padding(.trailing, 8)
+        .padding(.top, 12)
+        .padding(.bottom, 2)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(theme.bgRaised, in: shape)
+        .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
+        .accessibilityElement(children: .contain)
     }
 
     // MARK: Trial notice

@@ -157,15 +157,24 @@ struct ProfileButton: View {
     }
 }
 
-/// The top of each tab: a large title, a line under it, and the profile avatar.
+/// The top of each tab: a large title, a line under it, and the profile avatar, with an optional accessory left of the
+/// avatar (the Weight tab's More button, SPEC 3.12). Without one it lays out exactly as it always has.
 struct TabHeader: View {
     @Environment(\.theme) private var theme
     let title: String
     let subtitle: String?
+    let accessory: AnyView?
 
     init(title: String, subtitle: String? = nil) {
         self.title = title
         self.subtitle = subtitle
+        self.accessory = nil
+    }
+
+    init<Accessory: View>(title: String, subtitle: String? = nil, @ViewBuilder accessory: () -> Accessory) {
+        self.title = title
+        self.subtitle = subtitle
+        self.accessory = AnyView(accessory())
     }
 
     var body: some View {
@@ -185,6 +194,11 @@ struct TabHeader: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .accessibilityElement(children: .combine)
             .accessibilityAddTraits(.isHeader)
+            if let accessory {
+                accessory
+                    .padding(.top, 2)
+                    .padding(.trailing, -8)
+            }
             ProfileButton()
                 .padding(.top, 2)
         }
