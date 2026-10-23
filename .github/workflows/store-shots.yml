@@ -1,6 +1,10 @@
-# Taken's App Store screenshots (iPhone 6.9", 1320 x 2868): the app's own simulator captures from ci.yml, each
-# set on a studio-lit 3D iPhone under a one-line caption (tools/store-shots). One dispatch re-renders the whole
-# set whenever the app's UI changes; the result is the "store-shots" artifact.
+# Taken's App Store screenshots: the app's own simulator captures from ci.yml, each on a studio-lit 3D iPhone under a
+# one-line caption (tools/store-shots), in two sets (REDESIGN.md "App Store pack for 1.1"): en-US for the English (U.S.)
+# localization, from ci.yml's screenshots/store/us, and neutral for every other localization, from
+# screenshots/store/neutral. Each set is written at 1320 x 2868 (iPhone 6.9") and 1206 x 2622 (iPhone 6.3", the size
+# App Store Connect lists as required), with the in-app purchase review screenshot (the paywall) beside them, as the
+# "store-shots" artifact laid out as the repository's store/ folder. One dispatch re-renders everything whenever the
+# app's UI changes.
 name: Store shots
 
 on:
@@ -10,12 +14,16 @@ on:
         description: ci.yml run id(s) to take the "screenshots" artifact from; with several, a missing or blank capture falls back to the next (blank = newest successful ci.yml run on main that has one)
         required: false
         default: ""
+      sets:
+        description: Sets to render, space separated (en-US neutral)
+        required: false
+        default: "en-US neutral"
       only:
         description: Render only frames whose file starts with this, e.g. 03 (blank = all six)
         required: false
         default: ""
       screen_map:
-        description: 'JSON map from state to file name when the capture names differ, e.g. {"day":"day-sheet.png"}'
+        description: 'JSON map from state to file name when the capture names differ, for every set {"day":"day-sheet.png"} or per set {"neutral":{"add-search":"03-add-search-6.3in.png"}}'
         required: false
         default: ""
       placeholder:
@@ -43,10 +51,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           CI_RUN: ${{ inputs.ci_run }}
+          SETS: ${{ inputs.sets }}
           USE_PLACEHOLDER: ${{ inputs.placeholder }}
         run: |
           set -euo pipefail
-          raw="$RUNNER_TEMP/raw"; mkdir -p "$raw"
+          ci="$RUNNER_TEMP/ci"; mkdir -p "$ci"
           src=""
           if [ "$USE_PLACEHOLDER" != "true" ]; then
             ids=$(echo "$CI_RUN" | tr ',' ' ')
@@ -59,30 +68,52 @@ jobs:
                 if [ "$n" != "0" ]; then ids="$id"; break; fi
               done
             fi
-            # one folder per run, in the order given: a state takes the first run's capture, and the next
-            # run's when that one is missing or blank (generate.mjs)
             i=0
             for id in $ids; do
               i=$((i + 1))
-              gh run download "$id" -R "$GITHUB_REPOSITORY" -n screenshots -D "$raw/$i-$id"
-              if [ "$i" = 1 ]; then
-                # the day the captures were taken, so the drawn Lock Screen shows the same date as the app
-                day=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$id" --jq '.run_started_at' | cut -c1-10)
-                echo "DEMO_DATE=$day" >> "$GITHUB_ENV"
-              fi
+              gh run download "$id" -R "$GITHUB_REPOSITORY" -n screenshots -D "$ci/$i-$id"
               src="$src ci.yml run $id ($GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$id)"
             done
           fi
-          if [ -z "$src" ]; then
-            mkdir -p "$raw/1-placeholder"
-            cp store/placeholder/*.png "$raw/1-placeholder/"
-            src="PLACEHOLDER screens (store/placeholder): not the app, never ship these"
-          fi
+          # One folder of runs per set ("<order>-<run id>", as generate.mjs reads them): a state takes the first run's
+          # capture, and the next run's when that one is missing or blank. Each set's folder in the artifact is the
+          # stack it was captured with (scripts/screenshots.sh): en-US from store/us, neutral from store/neutral.
+          for set in $SETS; do
+            case "$set" in
+              en-US) stack=us ;;
+              neutral) stack=neutral ;;
+              *) echo "::error::Unknown set $set (en-US or neutral)"; exit 1 ;;
+            esac
+            raw="$RUNNER_TEMP/raw-$set"; mkdir -p "$raw"
+            for run in "$ci"/*; do
+              [ -d "$run/store/$stack" ] || continue
+              mkdir -p "$raw/$(basename "$run")"
+              cp "$run/store/$stack"/*.png "$raw/$(basename "$run")/"
+            done
+            first=""
+            for run in "$ci"/1-*; do if [ -d "$run" ]; then first="$run"; break; fi; done
+            if [ -n "$first" ] && [ ! -d "$first/store/$stack" ]; then
+              echo "::error::$(basename "$first") has no screenshots/store/$stack: give a ci.yml run that captured the store sets"
+              exit 1
+            fi
+            # the day the set's captures show (the app's probe), for the Lock Screen the composer draws
+            if [ -n "$first" ] && [ -f "$first/store/$stack/demo-date.txt" ]; then
+              day="$(tr -d '[:space:]' < "$first/store/$stack/demo-date.txt")"
+              echo "DEMO_DATE_$(echo "$set" | tr 'a-z-' 'A-Z_')=$day" >> "$GITHUB_ENV"
+            fi
+            if [ -z "$(ls -A "$raw")" ]; then
+              mkdir -p "$raw/1-placeholder"
+              cp store/placeholder/*.png "$raw/1-placeholder/"
+              # store/placeholder predates the type-ahead capture: the neutral frame 03 takes the chip grid's stand-in
+              cp store/placeholder/add.png "$raw/1-placeholder/add-search.png"
+              src="${src:-PLACEHOLDER screens (store/placeholder): not the app, never ship these}"
+            fi
+          done
           {
             echo "### Raw screens"
             echo "$src"
             echo '```'
-            (cd "$raw" && find . -type f | sort)
+            (cd "$RUNNER_TEMP" && find raw-* -type f | sort)
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 
@@ -101,46 +132,108 @@ jobs:
           "$RUNNER_TEMP/pw/node_modules/.bin/playwright" install --with-deps chromium
           python -m pip install --quiet pillow==11.0.0
 
-      - name: Render the frames at 2x
+      - name: Render each set at 2x
         env:
-          RAW: ${{ runner.temp }}/raw
-          OUT: ${{ runner.temp }}/x2
           PLAYWRIGHT: ${{ runner.temp }}/pw/node_modules/playwright/index.mjs
           ONLY: ${{ inputs.only }}
           SCREEN_MAP: ${{ inputs.screen_map }}
-        run: node tools/store-shots/generate.mjs
+          SETS: ${{ inputs.sets }}
+        run: |
+          set -uo pipefail
+          failed=""
+          for set in $SETS; do
+            key="DEMO_DATE_$(echo "$set" | tr 'a-z-' 'A-Z_')"
+            echo "::group::$set"
+            if ! SET="$set" RAW="$RUNNER_TEMP/raw-$set" OUT="$RUNNER_TEMP/x2/$set" DEMO_DATE="${!key:-}" \
+                 node tools/store-shots/generate.mjs; then
+              failed="$failed $set"
+            fi
+            echo "::endgroup::"
+          done
+          # a layout check that failed still leaves the frames to look at (the steps below run)
+          if [ -n "$failed" ]; then echo "::error::Layout checks failed for:$failed"; exit 1; fi
 
       # the steps below run even when a layout check above fails, so the frames can still be looked at
-      - name: Downsample to 1320 x 2868 RGB (Lanczos) and make the contact sheet
+      - name: Downsample to 1320 x 2868 and 1206 x 2622 RGB (Lanczos) and make the contact sheets
         if: ${{ !cancelled() }}
-        run: python tools/store-shots/finish.py "$RUNNER_TEMP/x2" store-shots
+        env:
+          SETS: ${{ inputs.sets }}
+        run: |
+          set -euo pipefail
+          for set in $SETS; do
+            [ -d "$RUNNER_TEMP/x2/$set" ] || continue
+            python tools/store-shots/finish.py "$RUNNER_TEMP/x2/$set" store-shots/appstore "$set"
+            cp "$RUNNER_TEMP/x2/$set/report.json" "store-shots/appstore/report-$set.json"
+          done
 
-      - name: Verify every frame is 1320 x 2868 RGB with no alpha
+      # App Store Connect's review screenshot for each in-app purchase: the paywall as ci.yml captured it with -demo
+      # (yearly selected, the introductory week, the trial timeline), flattened to RGB.
+      - name: In-app purchase review screenshot (the paywall)
+        if: ${{ !cancelled() }}
+        run: |
+          set -euo pipefail
+          first=""
+          for run in "$RUNNER_TEMP"/ci/1-*; do if [ -d "$run" ]; then first="$run"; break; fi; done
+          if [ -z "$first" ] || [ ! -f "$first/09-paywall.png" ]; then
+            echo "::warning::No 09-paywall.png in the first ci.yml run: store-shots/iap is left out"
+            exit 0
+          fi
+          mkdir -p store-shots/iap
+          python - "$first/09-paywall.png" store-shots/iap/paywall.png <<'PY'
+          import sys
+          from PIL import Image
+          im = Image.open(sys.argv[1])
+          if im.mode in ("RGBA", "LA", "PA") or "transparency" in im.info:
+              rgba = im.convert("RGBA")
+              ground = Image.new("RGB", rgba.size, (8, 9, 10))
+              ground.paste(rgba, mask=rgba.getchannel("A"))
+              im = ground
+          im = im.convert("RGB")
+          if im.size != (1320, 2868):
+              sys.exit(f"{sys.argv[1]} is {im.size}, want (1320, 2868)")
+          im.save(sys.argv[2], "PNG", optimize=True)
+          print(sys.argv[2], im.size, im.mode)
+          PY
+
+      - name: Verify every frame's size and mode, with no alpha
         if: ${{ !cancelled() }}
         env:
           ONLY: ${{ inputs.only }}
+          SETS: ${{ inputs.sets }}
         run: |
           python - <<'PY'
-          import os, sys
+          import json, os, sys
           from pathlib import Path
           from PIL import Image
-          frames = sorted(Path("store-shots").glob("*.png"))
-          bad = []
-          for p in frames:
-              im = Image.open(p)
-              print(f"{p.name}: {im.size[0]}x{im.size[1]} {im.mode}")
-              if im.size != (1320, 2868) or im.mode != "RGB" or "transparency" in im.info:
-                  bad.append(p.name)
-          if not os.environ.get("ONLY") and len(frames) != 6:
-              sys.exit(f"want 6 frames, have {len(frames)}")
+          sizes = {"iphone-6.9": (1320, 2868), "iphone-6.3": (1206, 2622)}
+          bad, counts = [], {}
+          for set_name in os.environ["SETS"].split():
+              for device, size in sizes.items():
+                  frames = sorted(Path("store-shots/appstore", device, set_name).glob("*.png"))
+                  counts[f"{device}/{set_name}"] = len(frames)
+                  for p in frames:
+                      im = Image.open(p)
+                      print(f"{device}/{set_name}/{p.name}: {im.size[0]}x{im.size[1]} {im.mode}")
+                      if im.size != size or im.mode != "RGB" or "transparency" in im.info:
+                          bad.append(str(p))
+                  if not os.environ.get("ONLY") and len(frames) != 6:
+                      bad.append(f"{device}/{set_name}: {len(frames)} frames, want 6")
+          iap = Path("store-shots/iap/paywall.png")
+          if iap.exists():
+              im = Image.open(iap)
+              print(f"iap/paywall.png: {im.size[0]}x{im.size[1]} {im.mode}")
+              if im.size != (1320, 2868) or im.mode != "RGB":
+                  bad.append(str(iap))
+          print(json.dumps(counts))
           if bad:
-              sys.exit(f"wrong size or mode: {bad}")
+              sys.exit(f"wrong size, mode or count: {bad}")
           PY
-          cp "$RUNNER_TEMP/x2/report.json" store-shots/report.json
           {
             echo "### Frames"
             echo '```'
-            python -c "import json; [print(r['file'], r['key'], r['screen'], 'clearance', r['clearance'], 'island', r['islandFrom'], 'battery repainted' if r['batteryRepainted'] else '', 'screen shown to', r['screenVisibleTo'], 'pt') for r in json.load(open('store-shots/report.json'))]"
+            for report in store-shots/appstore/report-*.json; do
+              python -c "import json, sys; [print(r['set'], r['file'], r['key'], r['screen'], r.get('date') or '', 'clearance', r['clearance'], 'island', r['islandFrom'], 'battery repainted' if r['batteryRepainted'] else '', 'screen shown to', r['screenVisibleTo'], 'pt') for r in json.load(open(sys.argv[1]))]" "$report"
+            done
             echo '```'
           } | tee -a "$GITHUB_STEP_SUMMARY"
 

@@ -1,0 +1,46 @@
+{
+  "subscription_group": {
+    "reference_name": "Taken Pro",
+    "display_name": "Taken Pro",
+    "app_name_display": "Use App Name"
+  },
+  "products": [
+    {
+      "product_id": "com.tombaxter.taken.pro.yearly",
+      "reference_name": "Taken Pro Yearly",
+      "type": "Auto-Renewable Subscription",
+      "group": "Taken Pro",
+      "duration": "1 year",
+      "price_usd": "19.99",
+      "offer": "Introductory offer: 1 week at no charge, new subscribers",
+      "display_name": "Taken Pro Yearly",
+      "description": "One-tap logging, widgets, Siri, voice to-dos",
+      "review_screenshot": "store/iap/paywall.png",
+      "review_notes": "Shown on the Taken Pro sheet, which slides up about 1.5 seconds after the first dose is logged (the version's App Review notes, step 2). Yearly is selected there, with the introductory week. Restore and Redeem code are on the same sheet and in Profile, Taken Pro."
+    },
+    {
+      "product_id": "com.tombaxter.taken.pro.monthly",
+      "reference_name": "Taken Pro Monthly",
+      "type": "Auto-Renewable Subscription",
+      "group": "Taken Pro",
+      "duration": "1 month",
+      "price_usd": "3.99",
+      "offer": "none",
+      "display_name": "Taken Pro Monthly",
+      "description": "One-tap logging, widgets, Siri, voice to-dos",
+      "review_screenshot": "store/iap/paywall.png",
+      "review_notes": "Shown on the Taken Pro sheet, which slides up about 1.5 seconds after the first dose is logged (the version's App Review notes, step 2). Tap Monthly to choose it. Restore and Redeem code are on the same sheet and in Profile, Taken Pro."
+    },
+    {
+      "product_id": "com.tombaxter.taken.pro.lifetime",
+      "reference_name": "Taken Pro Lifetime",
+      "type": "Non-Consumable",
+      "price_usd": "49.99",
+      "offer": "none",
+      "display_name": "Taken Pro Lifetime",
+      "description": "All of Taken Pro, yours for good",
+      "review_screenshot": "store/iap/paywall.png",
+      "review_notes": "Shown on the Taken Pro sheet, which slides up about 1.5 seconds after the first dose is logged (the version's App Review notes, step 2). Tap Lifetime to choose it: one payment, Pro for good. Restore purchases in Profile, Taken Pro brings it back on another iPhone."
+    }
+  ]
+}

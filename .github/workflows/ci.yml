@@ -63,6 +63,19 @@ jobs:
             build/TakenTests.xcresult
           retention-days: 7
 
+  # The App Store pack (store/SUBMISSION-1.1.md): every field against Apple's limits, the copy rules, no medicine (from
+  # Shared/Catalog.swift) or price in either set, weight words only in What's New's Weight tab line and the review
+  # notes, and the screenshot captions.
+  store-metadata:
+    name: Store metadata
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Check the listing, review notes, in-app purchases and captions
+        run: python3 scripts/check-store-metadata.py
+
   device-build:
     name: Release build for device (unsigned)
     runs-on: macos-26
@@ -218,11 +231,13 @@ jobs:
       - name: Capture screenshots
         run: scripts/screenshots.sh "${{ steps.sim.outputs.udid }}" build/DerivedData/Build/Products/Debug-iphonesimulator/Taken.app screenshots build/screenshot-diagnostics "${{ steps.sim.outputs.small }}" "${{ steps.sim.outputs.compact }}"
 
+      # The whole folder: the captures, and the App Store sets in store/us and store/neutral with the day each shows
+      # (demo-date.txt), which store-shots.yml renders.
       - name: Upload screenshots
         uses: actions/upload-artifact@v7
         with:
           name: screenshots
-          path: screenshots/*.png
+          path: screenshots/
           if-no-files-found: error
           retention-days: 30
 

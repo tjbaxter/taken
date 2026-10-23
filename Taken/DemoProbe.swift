@@ -3,7 +3,8 @@ import Foundation
 /// CI only (`-demo`): what is in front, written to `tmp/taken-ui-state.txt` in the app's container whenever it changes,
 /// so scripts/screenshots.sh can fail a link check that lands on the wrong screen instead of saving a picture of it.
 /// Lines: `tab=today|todo|history`, `sheet=<route or none>`, `paywall=0|1`, `todo=idle|starting|listening|sorting`,
-/// `ask=0|1` (the notification ask after a trial starts).
+/// `ask=0|1` (the notification ask after a trial starts), `stack=standard|us|neutral` (`-demo-stack`) and
+/// `day=YYYY-MM-DD`, the day being lived (the store sets' Thursday, which the drawn Lock Screen frame shows too).
 @MainActor
 enum DemoProbe {
     static let fileName = "taken-ui-state.txt"
@@ -13,12 +14,15 @@ enum DemoProbe {
 
     static func record(_ model: AppModel, todo: TodoModel = .shared) {
         guard model.isDemo else { return }
+        let (year, month, day) = model.today.day.ymd
         let lines = [
             "tab=\(model.tab.rawValue)",
             "sheet=\(model.sheet?.id ?? "none")",
             "paywall=\(model.paywall == nil ? 0 : 1)",
             "todo=\(todo.phase)",
             "ask=\(model.trialAsk == nil ? 0 : 1)",
+            "stack=\(model.demoStack.rawValue)",
+            "day=\(String(format: "%04d-%02d-%02d", year, month, day))",
         ]
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)

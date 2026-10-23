@@ -97,8 +97,11 @@ final class AppModel {
     /// Chips pre-selected in the Add sheet for the `-demo -screen add` screenshot, and how often each is taken.
     let demoPreselect: [String]
     let demoChoices: [String: FrequencyChoice]
-    /// `-demo -screen add-search`: the Add sheet in type mode with "tum" typed, Turmeric suggested.
+    /// `-demo -screen add-search`: the Add sheet in type mode with "tum" typed, Turmeric suggested ("mag" for the
+    /// neutral store set, `DemoStack.typedQuery`).
     let demoQuery: String
+    /// `-demo-stack us|neutral`: which App Store set a `-demo` launch shows (`DemoStack`); `standard` otherwise.
+    let demoStack: DemoStack
     /// Profile: a name and a photo, both optional, on this iPhone.
     let profileStore: ProfileStore
     private(set) var profile: Profile
@@ -149,7 +152,7 @@ final class AppModel {
     @ObservationIgnored private var askingPermission = false
 
     init(store: TakenStore, pro: ProStore? = nil, profileStore: ProfileStore = .shared, isDemo: Bool,
-         launchScreen: String?, clockNow: @escaping @Sendable () -> Date) {
+         launchScreen: String?, demoStack: DemoStack = .standard, clockNow: @escaping @Sendable () -> Date) {
         self.store = store
         self.isDemo = isDemo
         self.launchScreen = launchScreen
@@ -158,7 +161,8 @@ final class AppModel {
         let addScreen = isDemo && launchScreen == "add"
         self.demoPreselect = addScreen ? ["Vitamin D3", "Fish Oil", "Finasteride"] : []
         self.demoChoices = addScreen ? ["Finasteride": .alternate] : [:]
-        self.demoQuery = isDemo && launchScreen == "add-search" ? "tum" : ""
+        self.demoQuery = isDemo && launchScreen == "add-search" ? demoStack.typedQuery : ""
+        self.demoStack = isDemo ? demoStack : .standard
         self.profileStore = profileStore
         self.profile = profileStore.load()
         self.profilePhoto = profileStore.loadPhoto().flatMap { UIImage(data: $0) }
@@ -194,7 +198,11 @@ final class AppModel {
         }
     }
 
+    /// The app as launched. `-demo` (with `-screen`, `-theme` and `-demo-stack`) is CI's screenshot mode
+    /// (scripts/screenshots.sh, on the Debug simulator build) and is read only in Debug builds: a Release build, and so
+    /// every App Store build, always opens the real store and never reads an argument (Guideline 2.5.19).
     static func fromLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) -> AppModel {
+        #if DEBUG
         var screen: String?
         if let index = arguments.firstIndex(of: "-screen"), index + 1 < arguments.count {
             screen = arguments[index + 1]
@@ -207,13 +215,15 @@ final class AppModel {
         if let index = arguments.firstIndex(of: "-theme"), index + 1 < arguments.count {
             look = ThemeID(stored: arguments[index + 1])
         }
-        let demoNow = DemoData.referenceNow()
+        // `-demo-stack us|neutral`: the App Store sets, each on a Thursday with its weekly row (DemoStack).
+        let stack = DemoStack(arguments: arguments)
+        let demoNow = DemoData.referenceNow(stack: stack)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("taken-demo-\(UUID().uuidString).json")
         let store = TakenStore(fileURL: url, postsChangeNotifications: false)
         var seeded = screen == "add" || screen == "add-search" || screen == "empty"
             ? StackState(settings: StackSettings(reminderEnabled: true))
             : DemoData.state(now: demoNow, allTaken: screen == "today-done" || screen == "today-widget-invite",
-                             yesterdayPartial: screen == "today-repair")
+                             yesterdayPartial: screen == "today-repair", stack: stack)
         seeded.settings.theme = look
         try? store.replace(with: seeded)
         // Store screenshots show Taken with Pro; -screen paywall, locked and settings-locked show it without, and
@@ -228,7 +238,10 @@ final class AppModel {
         let profiles = ProfileStore(directory: profileFolder)
         if screen != "empty" { try? profiles.save(Profile(name: "Alex Morgan")) }
         return AppModel(store: store, pro: pro, profileStore: profiles, isDemo: true, launchScreen: screen,
-                        clockNow: { demoNow })
+                        demoStack: stack, clockNow: { demoNow })
+        #else
+        return AppModel(store: .shared, profileStore: .shared, isDemo: false, launchScreen: nil, clockNow: { Date() })
+        #endif
     }
 
     /// The tab a `-screen` opens on: the To-do screens on To-do, the log and the day sheet on History.
