@@ -22,11 +22,9 @@ enum TodayPrompt: Equatable, Sendable {
     /// for Taken, from the moment the reminder would have come until the trial ends (`TrialReminder.notice`). A tap
     /// opens Apple's Manage subscription sheet. It keeps the paywall's "we remind you" without notifications.
     case trialEnds(String)
-    #if DEBUG || TAKEN_INTERNAL
     /// "Log your weight here too: add a Weight tab", with Not now and Add tab: once, after every other row, to a stack
-    /// with a GLP-1 medicine on a later All taken day (`WeightOffer`, SPEC 3.12). Internal builds only until 1.2.
+    /// with a GLP-1 medicine on a later All taken day (`WeightOffer`, SPEC 3.12).
     case weightOffer
-    #endif
 }
 
 enum TodayPrompts {

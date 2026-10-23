@@ -244,7 +244,7 @@ shoot 54-trial-ask trial-ask
 lands 54-trial-ask "ask=1"
 shoot 54-trial-ask-blush trial-ask blush
 lands 54-trial-ask-blush "ask=1"
-# The Weight tab (SPEC 3.12; REDESIGN.md, "Weight tab page: entry first"; Debug and internal builds only until 1.2). Screen
+# The Weight tab (SPEC 3.12; REDESIGN.md, "Weight tab page: entry first"; in every build since 1.1, off by default). Screen
 # one: the grey last weigh-in with the caret in every look, typing (the number must not move, and the line must clear the
 # Weigh in bar), the range hint, never weighed in, weighed in today, locked, and pounds. Screen two: the first weigh-in's
 # single dot, the trend in every look, All weigh-ins, Profile's switch and CSV rows, and Today's one-time offer. Every other
@@ -349,18 +349,22 @@ link 67-link-weight-off settings "taken://weight" "tab=today sheet=none weight=0
 # with its weekly row (-demo-stack, Shared/DemoData.swift): the U.S. set names generic medicines ("Semaglutide",
 # "Weekly · Thu") and shows the Add sheet's chip grid; the neutral set has a "Weekly shot" row, no prescription-only
 # medicine, and the type-ahead with "mag" typed in place of the chip grid. The probe proves each launch took its stack,
-# and gives the day it shows, for the Lock Screen the composer draws.
+# and gives the day it shows, for the Lock Screen the composer draws. Every frame is the app as it installs: the Weight
+# tab, in every build since 1.1, is off (weight=0) and its one-time offer is not showing (offer=0).
 store_set() {
-  local set="$1" add="$2"
+  local set="$1" add="$2" default="weight=0 offer=0"
   shoot "store/$set/01-today" today signal "$set"
-  lands "store/$set/01-today" "tab=today sheet=none stack=$set"
+  lands "store/$set/01-today" "tab=today sheet=none stack=$set $default"
   sed -n 's/^day=//p' "$(probe_file)" > "$out/store/$set/demo-date.txt"
   echo "store/$set shows $(cat "$out/store/$set/demo-date.txt")"
   shoot "store/$set/02-today-done" today-done signal "$set"
+  lands "store/$set/02-today-done" "tab=today stack=$set $default"
   shoot "store/$set/03-$add" "$add" signal "$set"
-  lands "store/$set/03-$add" "sheet=add stack=$set"
+  lands "store/$set/03-$add" "sheet=add stack=$set $default"
   shoot "store/$set/04-day" day signal "$set"
+  lands "store/$set/04-day" "stack=$set $default"
   shoot "store/$set/06-log" log signal "$set"
+  lands "store/$set/06-log" "tab=history stack=$set $default"
 }
 store_set us add
 store_set neutral add-search

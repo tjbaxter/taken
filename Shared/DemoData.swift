@@ -131,8 +131,8 @@ enum DemoData {
     }
 }
 
-#if DEBUG || TAKEN_INTERNAL
-// The Weight tab's demo (SPEC 3.12, CI screenshots only), compiled only where the tab is.
+#if DEBUG
+// The Weight tab's demo (SPEC 3.12, CI screenshots only), Debug only like `-demo` itself.
 extension DemoData {
     /// About 26 weeks of morning weigh-ins, most days: a flat-to-gently-falling line from about 92.6 kg that levels off
     /// near 88.9 kg, with the day-to-day swings a scale shows, to the nearest 0.05 kg. Today's is at 07:xx; without

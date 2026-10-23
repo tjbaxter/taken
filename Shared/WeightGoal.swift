@@ -3,11 +3,8 @@ import Foundation
 // The Weight tab's optional goal and its moments (REDESIGN.md, "Goal and moments, 2026-10-22"): the goal, its start and
 // direction, the BMI 18.5 floor, at most three lit points on the trend (5% and 10% below the start, and the goal
 // reached), the one line that says how close the trend is, the y axis ticks, the change line for the selected range and
-// every word they show, as pure rules (TakenTests/WeightGoalTests.swift). Compiled only into Debug and the owner's
-// internal builds until 1.2, like the rest of the Weight tab. Copy rules: no em or en dash, no exclamation mark, and
-// never lose, lost, loss, ideal, great, should, missed, behind or off track.
-
-#if DEBUG || TAKEN_INTERNAL
+// every word they show, as pure rules (TakenTests/WeightGoalTests.swift). Copy rules: no em or en dash, no exclamation
+// mark, and never lose, lost, loss, ideal, great, should, missed, behind or off track.
 
 // MARK: - The goal
 
@@ -607,5 +604,3 @@ enum WeightGoalCopy {
         return lines
     }
 }
-
-#endif

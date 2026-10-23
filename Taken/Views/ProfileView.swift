@@ -26,21 +26,21 @@ struct ProfileView: View {
     @State private var loadingPhoto = false
     #if DEBUG || TAKEN_INTERNAL
     @State private var showVoiceLog = false
+    #endif
     /// Profile > Data > Import weight CSV: the file picker, and the line under the row once it has read the file.
     @State private var importingWeights = false
     @State private var weightNote: String?
-    #endif
 
     init() {}
 
     /// The Look row, which `-demo -screen look` scrolls to.
     static let lookAnchor = "look"
 
-    /// Where `-demo` opens Profile scrolled to: the Look row for `-screen look`, and in builds with the Weight tab the
-    /// Weight switch (`weight-settings`) and the weight CSV rows (`weight-data`).
+    /// Where `-demo` opens Profile scrolled to: the Look row for `-screen look`, and in Debug builds (where `-demo` is
+    /// read) the Weight switch (`weight-settings`) and the weight CSV rows (`weight-data`).
     static func demoAnchor(_ screen: String?) -> String? {
         if screen == "look" { return lookAnchor }
-        #if DEBUG || TAKEN_INTERNAL
+        #if DEBUG
         if screen == "weight-settings" { return weightAnchor }
         if screen == "weight-data" { return weightDataAnchor }
         #endif
@@ -57,9 +57,7 @@ struct ProfileView: View {
                     reminderSection
                     wakeSection
                     hapticsSection
-                    #if DEBUG || TAKEN_INTERNAL
                     weightSection
-                    #endif
                     proSection
                     dataSection
                     #if DEBUG || TAKEN_INTERNAL
@@ -72,7 +70,6 @@ struct ProfileView: View {
                 .background(theme.bg)
                 .environment(\.editMode, $editMode)
                 .photosPicker(isPresented: $pickingPhoto, selection: $photoItem, matching: .images)
-                #if DEBUG || TAKEN_INTERNAL
                 // Import weight CSV: a CSV, TSV or plain text file from Files (MyNetDiary's Data Export, another weight
                 // app, or Taken's own taken-weight.csv).
                 .fileImporter(isPresented: $importingWeights,
@@ -82,7 +79,6 @@ struct ProfileView: View {
                     case .failure: weightNote = WeightCopy.couldNotOpen
                     }
                 }
-                #endif
                 .task {
                     // `-demo -screen look`: the Look section in view, for the screenshots.
                     guard model.isDemo, let anchor = Self.demoAnchor(model.launchScreen) else { return }
@@ -167,11 +163,7 @@ struct ProfileView: View {
     }
 
     /// What Erase all data takes, said before it does.
-    #if DEBUG || TAKEN_INTERNAL
     static let eraseMessage = "This removes your stack, every logged dose, all your to-dos, your weigh-ins, your weight goal and your profile from this iPhone. It cannot be undone."
-    #else
-    static let eraseMessage = "This removes your stack, every logged dose, all your to-dos and your profile from this iPhone. It cannot be undone."
-    #endif
 
     // MARK: Profile
 
@@ -470,7 +462,6 @@ struct ProfileView: View {
         }
     }
 
-    #if DEBUG || TAKEN_INTERNAL
     // MARK: Weight
 
     /// The Weight switch, which `-demo -screen weight-settings` scrolls to.
@@ -526,7 +517,6 @@ struct ProfileView: View {
             }
         }
     }
-    #endif
 
     // MARK: Taken Pro
 
@@ -657,9 +647,7 @@ struct ProfileView: View {
             }
             .profileRow()
 
-            #if DEBUG || TAKEN_INTERNAL
             weightDataRows
-            #endif
 
             Button {
                 confirmErase = true
@@ -854,7 +842,6 @@ struct CSVFile: Transferable {
     }
 }
 
-#if DEBUG || TAKEN_INTERNAL
 /// Export weight CSV as a shareable file: taken-weight.csv (date, time, kg).
 struct WeightCSVFile: Transferable {
     let text: String
@@ -867,7 +854,6 @@ struct WeightCSVFile: Transferable {
         }
     }
 }
-#endif
 
 /// The item sheet: tap an item's name on Today (or its row in Profile) to rename it, change how often it is taken,
 /// archive it or delete it. No trip to settings.

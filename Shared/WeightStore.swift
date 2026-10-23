@@ -1,10 +1,9 @@
 import Foundation
 
-#if DEBUG || TAKEN_INTERNAL
 /// Reads and writes `weights.json` in the App Group, next to the log, the way `TodoStore` keeps `todos.json`: coordinated
 /// reads and read-modify-writes (NSFileCoordinator), atomic writes with complete protection until first unlock, a file
 /// that cannot be read set aside rather than overwritten, and a Darwin notification after each write. Its own file, so a
-/// build without the Weight tab never reads or rewrites it. Compiled only into Debug and internal builds until 1.2.
+/// build without the Weight tab never reads or rewrites it.
 final class WeightStore: Sendable {
     static let fileName = "weights.json"
     static let darwinNotificationName = "com.tombaxter.taken.weights.didChange"
@@ -92,4 +91,3 @@ final class WeightStore: Sendable {
         return WeightState()
     }
 }
-#endif

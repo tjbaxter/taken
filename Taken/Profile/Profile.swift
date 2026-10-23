@@ -171,13 +171,11 @@ struct TabHeader: View {
         self.accessory = nil
     }
 
-    #if DEBUG || TAKEN_INTERNAL
     init<Accessory: View>(title: String, subtitle: String? = nil, @ViewBuilder accessory: () -> Accessory) {
         self.title = title
         self.subtitle = subtitle
         self.accessory = AnyView(accessory())
     }
-    #endif
 
     var body: some View {
         HStack(alignment: .top, spacing: 12) {

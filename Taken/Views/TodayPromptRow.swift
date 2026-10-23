@@ -20,13 +20,10 @@ struct TodayPromptRow: View {
         case .repair(let day): repair(day)
         case .widgetInvite: widgetInvite
         case .trialEnds(let text): trialEnds(text)
-        #if DEBUG || TAKEN_INTERNAL
         case .weightOffer: weightOffer
-        #endif
         }
     }
 
-    #if DEBUG || TAKEN_INTERNAL
     // MARK: Weight offer
 
     /// The Weight tab offered once (SPEC 3.12): the nudge offer's shape, with Not now and Add tab. Add tab adds the tab
@@ -82,7 +79,6 @@ struct TodayPromptRow: View {
         .overlay(shape.strokeBorder(theme.line, lineWidth: 1))
         .accessibilityElement(children: .contain)
     }
-    #endif
 
     // MARK: Trial notice
 

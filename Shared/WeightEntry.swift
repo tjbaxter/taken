@@ -2,9 +2,7 @@ import Foundation
 
 // The Weight tab's page, entry first (REDESIGN.md, "Weight tab page: entry first, 2026-10-22"): what the big number shows,
 // what the small line under it says, when the range hint shows, and where a scroll comes to rest, as pure rules
-// (TakenTests/WeightEntryTests.swift). Compiled only into Debug and the owner's internal builds until 1.2.
-
-#if DEBUG || TAKEN_INTERNAL
+// (TakenTests/WeightEntryTests.swift).
 
 /// The page's scroll anchors: screen one, the number's block, and screen two.
 enum WeightAnchor: Hashable, Sendable {
@@ -118,5 +116,3 @@ enum WeightFold {
         return y < fold / 2 ? 0 : fold
     }
 }
-
-#endif

@@ -1,6 +1,5 @@
 import SwiftUI
 
-#if DEBUG || TAKEN_INTERNAL
 /// All weigh-ins (SPEC 3.12): every weigh-in, newest first, with its day, time and weight. A tap opens it to change the
 /// weight, the day or the time (Taken Pro after the first weigh-in, as backdating a dose needs it); a swipe deletes it,
 /// always, with UNDO. Hiding the tab never deletes anything here; only Erase all data does.
@@ -266,4 +265,3 @@ struct WeighInEditor: View {
         dismiss()
     }
 }
-#endif

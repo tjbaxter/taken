@@ -3,15 +3,13 @@ import Observation
 import AppIntents
 import WidgetKit
 
-/// The tab bar's three tabs (REDESIGN.md), and the optional fourth, Weight, last (SPEC 3.12; internal builds only until
-/// 1.2).
+/// The tab bar's three tabs (REDESIGN.md), and the optional fourth, Weight, last (SPEC 3.12; off until the person turns
+/// it on).
 enum AppTab: String, Hashable, Sendable {
     case today
     case todo
     case history
-    #if DEBUG || TAKEN_INTERNAL
     case weight
-    #endif
 }
 
 /// Every sheet, presented above the tab bar, so one place can close it (a voice to-do request, the paywall).
@@ -29,12 +27,10 @@ enum SheetRoute: Identifiable, Hashable {
     case todoType
     /// How to add the Lock Screen widget, from Today's one-time invite.
     case widgetHelp
-    #if DEBUG || TAKEN_INTERNAL
     /// All weigh-ins: edit one, or swipe it away.
     case weighIns
     /// Set Goal or Change Goal, from the Weight tab's More menu.
     case weightGoal
-    #endif
 
     var id: String {
         switch self {
@@ -46,10 +42,8 @@ enum SheetRoute: Identifiable, Hashable {
         case .todoEdit(let id): return "todo-\(id.uuidString)"
         case .todoType: return "todo-type"
         case .widgetHelp: return "widget-help"
-        #if DEBUG || TAKEN_INTERNAL
         case .weighIns: return "weigh-ins"
         case .weightGoal: return "weight-goal"
-        #endif
         }
     }
 }
@@ -60,7 +54,6 @@ enum UndoStep: Equatable, Sendable {
     case remove(Set<UUID>)
     /// Put doses back exactly as they were: a removed dose, or a dose before its time was changed.
     case restore([Dose])
-    #if DEBUG || TAKEN_INTERNAL
     /// Remove a weigh-in that was just saved.
     case removeWeighIn(UUID)
     /// Put a weigh-in back as it was: deleted, or before an edit.
@@ -69,7 +62,6 @@ enum UndoStep: Equatable, Sendable {
     case showWeightTab
     /// Put the goal back after Clear Goal, start included.
     case restoreWeightGoal(WeightGoal)
-    #endif
 }
 
 struct Toast: Identifiable, Equatable {
@@ -143,10 +135,8 @@ final class AppModel {
     /// Whether the Taken widget is on the Lock Screen already, as WidgetKit last said; nil until it has answered, and the
     /// widget invite waits for that answer.
     private(set) var lockScreenWidget: Bool?
-    #if DEBUG || TAKEN_INTERNAL
-    /// The Weight tab (SPEC 3.12): weights.json, or a temporary file under `-demo`. Internal builds only until 1.2.
+    /// The Weight tab (SPEC 3.12): weights.json, or a temporary file under `-demo` (Debug only).
     @ObservationIgnored var weight: WeightModel
-    #endif
 
     @ObservationIgnored private var toastTask: Task<Void, Never>?
     @ObservationIgnored private var ticker: Task<Void, Never>?
@@ -185,9 +175,11 @@ final class AppModel {
         self.isDemo = isDemo
         self.launchScreen = launchScreen
         self.clockNow = clockNow
-        #if DEBUG || TAKEN_INTERNAL
+        #if DEBUG
         self.weight = isDemo ? WeightModel.demo(screen: launchScreen, now: clockNow())
                              : WeightModel(store: .shared, isDemo: false, clockNow: clockNow)
+        #else
+        self.weight = WeightModel(store: .shared, isDemo: false, clockNow: clockNow)
         #endif
         self.tab = Self.tab(forScreen: launchScreen)
         let addScreen = isDemo && launchScreen == "add"
@@ -253,25 +245,18 @@ final class AppModel {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("taken-demo-\(UUID().uuidString).json")
         let store = TakenStore(fileURL: url, postsChangeNotifications: false)
         var allTaken = screen == "today-done" || screen == "today-widget-invite"
-        #if DEBUG || TAKEN_INTERNAL
         if WeightDemo.allTaken(screen) { allTaken = true }
-        #endif
         var seeded = screen == "add" || screen == "add-search" || screen == "empty"
             ? StackState(settings: StackSettings(reminderEnabled: true))
             : DemoData.state(now: demoNow, allTaken: allTaken, yesterdayPartial: screen == "today-repair",
                              stack: stack)
-        #if DEBUG || TAKEN_INTERNAL
         // The Weight screens' chart gets its weekly dose ticks, and the offer its weekly shot.
         if WeightDemo.addsWeeklyShot(screen) { seeded = DemoData.withWeeklyShot(seeded, now: demoNow) }
-        #endif
         seeded.settings.theme = look
         try? store.replace(with: seeded)
         // Store screenshots show Taken with Pro; -screen paywall, locked and settings-locked show it without, and
         // paywall-no-yearly shows the paywall when the App Store returned every plan but yearly.
-        var lockedScreens: Set<String> = ["paywall", "locked", "settings-locked", "paywall-no-yearly"]
-        #if DEBUG || TAKEN_INTERNAL
-        lockedScreens.insert("weight-locked")
-        #endif
+        let lockedScreens: Set<String> = ["paywall", "locked", "settings-locked", "paywall-no-yearly", "weight-locked"]
         var offers = DemoOffers.all
         if screen == "paywall-no-yearly" { offers[.yearly] = nil }
         let demoLocked = screen.map { lockedScreens.contains($0) } ?? false
@@ -291,7 +276,7 @@ final class AppModel {
     /// on Weight.
     static func tab(forScreen screen: String?) -> AppTab {
         if TodoModel.opensOnTodo(screen) { return .todo }
-        #if DEBUG || TAKEN_INTERNAL
+        #if DEBUG
         if WeightDemo.opensOnWeight(screen) { return .weight }
         #endif
         switch screen {
@@ -332,16 +317,11 @@ final class AppModel {
     /// The one quiet row under Today's progress line, if any. Never in `-demo` unless its `-screen` asks for it.
     var todayPrompt: TodayPrompt? {
         if isDemo { return demoPrompt }
-        #if DEBUG || TAKEN_INTERNAL
-        // The Weight tab's one-time offer comes last, after every row 1.1 has (SPEC 3.12).
+        // The Weight tab's one-time offer comes last, after every other row (SPEC 3.12).
         return TodayPrompts.pick(settings: settings, hasStack: hasStack, today: today, repairDay: repairDay,
                                  locked: isLocked, lockScreenWidget: lockScreenWidget ?? true, trialNotice: trialNotice,
                                  weightOffer: WeightOffer.shows(weight: weight.state, state: state, today: today,
                                                                 clock: clock))
-        #else
-        return TodayPrompts.pick(settings: settings, hasStack: hasStack, today: today, repairDay: repairDay,
-                                 locked: isLocked, lockScreenWidget: lockScreenWidget ?? true, trialNotice: trialNotice)
-        #endif
     }
 
     /// The trial reminder's words for Today while notifications cannot carry them (`TrialReminder.notice`).
@@ -355,14 +335,13 @@ final class AppModel {
         case "today-nudge-offer": return .nudgeOffer(minutes: settings.reminderMinutes)
         case "today-repair": return .repair(today.adding(-1))
         case "today-widget-invite": return .widgetInvite
-        #if DEBUG || TAKEN_INTERNAL
+        #if DEBUG
         case "today-weight-offer": return .weightOffer
         #endif
         default: return nil
         }
     }
 
-    #if DEBUG || TAKEN_INTERNAL
     /// Add tab or Not now on Today's weight offer (SPEC 3.12). Either answer is final, and Add tab turns the tab on
     /// without switching to it.
     func answerWeightOffer(addTab: Bool) {
@@ -373,7 +352,6 @@ final class AppModel {
         if addTab { Haptics.selection(hapticsOn) }
         if addTab && !isDemo { UIAccessibility.post(notification: .announcement, argument: "Weight tab added.") }
     }
-    #endif
 
     /// Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. Turn on is
     /// the only place, with Profile's toggle, where iOS asks for notification permission.
@@ -520,9 +498,7 @@ final class AppModel {
     func didBecomeActive() {
         // Always rebuild: the time zone or the day may have changed while the app was away.
         apply(store.load())
-        #if DEBUG || TAKEN_INTERNAL
         weight.refresh()
-        #endif
         guard !isDemo else { return }
         let snapshot = state
         // A Taken widget added to the Lock Screen while Taken was away ends the widget invite before it shows. Its own
@@ -557,7 +533,7 @@ final class AppModel {
         case "paywall", "paywall-no-yearly": presentPaywall(origin: .intro)
         case "widget-help": sheet = .widgetHelp
         case "trial-ask": trialAsk = .root
-        #if DEBUG || TAKEN_INTERNAL
+        #if DEBUG
         case "weight-list": sheet = .weighIns
         case "weight-settings", "weight-data": sheet = .settings
         case "weight-goal-sheet", "weight-goal-low": sheet = .weightGoal
@@ -594,10 +570,8 @@ final class AppModel {
             // taken://today (a widget), taken://todo (the To-do tab follows on its own): whatever was open closes.
             sheet = nil
             if url.host == "today" { tab = .today }
-            #if DEBUG || TAKEN_INTERNAL
-            // taken://weight (CI's link check): the Weight tab, or Today while it is off.
+            // taken://weight: the Weight tab, or Today while it is off.
             if url.host == "weight" { openWeightTab() }
-            #endif
             return
         }
         // taken://pro from a locked widget: the tap it was, run once Pro is on.
@@ -983,10 +957,8 @@ final class AppModel {
             write { state in
                 for dose in doses { state.restore(dose) }
             }
-        #if DEBUG || TAKEN_INTERNAL
         case .removeWeighIn, .restoreWeighIn, .showWeightTab, .restoreWeightGoal:
             undoWeight(step)
-        #endif
         }
         Haptics.soft(hapticsOn)
         dismissToast()
@@ -1204,10 +1176,8 @@ final class AppModel {
     func eraseAll() {
         write { $0.eraseAll() }
         TodoModel.shared.eraseAll()
-        #if DEBUG || TAKEN_INTERNAL
         // The weigh-ins go; the tab setting, the unit, the offer's answer and the first weigh-in's date stay.
         weight.eraseAll()
-        #endif
         if !isDemo {
             profileStore.erase()
             store.removeSetAsideCopies()

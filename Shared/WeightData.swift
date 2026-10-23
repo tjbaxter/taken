@@ -1,13 +1,10 @@
 import Foundation
 
 // The Weight tab (SPEC 3.12; REDESIGN.md, "Weight tab, 2026-10-22"): weigh-ins, the smoothed trend, kilograms and pounds,
-// the Pro rule, the one-time offer on Today and the CSV, as pure rules (TakenTests/WeightTests.swift). Compiled only into
-// Debug (for the tests) and the owner's internal builds (TAKEN_INTERNAL) until 1.2 ships after 1.1 is approved, so no
-// App Store build from main contains it (App Review Guideline 2.5.19: scripts/check-app-store-build.sh looks for
-// WeightTabRootView). Copy rules: no em or en dash, never the word for no charge, no exclamation marks, and never lose,
-// ideal or goal (the self-weighing research in REDESIGN.md).
-
-#if DEBUG || TAKEN_INTERNAL
+// the Pro rule, the one-time offer on Today and the CSV, as pure rules (TakenTests/WeightTests.swift). In every build
+// since 1.1 and off until the person turns it on; only `WeightDemo`, CI's screenshot mode, is Debug only. Copy rules: no
+// em or en dash, never the word for no charge, no exclamation marks, and never lose, ideal or goal (the self-weighing
+// research in REDESIGN.md).
 
 // MARK: - Weigh-ins
 
@@ -228,7 +225,7 @@ enum WeightRange: String, Codable, CaseIterable, Identifiable, Sendable {
 }
 
 /// Everything the Weight tab keeps: `weights.json` in the App Group, next to the log (`WeightStore`). Its own file, not
-/// taken.json, so a build without the tab never reads or rewrites it, and 1.2 reads what the internal builds wrote.
+/// taken.json, so a build without the tab never reads or rewrites it, and 1.1 reads what the internal builds wrote.
 struct WeightState: Codable, Hashable, Sendable {
     var schemaVersion: Int = 1
     var weighIns: [WeighIn] = []
@@ -1190,12 +1187,13 @@ enum WeightCopy {
 
 // MARK: - Demo
 
+#if DEBUG
 /// `-demo` screens for the Weight tab (CI screenshots only; REDESIGN.md, "Weight tab page: entry first"): screen one as
 /// it opens (`weight`), typing (`weight-entry`, `weight-entry-range`), never weighed in (`weight-empty`), weighed in today
 /// (`weight-weighed`), locked (`weight-locked`), in pounds (`weight-lb`); screen two (`weight-first`, `weight-trend`);
 /// All weigh-ins (`weight-list`); Profile at the Weight switch and the CSV rows (`weight-settings`, `weight-data`); the
 /// goal's (`weight-goal`, `weight-goal-saved`, `weight-goal-moment`, `weight-goal-reached`, `weight-goal-reached-moment`,
-/// `weight-goal-sheet`, `weight-goal-low`); and `today-weight-offer`.
+/// `weight-goal-sheet`, `weight-goal-low`); and `today-weight-offer`. Debug only, like `-demo` itself.
 enum WeightDemo {
     static let pageScreens = ["weight", "weight-entry", "weight-entry-range", "weight-empty", "weight-first", "weight-weighed",
                               "weight-trend", "weight-locked", "weight-lb", "weight-list", "weight-settings", "weight-data"]

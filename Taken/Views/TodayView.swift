@@ -1,8 +1,8 @@
 import SwiftUI
 
 /// The three tabs (REDESIGN.md): Today (the stack), To-do (voice to-dos) and History (the calendar and stats), in the
-/// system tab bar, which is Liquid Glass on iOS 26; internal builds add the optional Weight tab last when it is switched
-/// on (SPEC 3.12). Every sheet and the Taken Pro paywall are presented from here, above
+/// system tab bar, which is Liquid Glass on iOS 26, and the optional Weight tab last when it is switched on (SPEC
+/// 3.12). Every sheet and the Taken Pro paywall are presented from here, above
 /// the tabs, so Siri, the Action button, the control, the Lock Screen, links, notifications and the quick action can
 /// close whatever is open and bring the To-do tab to the front.
 struct RootView: View {
@@ -48,7 +48,6 @@ struct RootView: View {
             HistoryScreen()
                 .tabItem { Label("History", systemImage: "calendar") }
                 .tag(AppTab.history)
-            #if DEBUG || TAKEN_INTERNAL
             // The optional Weight tab, last, behind the person's own switch (SPEC 3.12). A plain `if` is Apple DTS's
             // advice for a tab shown by a user setting, and the only way on iOS 17 (`Tab` and `hidden(_:)` are iOS 18).
             if model.weight.showsTab {
@@ -56,11 +55,10 @@ struct RootView: View {
                     .tabItem { Label(WeightCopy.tab, systemImage: WeightCopy.symbol) }
                     .tag(AppTab.weight)
             }
-            #endif
         }
         .opensTodoTab { model.openTodoTab() }
         .paywallHost(.root)
-        #if DEBUG || TAKEN_INTERNAL
+        #if DEBUG
         // `-demo -type ax3`: CI's large-text capture of the Weight tab.
         .modifier(DemoTypeSize(enabled: model.isDemo))
         #endif
@@ -126,12 +124,10 @@ struct RootView: View {
             }
         case .widgetHelp:
             WidgetHelpSheet()
-        #if DEBUG || TAKEN_INTERNAL
         case .weighIns:
             WeighInList()
         case .weightGoal:
             WeightGoalSheet()
-        #endif
         }
     }
 }

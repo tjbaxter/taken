@@ -2,10 +2,8 @@ import Observation
 import SwiftUI
 import UIKit
 
-#if DEBUG || TAKEN_INTERNAL
 /// The Weight tab's state (SPEC 3.12): weights.json through `WeightStore`, read and written on the main actor. The app
-/// model owns one (`AppModel.weight`); `-demo` gives it a temporary file seeded for the screen. Compiled only into Debug
-/// and the owner's internal builds until 1.2.
+/// model owns one (`AppModel.weight`); `-demo` gives it a temporary file seeded for the screen.
 @MainActor
 @Observable
 final class WeightModel {
@@ -47,10 +45,12 @@ final class WeightModel {
         }
     }
 
-    /// `-demo`: a temporary file, the tab on for the Weight screens with a flat-to-gently-falling line of weigh-ins
-    /// (`DemoData.weighIns`, ending yesterday unless the screen is about today), in kilograms (pounds on `weight-lb`) so
-    /// every capture reads the same; off and empty for every other screen. The goal screens get Tom-like history, the
-    /// goal and the height, and the in-memory state their line needs (a save on this visit, a point just lit).
+    #if DEBUG
+    /// `-demo` (Debug only): a temporary file, the tab on for the Weight screens with a flat-to-gently-falling line of
+    /// weigh-ins (`DemoData.weighIns`, ending yesterday unless the screen is about today), in kilograms (pounds on
+    /// `weight-lb`) so every capture reads the same; off and empty for every other screen. The goal screens get
+    /// Tom-like history, the goal and the height, and the in-memory state their line needs (a save on this visit, a
+    /// point just lit).
     static func demo(screen: String?, now: Date) -> WeightModel {
         let url = FileManager.default.temporaryDirectory.appendingPathComponent("weights-demo-\(UUID().uuidString).json")
         let store = WeightStore(fileURL: url, postsChangeNotifications: false)
@@ -95,6 +95,7 @@ final class WeightModel {
         }
         return model
     }
+    #endif
 
     // MARK: Reading
 
@@ -475,4 +476,3 @@ struct WeightPicture {
     /// The points inside the range.
     var momentsInView: [WeightMoment] { moments.filter { window.contains($0.day) } }
 }
-#endif

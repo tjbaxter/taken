@@ -1,6 +1,5 @@
 import SwiftUI
 
-#if DEBUG || TAKEN_INTERNAL
 /// Set Goal or Change Goal, from the Weight tab's More menu and nowhere else (REDESIGN.md, "Goal and moments"): the goal
 /// in a field like the big number's, the start (the first weigh-in day unless the trend has already been at the goal,
 /// movable here), the height (asked only here, to keep goals at or above BMI 18.5), two footnotes and Save. No target date,
@@ -325,4 +324,3 @@ struct HeightWheelSheet: View {
         }
     }
 }
-#endif

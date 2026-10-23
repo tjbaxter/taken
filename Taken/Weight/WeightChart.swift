@@ -1,7 +1,6 @@
 import Charts
 import SwiftUI
 
-#if DEBUG || TAKEN_INTERNAL
 /// The weight chart (SPEC 3.12; REDESIGN.md, "Goal and moments"), in Swift Charts, one chart at the card's width with the
 /// plot fixed at 196 pt: each weigh-in a small dot in the look's subtle ink, the trend a smooth line in the look's signal
 /// colour (monotone interpolation, "a cubic spline that preserves monotonicity of the data"), a small unlabelled tick on
@@ -403,4 +402,3 @@ struct WeightRangePicker: View {
         .animation(.snappy(duration: 0.2), value: selection)
     }
 }
-#endif

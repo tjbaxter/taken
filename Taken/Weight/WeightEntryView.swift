@@ -2,7 +2,6 @@ import Accessibility
 import Combine
 import SwiftUI
 
-#if DEBUG || TAKEN_INTERNAL
 /// Screen one of the Weight tab (REDESIGN.md, "Weight tab page: entry first, 2026-10-22"): More and the avatar top right,
 /// one big number in the middle (the last weigh-in in grey with an amber caret, or today's in the look's ink), one small
 /// line under it, and a small chevron at the bottom. Nothing else. A tap on the number brings up the decimal pad and the
@@ -459,6 +458,7 @@ struct WeightFoldSnap: ScrollTargetBehavior {
     }
 }
 
+#if DEBUG
 /// `-demo -type ax3`: the whole app at accessibility size 3, for CI's large-text capture.
 struct DemoTypeSize: ViewModifier {
     let enabled: Bool

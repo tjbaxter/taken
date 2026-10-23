@@ -458,6 +458,8 @@ Tom, 2026-10-22, on the Weight tab planned for 1.2: "Stop making more versions. 
 
 ## Weight tab, 2026-10-22 (decision; built on feat/weight-tab for internal builds; ships in 1.2)
 
+Update, 2026-10-23: it ships in 1.1, not 1.2. See "Weight tab in 1.1, 2026-10-23" at the end of this file.
+
 Tom asked whether Taken should get a minimal weight log: weigh in, type the number, watch a graph form, the one thing he uses MyNetDiary for. His sketch: a fourth tab, on by default, with a corner button and a pop-up to remove it ("don't need to weigh yourself? remove"). Researched as of 22 Oct 2026 against Apple's docs and guidelines, shipping apps and the self-weighing research, then reviewed by a critic whose ten points were each checked against the sources (bottom of this section).
 
 ### Verdict
@@ -1999,3 +2001,21 @@ Tom asked whether to-dos and a daily weigh-in would put off someone who came for
 - Measurement: Taken collects no analytics, so defaults are set on today's evidence and change on reviews, support mail and App Store Connect's broad signals.
 
 Sources: https://developer.apple.com/app-store/search/, https://developer.apple.com/app-store/product-page/, https://developer.apple.com/design/human-interface-guidelines/tab-bars, https://developer.apple.com/documentation/tipkit, https://developer.apple.com/app-store/review/guidelines/, https://www.revenuecat.com/state-of-subscription-apps/, https://adapty.io/state-of-in-app-subscriptions/, https://apps.apple.com/us/app/medisafe-medication-management/id573916946, https://apps.apple.com/us/app/mytherapy-pill-reminder/id662170995, https://apps.apple.com/us/app/shotsy-glp-1-tracker/id6499510249, https://apps.apple.com/us/app/happy-scale/id532430574, https://apps.apple.com/us/app/mynetdiary-calorie-counter/id287529757, https://academic.oup.com/jcr/article/33/4/430/1790298 (Chernev 2007), https://ideas.repec.org/a/oup/jconrs/v28y2002i4p618-35.html (Meyvis and Janiszewski 2002), https://pubmed.ncbi.nlm.nih.gov/17352599/ (Zhang, Fishbach and Kruglanski 2007), https://mhealth.jmir.org/2019/1/e11919 (Park 2019), https://pubmed.ncbi.nlm.nih.gov/37339756/ (Pacanowski 2023), https://pubmed.ncbi.nlm.nih.gov/26293454/ (Madigan 2015), https://ideas.repec.org/a/cup/bpubpo/v3y2019i02p159-186_00.html (Jachimowicz 2019), https://developer.apple.com/app-store/small-business-program/
+
+## Weight tab in 1.1, 2026-10-23
+
+Tom, 2026-10-22, on holding the Weight tab for 1.2: "Stop making more versions. Just publish it to the App Store. I want to see it." App Store Connect takes one version submission per platform at a time (https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/overview-of-submitting-for-review) and 1.0 is still in App Review, so the tab goes in 1.1, the update submitted when 1.0 clears, not in a version of its own.
+
+### Built
+- The Weight tab is in every build. The `#if DEBUG || TAKEN_INTERNAL` gate is gone from every weight type and view: Shared/WeightData.swift, WeightEntry.swift, WeightGoal.swift and WeightStore.swift, Taken/Weight, and the weight parts of AppModel, RootView, ProfileView, TodayPromptRow, TabHeader, `TodayPrompt` and DemoProbe. It is still off for every install (`WeightState.showsTab` nil) and comes in only through Profile's switch or Today's one-time offer.
+- Debug only, like `-demo` itself (Guideline 2.5.19, https://developer.apple.com/app-store/review/guidelines/): `WeightDemo`, the demo weigh-ins and weekly shot in `DemoData`, `WeightModel.demo`, the weight `-screen` cases in AppModel and ProfileView, the Weight tab's demo focus and scroll, and `DemoTypeSize`, the only reader of `-type`. No App Store build reads a weight launch argument or carries a weight screen name.
+- scripts/check-app-store-build.sh is main's again: `WeightTabRootView` is out of the must-be-absent markers and out of the `--internal` presence check. The owner-only markers (TakenInternalPro, the eval's, the voice note log's) and the unread-binary control still fail the check closed.
+- scripts/screenshots.sh: every store frame, both sets, 01 to 06, must leave `weight=0` and `offer=0` in the demo probe, so the 1.1 screenshots show the app as it installs: three tabs and no weight row.
+- Still `#if DEBUG || TAKEN_INTERNAL`, owner only: the internal Pro unlock (`InternalBuild`), TodoEval and the voice note log.
+
+### Unchanged
+- The store rules from "Weight tab, 2026-10-22" and "Extras policy, 2026-10-22": weight is a quiet extra, off by default, and never in the name, subtitle, keywords, description, promotional text or screenshots. What's New has one neutral line in every set and the review notes describe the switch, the offer, weights.json on the iPhone and the goal sentence ("Review fixes and the Weight tab in 1.1" above); scripts/check-store-metadata.py allows weight words in those two places only.
+
+### Own choices (no source)
+- `taken://weight` is in every build with the tab: the Weight tab, or Today while it is off, like `taken://todo`.
+- The weight demo hooks are compiled out of Release builds rather than left unreachable, one step past main's rule (only the arguments are Debug only), so no weight screen name ships.

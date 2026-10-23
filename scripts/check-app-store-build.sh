@@ -1,19 +1,16 @@
 #!/usr/bin/env bash
 # App Review Guideline 2.5.19 (no hidden, dormant or undocumented features): an App Store build of Taken must not
 # contain the owner-only Pro unlock (InternalBuild, Shared/Pro.swift), the taken://todo-eval sheet
-# (Taken/Todo/TodoEval.swift), the voice note log (Taken/Todo/VoiceNoteLog.swift, taken://todo-log) or, until 1.2, the
-# Weight tab (Taken/Weight, Shared/WeightData.swift; SPEC 3.12). All four compile only with DEBUG or TAKEN_INTERNAL
-# (project.internal.yml, the EAS "internal" profile), so a Release build generated from project.yml carries none of
-# their markers, and neither Info.plist has the TakenInternalPro key.
+# (Taken/Todo/TodoEval.swift) or the voice note log (Taken/Todo/VoiceNoteLog.swift, taken://todo-log). All three
+# compile only with DEBUG or TAKEN_INTERNAL (project.internal.yml, the EAS "internal" profile), so a Release build
+# generated from project.yml carries none of their markers, and neither Info.plist has the TakenInternalPro key.
 #
 # The markers are text an optimised Release build keeps when the code is compiled in (checked on the internal build
 # 1.1.0 (9)): the plist key "TakenInternalPro" (app and widget), the eval's type names and one eval note. The voice
 # note log's type names (16 and 17 bytes, the same kind of name as the eval's) are markers too; --internal requires
-# VoiceNoteLogView, which proves the scan sees them before an App Store build is called clean of them. The Weight tab's
-# root view is a real type named WeightTabRootView (17 bytes) for the same reason, and --internal requires it too. Swift
-# keeps strings of 15 bytes or fewer inside the code, where strings(1) cannot see them, and drops literals only tests
-# use ("taken://todo-eval" is gone from that build), so do not swap in a short or test-only string. For the 1.2 build,
-# remove the Weight tab's #if, this marker and its presence check together.
+# VoiceNoteLogView, which proves the scan sees them before an App Store build is called clean of them. Swift keeps
+# strings of 15 bytes or fewer inside the code, where strings(1) cannot see them, and drops literals only tests use
+# ("taken://todo-eval" is gone from that build), so do not swap in a short or test-only string.
 #
 # An internal build must also be exported "TestFlight internal testing only" (.eas/build/build-ios-internal.yml), so
 # App Store Connect can never put it in an App Store version or App Review. Xcode's export with that option writes
@@ -31,7 +28,7 @@ if [ "${1:-}" = "--internal" ]; then
 fi
 app="${1:?usage: check-app-store-build.sh [--internal] path/to/Taken.app}"
 appex="$app/PlugIns/TakenWidgets.appex"
-markers='TakenInternalPro|TodoEvalView|TodoEvalRunner|TodoEvalRoute|VoiceNoteLogView|VoiceNoteLogStore|WeightTabRootView|Restock Always pads and Native deodorant'
+markers='TakenInternalPro|TodoEvalView|TodoEvalRunner|TodoEvalRoute|VoiceNoteLogView|VoiceNoteLogStore|Restock Always pads and Native deodorant'
 # Every build of both targets keeps the App Group ID (TakenStore.appGroupID): a scan that cannot see it read nothing,
 # and the check fails rather than calling an unread binary clean.
 control='group.com.tombaxter.taken'
@@ -81,7 +78,6 @@ fi
 case " $app_hits " in *" TakenInternalPro "*) ;; *) echo "::error::Taken lacks the Pro unlock. $report"; exit 1 ;; esac
 case " $app_hits " in *" TodoEvalView "*) ;; *) echo "::error::Taken lacks the eval sheet. $report"; exit 1 ;; esac
 case " $app_hits " in *" VoiceNoteLogView "*) ;; *) echo "::error::Taken lacks the voice note log. $report"; exit 1 ;; esac
-case " $app_hits " in *" WeightTabRootView "*) ;; *) echo "::error::Taken lacks the Weight tab. $report"; exit 1 ;; esac
 case " $widget_hits " in *" TakenInternalPro "*) ;; *) echo "::error::TakenWidgets lacks the Pro unlock. $report"; exit 1 ;; esac
 if [ "$app_plist" != yes ] || [ "$widget_plist" != yes ]; then
   echo "::error::An Info.plist lacks the TakenInternalPro marker. $report"

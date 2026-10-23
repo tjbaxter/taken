@@ -1,14 +1,11 @@
 import SwiftUI
 
-#if DEBUG || TAKEN_INTERNAL
 /// The Weight tab (SPEC 3.12; REDESIGN.md, "Weight tab page: entry first, 2026-10-22"): one ScrollView with two screens.
 /// Screen one (`WeightEntryPage`) is the big number, the small line under it and a chevron; screen two (`WeightTrendPage`)
 /// is the trend, how close it is to the goal, the chart card and All weigh-ins, one scroll down. The page height is
 /// measured once (status bar to tab bar, keyboard ignored) and frozen while typing, so the number never moves; the Weigh
 /// in bar rides on the decimal pad. Off until the person turns it on in Profile or from Today's one-time offer. Weight
 /// never shows on Today (apart from the offer), in the widgets, the control, Siri, the nudge, the streak or History.
-/// Compiled only into Debug and the owner's internal builds until 1.2: this type's name is the marker
-/// scripts/check-app-store-build.sh looks for, so an App Store build is proven not to contain the tab.
 struct WeightTabRootView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
@@ -198,14 +195,17 @@ struct WeightTabRootView: View {
         }
     }
 
-    /// `-demo`: the entry screens take focus, and the trend screens scroll to screen two, 450 ms after appearing.
+    /// `-demo` (Debug only): the entry screens take focus, and the trend screens scroll to screen two, 450 ms after
+    /// appearing.
     private func applyDemo(_ proxy: ScrollViewProxy) async {
+        #if DEBUG
         guard model.isDemo else { return }
         let screen = model.launchScreen
         guard WeightDemo.draft(screen) != nil || WeightDemo.opensOnTrend(screen) else { return }
         try? await Task.sleep(for: .milliseconds(450))
         if WeightDemo.draft(screen) != nil { focused = true }
         if WeightDemo.opensOnTrend(screen) { proxy.scrollTo(WeightAnchor.trend, anchor: .top) }
+        #endif
     }
 
     private func record() {
@@ -458,4 +458,3 @@ struct WeightToastDock: View {
         .animation(.snappy(duration: 0.22), value: model.toast)
     }
 }
-#endif
