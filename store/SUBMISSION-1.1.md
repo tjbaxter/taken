@@ -5,10 +5,12 @@ Everything App Store Connect asks for version 1.1.0, in the order its pages ask,
 ## 0. Before you start
 
 - 1.0 has left App Review. App Store Connect takes one version submission per platform at a time (https://developer.apple.com/help/app-store-connect/manage-submissions-to-app-review/overview-of-submitting-for-review).
-- The build. Only a build from `.github/workflows/app-store-build.yml` goes in: never an internal build. Internal builds are exported TestFlight internal testing only and App Store Connect never offers them for a version; 1.1.0 (8) and (9) predate that and still show as Ready to Submit, so never pick them. `scripts/check-app-store-build.sh` (Guideline 2.5.19) and the rest of `scripts/check-ipa.sh` ran on the IPA before upload.
-  - Current build: **1.1.0 (23)**, from app-store-build.yml run 39680420022 (https://github.com/tjbaxter/taken/actions/runs/39680420022) on main at 164a893, every check-ipa.sh line OK.
-  - If main has changed in anything that goes into the app since that commit (`git diff --stat 164a893 origin/main -- Taken Shared TakenWidgets project.yml .eas eas.json app.json`), run app-store-build.yml again from main and attach the new build instead. Merging the App Store pack's pull request changes four Swift files (demo data and the Debug-only `-demo-stack` argument, which no App Store build reads), so after it merges, rebuild before you submit.
-- Read the Primary Language first: App Information, General, Primary Language. Section 2 depends on it.
+- Business, Agreements: the Paid Apps Agreement is signed and reads Active, with the bank account and tax forms Business asks for. 1.0 is a free app with no in-app purchases, so it may never have been signed. Apple: "To sell your apps on the App Store or offer In-App Purchases, the Account Holder must sign the Paid Apps Agreement", "This agreement must be active in order for you to submit or update paid apps and In-App Purchases" and "You won't be able to create a new app or In-App Purchase until you've agreed to the most recent version of the Paid Apps Agreement" (https://developer.apple.com/help/app-store-connect/manage-agreements/sign-and-update-agreements). Do this before section 4.
+- The build: a new one, from `.github/workflows/app-store-build.yml` run on main once both of these are merged:
+  1. this pack (pull request #10), and
+  2. the Weight tab (pull request #11), with its `#if DEBUG || TAKEN_INTERNAL` gate, the `WeightTabRootView` marker and its `--internal` presence check in `scripts/check-app-store-build.sh` removed together in one change. While the marker is there, the check refuses any App Store build that contains the Weight tab; a build without the tab lacks what What's New and the review notes describe (Guidelines 2.3.1(a) and 2.3.12).
+- Attach only that build, with every `scripts/check-ipa.sh` line OK (`scripts/check-app-store-build.sh`, Guideline 2.5.19, among them). Never 1.1.0 (23) or any build from before both merges: none has the Weight tab. Never an internal build: internal builds are exported TestFlight internal testing only and App Store Connect never offers them for a version; 1.1.0 (8) and (9) predate that and still show as Ready to Submit, so never pick them.
+- Read the Primary Language (App Information, General, Primary Language). Section 2 keeps it as it is.
 
 ## 1. App Information (shared by every version)
 
@@ -35,18 +37,19 @@ Age rating questionnaire (Apple's categories, https://developer.apple.com/help/a
 
 ## 2. Localizations: which copy and which screenshots
 
-Every storefront but the United States, Canada and Japan lists English (U.K.) as its default or an additional language, Australia and New Zealand list English (Australia) too, Canada lists English (Canada), and English (U.S.) is listed only in the United States (default) and Japan (additional) (https://developer.apple.com/help/app-store-connect/reference/app-information/app-store-localizations). Where no localization matches, the primary language shows (https://developer.apple.com/help/app-store-connect/manage-app-information/localize-app-information).
+One listing for every storefront: every localization gets the same copy and the neutral screenshots.
 
 | Localization | Copy | Screenshots, 6.9 inch and 6.3 inch |
 | --- | --- | --- |
-| English (U.S.) | `store/metadata/en-US/` | `store/appstore/iphone-6.9/en-US/`, `store/appstore/iphone-6.3/en-US/` (only when English (U.S.) is not the primary language: see below) |
-| English (U.K.) | `store/metadata/neutral/` | `store/appstore/iphone-6.9/neutral/`, `store/appstore/iphone-6.3/neutral/` |
-| English (Australia) | `store/metadata/neutral/` | the neutral set |
-| English (Canada) | `store/metadata/neutral/` | the neutral set |
+| English (U.S.), the Primary Language or not | `store/metadata/en-US/` (in 1.1 the same text as `neutral/`) | `store/appstore/iphone-6.9/neutral/`, `store/appstore/iphone-6.3/neutral/` |
+| English (U.K.), English (Australia), English (Canada) and any other localization 1.0 has | `store/metadata/neutral/` | the neutral set |
 
-If the Primary Language is English (U.S.), it is what every storefront without a matching localization shows, so in 1.1 English (U.S.) takes the **neutral** copy and the **neutral** screenshots too. Add English (U.K.) in 1.1 with the neutral set uploaded to it (a new language starts with the primary language's screenshots, so upload them; do not leave them derived). Once 1.1 is approved, change the Primary Language to English (U.K.) in the next version, then give English (U.S.) `store/metadata/en-US/` and the en-US screenshots. Apple's rule for a new primary language: it was added to a previous version, App Review approved it, and its own screenshots, at the same sizes as the current primary's, were approved (same page). If the Primary Language is already English (U.K.), English (Australia) or English (Canada), English (U.S.) gets its own copy and screenshots in 1.1.
-
-Japan lists English (U.S.) as its one English, so once English (U.S.) shows the en-US set, Japanese storefront visitors can see it too. A Japanese localization holding the neutral text and screenshots would keep it to the United States; no Apple page says whether English text in a Japanese localization is acceptable, so that is Tom's call.
+Decided, so nothing here is left for submission day:
+- No Japanese localization, and English (U.S.) holds the neutral rules. Japan lists Japanese and English (US) (https://developer.apple.com/help/app-store-connect/reference/app-information/app-store-localizations), so English (U.S.) reaches Japan as well as the United States. The same page names no order between the storefront's language, the device's language and the primary language ("the language shown to each customer could be impacted by factors like the App Store language for their location, their device's language settings, languages you've added, and your primary language"), so a Japanese localization would not reliably keep English (U.S.) out of Japan, and no Apple page documents English text in one.
+- The neutral rules: no medicine name and no price, in both sets. Most countries ban promoting prescription medicines to the public, the United States and New Zealand being the exceptions (REDESIGN.md, "Store screenshots for the 1.1 submission"), and Japan bans it too. Storefronts charge in their own currency, so a written price is false outside the United States (Guideline 2.3.1(a), "promoting a false price"); the product page lists each in-app purchase in the visitor's currency and the paywall shows StoreKit's price. `scripts/check-store-metadata.py` checks both rules on both sets in CI.
+- The en-US screenshots (`store/appstore/iphone-6.9/en-US/`, `store/appstore/iphone-6.3/en-US/`, with a Semaglutide row and the medicine chips) go to no localization.
+- No localization needs adding and the Primary Language stays as it is: where no localization matches, the primary language shows (https://developer.apple.com/help/app-store-connect/manage-app-information/localize-app-information), and every localization shows the same listing.
+- Weight words: only What's New's line for the Weight tab, in every localization (Guideline 2.3.12; REDESIGN.md "Weight tab", Store, privacy and positioning). The English (U.S.) description line that spec allows is left out: the description has 4 characters to spare and the line needs 66, and English (U.S.) is also shown in Japan and, while it is the Primary Language, wherever no localization matches.
 
 Screenshots: upload all six PNGs of a set, in order 01 to 06, to both iPhone sizes: iPhone 6.9" Display (1320 x 2868, `iphone-6.9`) and iPhone 6.3" Display (1206 x 2622, `iphone-6.3`). The medium display is the size App Store Connect requires (https://developer.apple.com/help/app-store-connect/reference/app-information/screenshot-specifications). The contact sheets (`store/appstore/contact-sheet-<set>.jpg`) are for looking, not for upload.
 
@@ -57,7 +60,7 @@ Screenshots: upload all six PNGs of a set, in order 01 to 06, to both iPhone siz
 
 ## 4. In-App Purchases and Subscriptions (before the version page)
 
-Values in `store/iap/products.json`; product ids are fixed (PRO.md). Each needs its display name and description in every localization the app has (the same text in each), and the review screenshot `store/iap/paywall.png` (the paywall as ci.yml captures it, refreshed by store-shots.yml).
+First, the Paid Apps Agreement must read Active (section 0). Values in `store/iap/products.json`; product ids are fixed (PRO.md). Each needs its display name and description in every localization the app has (the same text in each), and the review screenshot `store/iap/paywall.png` (the paywall as ci.yml captures it, refreshed by store-shots.yml).
 
 | Product id | Type | Price (USD) | Offer | Display name | Description |
 | --- | --- | --- | --- | --- | --- |
@@ -72,7 +75,7 @@ Values in `store/iap/products.json`; product ids are fixed (PRO.md). Each needs 
 
 ## 5. App Privacy
 
-Data Not Collected, unchanged (https://developer.apple.com/app-store/app-privacy-details/). Purchases go through Apple; speech, sorting and every file stay on the iPhone.
+Data Not Collected, unchanged (https://developer.apple.com/app-store/app-privacy-details/). Purchases go through Apple; speech, sorting, weigh-ins and every file stay on the iPhone.
 
 ## 6. Version 1.1.0 (iOS App, + Version, 1.1.0)
 
@@ -94,13 +97,13 @@ For the version as a whole:
 | --- | --- |
 | Version | 1.1.0 |
 | Copyright | 2026 Thomas Baxter |
-| Build | 1.1.0 (23), or the newer app-store-build.yml build (section 0) |
+| Build | The app-store-build.yml build from main after pull requests #10 and #11 (section 0); never 1.1.0 (23) |
 | In-App Purchases and Subscriptions | Select all three: Taken Pro Yearly, Taken Pro Monthly, Taken Pro Lifetime |
 | App Review Information, Sign-in required | Off |
 | Contact | Thomas Baxter, tjpb2@cantab.ac.uk (`store/metadata/review_information/email_address.txt`), and the phone number on the account |
-| Notes | `store/metadata/review_information/notes.txt` (4000 bytes) |
+| Notes | `store/metadata/review_information/notes.txt` (4000 bytes; step 12 is the Weight tab, so the build must have it) |
 | Attachment | none |
-| Version Release | Manually release this version, so the 1.1 support and privacy text in `docs/` goes live with it (REDESIGN.md, "Publish with 1.1"; own choice) |
+| Version Release | Manually release this version, so the 1.1 support and privacy text goes live with it (pull request #12; own choice) |
 
 ## 7. Submit
 
@@ -108,5 +111,4 @@ Add for Review, with version 1.1.0, the subscription group and all three in-app 
 
 ## 8. After approval
 
-1. Publish REDESIGN.md's "Publish with 1.1" text to `docs/`, then release 1.1.0 by hand.
-2. If English (U.S.) was the primary language: in the next version, change the primary language to English (U.K.) and give English (U.S.) its own copy and screenshots (section 2).
+1. On the day 1.1.0 goes live (released by hand), merge pull request #12, "Site text for 1.1 (merge on release day)" (branch `release/1.1-site`: the privacy policy with weigh-ins, the weight goal and 13+, and the 1.1 support answers), after setting the effective date in `docs/privacy.html` to that day. GitHub Pages publishes `docs/` from main.

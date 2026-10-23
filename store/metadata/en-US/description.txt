@@ -12,7 +12,7 @@ KNOW FOR SURE
 
 EVERY SCHEDULE
 • Daily, every other day, weekly, 2x or 3x daily, or the days you pick, set for each item as you add it.
-• A weekly shot such as semaglutide or tirzepatide sits on its day. Logged a few days late? It still counts for its week.
+• A weekly shot sits on its day. Logged a few days late? It still counts for its week.
 • Items not due today wait under Not today, with the day they are next due.
 
 LOG IT FROM ANYWHERE
@@ -54,7 +54,7 @@ TAKEN PRO
 • Start the yearly plan with 7 days on us, and Taken reminds you 3 days before the trial ends.
 • Downloaded Taken 1.0? You keep Pro for life.
 
-Taken Pro yearly: 7 days on us for new subscribers, then $19.99 a year. Or $3.99 a month, or $49.99 once. Payment is charged to your Apple Account. Subscriptions renew automatically unless you cancel at least 24 hours before the end of the period; manage or cancel in Settings.
+Taken Pro: a yearly plan, with 7 days on us for new subscribers, a monthly plan, or one payment for good. The App Store shows each price in your currency before you buy. Payment is charged to your Apple Account. Subscriptions renew automatically unless you cancel at least 24 hours before the end of the period; manage or cancel in Settings.
 
 Terms of Use: https://www.apple.com/legal/internet-services/itunes/dev/stdeula/
 Privacy Policy: https://tjbaxter.github.io/taken/privacy.html

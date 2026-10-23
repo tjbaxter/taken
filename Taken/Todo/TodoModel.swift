@@ -135,7 +135,10 @@ final class TodoModel {
         self.now = clockNow()
     }
 
+    /// The to-dos as launched. `-demo` and `-screen` are CI's screenshot mode, read only in Debug builds, as
+    /// `AppModel.fromLaunchArguments`: a Release build always opens the real todos.json (Guideline 2.5.19).
     static func fromLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) -> TodoModel {
+        #if DEBUG
         var screen: String?
         if let index = arguments.firstIndex(of: "-screen"), index + 1 < arguments.count {
             screen = arguments[index + 1]
@@ -154,6 +157,9 @@ final class TodoModel {
         let model = TodoModel(store: store, isDemo: true, launchScreen: screen, clockNow: { demoNow })
         if recording { model.showDemoRecording() }
         return model
+        #else
+        return TodoModel(store: .shared, isDemo: false, launchScreen: nil, clockNow: { Date() })
+        #endif
     }
 
     /// `-screen todo`, `todo-recording`, `todo-cap` and `todo-empty` open on the To-do tab.

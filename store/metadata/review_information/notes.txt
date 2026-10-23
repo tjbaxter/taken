@@ -1,32 +1,25 @@
 No login or account. Taken keeps everything on the iPhone and makes no network requests of its own; purchases use StoreKit 2.
 
-New in 1.1 (all reachable as below):
-- Three tabs: Today, To-do (voice to-dos), History. The avatar at the top right opens Profile, with every setting.
-- Taken Pro: a yearly subscription with a one-week introductory offer, a monthly subscription and a lifetime purchase.
-- A schedule per item (Daily, Every other day, Weekly, 2x or 3x daily, Days), type-ahead in the Add sheet, four looks, a wake-up time.
-- Today offers the evening nudge once, a line to fill in yesterday, and a one-time Lock Screen widget tip.
-- Shortcuts actions that return values: Did I take it?, Get to-dos and Add to-do.
-- After a trial starts, one sheet asks for notifications (if iOS has not asked yet), and one reminder comes 3 days before the trial ends.
+New in 1.1 (steps below): three tabs, Today, To-do (voice to-dos) and History, and an optional fourth, Weight; Profile (the avatar, top right) with every setting; Taken Pro (a yearly subscription with a one-week introductory offer, a monthly one, a lifetime purchase); a schedule per item; type-ahead in the Add sheet; four looks; a wake-up time; one-time rows on Today (the evening nudge, filling in yesterday, a Lock Screen widget tip); Shortcuts actions that return values; after a trial starts, one notification sheet and one reminder 3 days before the trial ends.
 
 Sandbox steps:
 1. On first launch tap Add to stack, tap three chips (Vitamin D3, Fish Oil, Magnesium) and tap Add 3.
-2. Tap the empty ring beside Vitamin D3. It fills, the time shows beside it, and about 1.5 seconds later the Taken Pro sheet slides up: yearly selected with 7 days on us and its timeline (Day 4: we remind you), monthly and lifetime, App Store prices, the renewal terms, and Restore, Redeem code, Terms of Use and Privacy.
-3. Close it with the X: locked mode. The log stays visible; a ring, Take all, the bar under the progress line or the + opens the sheet again. The day sheet shows the log (logging there opens the sheet); CSV export works.
-4. Voice to-dos, still without Pro: open the To-do tab and tap the mic. iOS asks for microphone and speech access. Say "Tomorrow at 9 call the dentist and buy milk", then tap the mic to finish. Speech recognition is Apple's, on device (SpeechAnalyzer, else SFSpeechRecognizer), and sorting uses Apple's on-device Foundation Models where Apple Intelligence is on; without it the note is saved as said. The first voice note needs no Pro, so the next tap on the mic opens the Taken Pro sheet.
-5. Tap Start 7 days on us and confirm with the sandbox account. The mic tap that opened the sheet then runs and Taken listens; tap the mic to finish. Then a sheet, Your trial has started, has one Continue button, which brings the iOS notification prompt (only if iOS has not asked yet, so leave Today's nudge offer unanswered). The sandbox week lasts about 3 minutes, so the reminder's moment has passed and nothing is scheduled. For those minutes, with notifications off, Today shows the reminder's words, and Profile, Reminder has a Trial reminder switch.
-6. Profile, Taken Pro has Restore purchases, Redeem code and Manage subscription.
+2. Tap the ring beside Vitamin D3. It fills with the time, and 1.5 seconds later the Taken Pro sheet opens: the three plans with App Store prices, yearly with 7 days on us and its timeline, the renewal terms, Restore, Redeem code, Terms of Use and Privacy.
+3. Close it with the X: locked mode. The log and CSV export stay open; a ring, Take all or the + opens the sheet again.
+4. Voice to-dos, still without Pro: in the To-do tab tap the mic and allow microphone and speech access. Say "Tomorrow at 9 call the dentist and buy milk", then tap the mic again. Speech recognition (SpeechAnalyzer, else SFSpeechRecognizer) and sorting (Apple's Foundation Models, where Apple Intelligence is on) run on device; without it the note is saved as said. The first voice note needs no Pro; the next mic tap opens the Taken Pro sheet.
+5. Tap Start 7 days on us and confirm with the sandbox account; the mic then listens (tap it to finish). Your trial has started then shows one Continue button, which brings the iOS notification prompt if not asked yet. A sandbox trial lasts minutes, so no reminder is scheduled; Profile, Reminder has its switch.
+6. Profile, Taken Pro: Restore purchases, Redeem code, Manage subscription.
 
-Founding members: a first download of Taken 1.0 (build 7 or earlier) keeps Pro for life at no cost, read from AppTransaction.originalAppVersion in production only. In the sandbox and TestFlight it never counts, so review devices see the paywall as a new customer does.
+Founding members: a first download of Taken 1.0 (build 7 or earlier) keeps Pro for life at no cost, read from AppTransaction.originalAppVersion in production only. In the sandbox and TestFlight it never counts.
 
-With Pro on (if nothing is pending, touch and hold an item and choose Undo last dose):
+With Pro on (if nothing is pending, touch and hold an item, Undo last dose):
 7. Widgets: add Taken's small and medium Home Screen widgets; TAKE ALL or a pending row logs without opening the app. Lock Screen widgets show the stack and a to-do mic.
 8. Control Center (iOS 18 and later): tap +, Add a Control, Taken, then Take all or New voice to-do.
-9. Siri: "Did I take my pills in Taken" (a locked iPhone asks for Face ID or the passcode first), "Log my stack in Taken", "Add to-dos in Taken".
-10. Shortcuts app: Taken's Did I take it?, Get to-dos and Add to-do hand their results to the shortcut.
+9. Siri: "Did I take my pills in Taken" (locked, it asks for Face ID or the passcode first), "Log my stack in Taken", "Add to-dos in Taken".
+10. Shortcuts: Did I take it?, Get to-dos and Add to-do return their results to a shortcut.
 11. Profile, Reminder, Nudge: set the time 2 minutes ahead; it comes only while something is pending, with TAKE ALL.
+12. Weight, off by default: in Profile, under Weight, turn on Weight tab. In that tab, tap the number, type a weight, tap Save; a smoothed trend follows. More (beside the avatar) has Kilograms, Pounds, Set Goal and Hide Weight Tab. Today offers the tab once, on a later day when all is taken, only to stacks with Semaglutide, Tirzepatide or Oral Semaglutide. Weigh-ins stay on the iPhone, in weights.json; Profile, Data has Export and Import weight CSV. The first weigh-in needs no Pro; later ones follow the dose rule. An optional weight goal is in the Weight tab's More menu; it cannot be set below BMI 18.5, the sheet says goals are for adults, and nothing about it is prompted or sent.
 
-Guideline 2.5.19: nothing is hidden or dormant. Owner-only test tools are compiled out of App Store builds, and a build check refuses any build with them.
+Guideline 2.5.19: nothing is hidden or dormant. Owner-only test tools and CI's screenshot mode are compiled out of App Store builds; a build check refuses any build with the tools.
 
-Semaglutide and tirzepatide are approved prescription medicines. Taken only records that a dose was taken; it gives no dosing or medical guidance.
-
-Contact: tjpb2@cantab.ac.uk
+Semaglutide and tirzepatide are approved prescription medicines. Taken only records that a dose was taken; it gives no dosing or medical guidance. Contact: tjpb2@cantab.ac.uk

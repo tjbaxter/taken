@@ -198,7 +198,11 @@ final class AppModel {
         }
     }
 
+    /// The app as launched. `-demo` (with `-screen`, `-theme` and `-demo-stack`) is CI's screenshot mode
+    /// (scripts/screenshots.sh, on the Debug simulator build) and is read only in Debug builds: a Release build, and so
+    /// every App Store build, always opens the real store and never reads an argument (Guideline 2.5.19).
     static func fromLaunchArguments(_ arguments: [String] = ProcessInfo.processInfo.arguments) -> AppModel {
+        #if DEBUG
         var screen: String?
         if let index = arguments.firstIndex(of: "-screen"), index + 1 < arguments.count {
             screen = arguments[index + 1]
@@ -235,6 +239,9 @@ final class AppModel {
         if screen != "empty" { try? profiles.save(Profile(name: "Alex Morgan")) }
         return AppModel(store: store, pro: pro, profileStore: profiles, isDemo: true, launchScreen: screen,
                         demoStack: stack, clockNow: { demoNow })
+        #else
+        return AppModel(store: .shared, profileStore: .shared, isDemo: false, launchScreen: nil, clockNow: { Date() })
+        #endif
     }
 
     /// The tab a `-screen` opens on: the To-do screens on To-do, the log and the day sheet on History.

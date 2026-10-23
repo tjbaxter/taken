@@ -11,3 +11,5 @@ Shortcuts: Did I take it? now hands its answer on (on a locked iPhone it asks yo
 Taken Pro is here. Log your first dose, then pick yearly (7 days on us for new subscribers, with a reminder 3 days before the trial ends), monthly or lifetime. Everyone who downloaded Taken 1.0 keeps Pro for life, at no cost. Still no ads, no account and no tracking, and your log stays on your iPhone.
 
 Four looks in your profile: Signal, Blush, Phosphor and Ice. Your widgets and the app icon follow the one you pick.
+
+New: an optional Weight tab. Log a weigh-in in a few taps and watch a smoothed trend form. Turn it on in Profile.

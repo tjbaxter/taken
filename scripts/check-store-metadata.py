@@ -20,10 +20,17 @@ Apple's limits, each from App Store Connect Help as of October 2026:
 
 The listing's rules (REDESIGN.md "Store screenshots for the 1.1 submission" and "App Store pack for 1.1"):
 - Tom's copy rules everywhere: no em or en dashes, never the word "free", no exclamation marks.
-- No brand names, "GLP-1", "jab", "pen" or weight words in any set, caption or in-app purchase text.
-- The neutral set (every localization but English (U.S.)) names no medicine at all and no price, since prices differ by
-  storefront (Guideline 2.3.1 forbids promoting a false price) and most countries ban promoting prescription medicines.
-- English (U.S.) names generic medicines only, in US spelling.
+- No brand names, "GLP-1", "jab", "pen" or weight words in any set, caption or in-app purchase text. Weight words
+  match as stems from the start of a word ("weigh" finds weight, weighed and weigh-in). The one public exception is
+  WEIGHT_LINE, which What's New in every set must carry (REDESIGN.md "Weight tab", Store, privacy and positioning);
+  anywhere else, including the rest of What's New, a weight word fails. The App Review notes, which only Apple reads,
+  must describe the Weight tab (Guideline 2.3.1(a)), so weight words are allowed there too.
+- No set names a medicine or a price. Every medicine in Shared/Catalog.swift counts, with its other names: the
+  medicines list and the medicine chips (CHIP_MEDICINES). Prices differ by storefront (Guideline 2.3.1(a) forbids
+  promoting a false price) and most countries ban promoting prescription medicines. English (U.S.) is held to the same
+  rule because it is also the Japan storefront's English (Apple's App Store localizations table lists Japan with
+  Japanese and English (US)), and Japan bans promoting prescription medicines too.
+- English (U.S.) uses US spelling; the neutral set avoids every word English spells two ways.
 - Captions carry no price, discount, URL or copyright symbol (App Store asset best practices).
 Exits 1 with every problem listed; prints each field's count against its limit.
 """
@@ -44,14 +51,21 @@ CATEGORY_WORDS = {"health", "fitness"}
 
 BRANDS = ["ozempic", "wegovy", "mounjaro", "zepbound", "rybelsus", "saxenda", "trulicity", "propecia", "proscar",
           "rogaine", "regaine", "glucophage", "yasmin", "microgynon"]
-# "pen" and "jab" as whole words; weight words as stems
-BANNED_WORDS = [r"glp-?1", r"jabs?", r"pens?", r"weight", r"weigh", r"slim", r"fat", r"diet", r"calorie", r"obes\w*",
-                r"lose", r"loss", r"pounds?", r"lbs?", r"kgs?"]
-# Prescription-only in most storefronts: never in the neutral set (DemoDataTests.prescriptionOnly)
-PRESCRIPTION = ["finasteride", "metformin", "semaglutide", "tirzepatide", "minoxidil", "birth control", "melatonin",
-                "contraceptive"]
-# The generic names English (U.S.) may use
-US_GENERICS = {"semaglutide", "tirzepatide"}
+# "pen" and "jab" as whole words
+BANNED_WORDS = [r"glp-?1", r"jabs?", r"pens?"]
+# Weight words as stems, each from the start of a word: weigh finds weigh, weighs, weighed, weighing, weight, weights
+# and weigh-in. "fat" and "lose" list their endings so fatigue and close never match.
+WEIGHT_STEMS = [r"weigh\w*", r"slim\w*", r"fat(?:s|ty|ter|test|ten\w*)?", r"diet\w*", r"calor\w*", r"obes\w*",
+                r"los(?:e|es|er|ers|ing|s|t)", r"pounds?", r"lbs?", r"kgs?", r"kilo\w*", r"bmi", r"waist\w*",
+                r"bell(?:y|ies)", r"trim\w*", r"burn\w*"]
+# The one weight line the store carries (REDESIGN.md "Weight tab", Store, privacy and positioning). What's New must
+# list a new feature (Guideline 2.3.12) and is set per localization, so every set's What's New has it, word for word.
+WEIGHT_LINE = ("New: an optional Weight tab. Log a weigh-in in a few taps and watch a smoothed trend form. "
+               "Turn it on in Profile.")
+APPROVED = {("en-US", "release_notes"): WEIGHT_LINE, ("neutral", "release_notes"): WEIGHT_LINE}
+# The chips that are medicines, prescription-only in most storefronts (DemoDataTests.prescriptionOnly); every other
+# chip is a supplement. Their other names come from Shared/Catalog.swift with the rest.
+CHIP_MEDICINES = ["Melatonin", "Finasteride", "Minoxidil", "Birth Control", "Metformin", "Semaglutide", "Tirzepatide"]
 UK_SPELLINGS = [r"colour", r"favourite", r"organis", r"personalis", r"customis", r"recognis", r"centre", r"licence",
                 r"cancelled", r"cancelling", r"travelled", r"programme", r"\bmum\b", r"analyse", r"realis"]
 US_SPELLINGS = [r"\bcolor", r"favorite", r"organiz", r"personaliz", r"customiz", r"recogniz", r"licens",
@@ -75,7 +89,44 @@ def read(path):
     return text.rstrip("\n")
 
 
-def copy_rules(where, text):
+def catalog_medicines():
+    """Every medicine Shared/Catalog.swift knows, with its other names (brands, UK names), lower case: the medicines
+    list and the chips in CHIP_MEDICINES. Misspellings are left out; they are never shown."""
+    source = (ROOT / "Shared" / "Catalog.swift").read_text(encoding="utf-8")
+
+    def entries(name):
+        block = re.search(rf"static let {name}: \[CatalogEntry\] = \[(.*?)\n    \]", source, re.S)
+        if not block:
+            problem("Shared/Catalog.swift", f"no {name} list; the parser no longer matches the file")
+            return {}
+        found = {}
+        for chunk in block.group(1).split("CatalogEntry(")[1:]:
+            entry = re.match(r'\s*"([^"]+)"', chunk)
+            aliases = re.search(r"aliases:\s*\[([^\]]*)\]", chunk)
+            if entry:
+                found[entry.group(1)] = re.findall(r'"([^"]+)"', aliases.group(1)) if aliases else []
+        return found
+
+    chips = entries("chips")
+    medicines = entries("medicines")
+    for name in CHIP_MEDICINES:
+        if name not in chips:
+            problem("Shared/Catalog.swift", f'no chip "{name}" (CHIP_MEDICINES)')
+        else:
+            medicines[name] = chips[name]
+    if len(medicines) < 100:
+        problem("Shared/Catalog.swift", f"found only {len(medicines)} medicines; the parser no longer matches the file")
+    names = set()
+    for name, aliases in medicines.items():
+        names.add(name.lower())
+        names.update(alias.lower() for alias in aliases)
+    return sorted(names)
+
+
+MEDICINES = catalog_medicines()
+
+
+def copy_rules(where, text, weight_ok=False):
     if re.search("[–—]", text):
         problem(where, "contains an en or em dash")
     if re.search(r"(?i)\bfree\b", text):
@@ -86,17 +137,17 @@ def copy_rules(where, text):
     for brand in BRANDS:
         if brand in lower:
             problem(where, f'names the brand "{brand}"')
-    for word in BANNED_WORDS:
+    for word in BANNED_WORDS + ([] if weight_ok else WEIGHT_STEMS):
         hit = re.search(rf"(?i)\b{word}\b", text)
         if hit:
             problem(where, f'contains "{hit.group(0)}"')
 
 
-def medicines(where, text, allowed):
-    lower = text.lower()
-    for name in PRESCRIPTION:
-        if name in lower and name not in allowed:
-            problem(where, f'names "{name}"')
+def medicines(where, text):
+    for name in MEDICINES:
+        hit = re.search(rf"(?i)(?<![\w-]){re.escape(name)}(?![\w-])", text)
+        if hit:
+            problem(where, f'names the medicine "{hit.group(0)}"')
 
 
 def spelling(where, text, banned, kind):
@@ -117,7 +168,15 @@ for set_name in SETS:
         where = f"{set_name}/{field}"
         text = read(path)
         values[set_name][field] = text
-        copy_rules(where, text)
+        # The approved weight line is taken out before the rules run, so a weight word anywhere else in What's New
+        # still fails.
+        rest = text
+        approved = APPROVED.get((set_name, field))
+        if approved and approved in text:
+            rest = text.replace(approved, "", 1)
+        elif approved:
+            problem(where, f'lacks the Weight tab line "{approved}" (Guideline 2.3.12)')
+        copy_rules(where, rest)
         if field in LIMITS:
             n = len(text)
             counts[where] = (n, LIMITS[field], "characters")
@@ -126,14 +185,14 @@ for set_name in SETS:
         if field.endswith("_url"):
             if not re.fullmatch(r"https://\S+", text):
                 problem(where, f"not one https URL: {text!r}")
+        # Both sets: no medicine and no price (English (U.S.) is the Japan storefront's English too).
+        medicines(where, text)
+        if PRICE.search(text):
+            problem(where, f'shows a price ("{PRICE.search(text).group(0)}"): prices differ by storefront')
         if set_name == "neutral":
-            medicines(where, text, set())
-            if PRICE.search(text):
-                problem(where, f'shows a price ("{PRICE.search(text).group(0)}"): prices differ by storefront')
             spelling(where, text, UK_SPELLINGS, "UK-only")
             spelling(where, text, US_SPELLINGS, "US-only")
         else:
-            medicines(where, text, US_GENERICS)
             spelling(where, text, UK_SPELLINGS, "UK")
     if len(values[set_name]["name"]) < 2:
         problem(f"{set_name}/name", "shorter than 2 characters")
@@ -170,15 +229,17 @@ for field in ["name", "subtitle", "keywords", "support_url", "marketing_url", "p
         problem(field, "differs between en-US and neutral")
 
 # App Review notes: 4000 bytes; the founding member rule, the sandbox paywall, on-device voice to-dos, Shortcuts, the
-# trial reminder, Guideline 2.5.19 and the one contact address must each be in them.
+# trial reminder, the Weight tab (its Profile switch, weights.json and the goal's floor), Guideline 2.5.19 and the one
+# contact address must each be in them. Only Apple reads them, so weight words are allowed here.
 notes = read(META / "review_information" / "notes.txt")
-copy_rules("review notes", notes)
+copy_rules("review notes", notes, weight_ok=True)
 size = len(notes.encode("utf-8"))
 counts["review_information/notes"] = (size, NOTES_BYTES, "bytes")
 if size > NOTES_BYTES:
     problem("review notes", f"{size} bytes, limit {NOTES_BYTES}")
 for needle in ["Founding members", "originalAppVersion", "sandbox", "Foundation Models", "on device", "Shortcuts",
-               "3 days before the trial ends", "2.5.19", "tjpb2@cantab.ac.uk"]:
+               "3 days before the trial ends", "Weight", "Profile", "weights.json", "BMI 18.5", "2.5.19",
+               "tjpb2@cantab.ac.uk"]:
     if needle not in notes:
         problem("review notes", f'does not mention "{needle}"')
 emails = set(re.findall(r"[\w.+-]+@[\w-]+\.[\w.]+", notes))
@@ -208,7 +269,7 @@ for p in iap["products"]:
     for key, low, high in [("display_name", 2, 30), ("description", 1, 45), ("review_notes", 1, 4000)]:
         text = p.get(key, "")
         copy_rules(f"{pid} {key}", text)
-        medicines(f"{pid} {key}", text, set())
+        medicines(f"{pid} {key}", text)
         counts[f"{pid.rsplit('.', 1)[-1]} {key}"] = (len(text), high, "characters")
         if not low <= len(text) <= high:
             problem(f"{pid} {key}", f"{len(text)} characters, allowed {low} to {high}")
@@ -226,14 +287,14 @@ if len(captions) < 12:
 for caption in captions:
     plain = caption.replace("*", "")
     copy_rules(f'caption "{plain}"', plain)
-    medicines(f'caption "{plain}"', plain, set())
+    medicines(f'caption "{plain}"', plain)
     if PRICE.search(plain) or re.search(r"https?://|www\.|\.com\b|©", plain):
         problem(f'caption "{plain}"', "has a price, URL or copyright symbol")
 
 width = max(len(k) for k in counts)
 for key, (n, limit, unit) in counts.items():
     print(f"{key:<{width}}  {n:5d} / {limit} {unit}")
-print(f"captions checked: {len(captions)}")
+print(f"captions checked: {len(captions)}; medicine names from Shared/Catalog.swift: {len(MEDICINES)}")
 if problems:
     print("\nProblems:", file=sys.stderr)
     for p in problems:
