@@ -5,6 +5,7 @@
   },
   "build": {
     "production": {
+      "node": "22.23.4",
       "distribution": "store",
       "autoIncrement": true,
       "credentialsSource": "remote",
