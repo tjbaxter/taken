@@ -41,6 +41,7 @@ import com.tombaxter.taken.R
 import com.tombaxter.taken.TakenApp
 import com.tombaxter.taken.core.surfaces.TodoWidgetFace
 import com.tombaxter.taken.core.surfaces.TodoWidgetRow
+import com.tombaxter.taken.core.surfaces.TakenWidgetKind
 import com.tombaxter.taken.core.surfaces.WidgetCopy
 import com.tombaxter.taken.core.surfaces.WidgetTap
 import com.tombaxter.taken.core.theme.Look
@@ -67,6 +68,11 @@ class TodoWidget : GlanceAppWidget() {
             val inputs by surfaces.inputs.collectAsState(initial)
             TodoWidgetContent(surfaces.todoFace(inputs, locale = locale), Looks.look(inputs.stack.settings.theme))
         }
+    }
+
+    /** A widget Android could not draw shows Taken's card in the person's look, never Glance's stock one (NEXT 7). */
+    override fun onCompositionError(context: Context, glanceId: GlanceId, appWidgetId: Int, throwable: Throwable) {
+        WidgetFallback.show(context, appWidgetId, TakenWidgetKind.TODO)
     }
 
     /** Android 15's generated preview: the demo to-dos in the person's look. */

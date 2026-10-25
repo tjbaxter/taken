@@ -82,13 +82,22 @@ class Surfaces(
 
     private val ticks = MutableStateFlow(0L)
 
+    /**
+     * The look the surfaces last read: what a widget that cannot be drawn shows its card in ([WidgetFallback]), since the
+     * files may be what failed. Signal until a first read.
+     */
+    @Volatile
+    var look: ThemeID = ThemeID.SIGNAL
+        private set
+
     /** The files as they change, for widget sessions to follow. A file that cannot be read now stops nothing. */
     val inputs: Flow<Inputs> = combine(stores.stack.data, stores.ledger.data, stores.todos.data, ticks) { stack, ledger, todos, tick ->
+        look = stack.settings.theme
         Inputs(stack, ledger.ledger, todos, tick)
     }.catch { }
 
     suspend fun read(): Inputs = Inputs(
-        stores.stack.data.first(),
+        stores.stack.data.first().also { look = it.settings.theme },
         stores.ledger.data.first().ledger,
         stores.todos.data.first(),
         ticks.value,

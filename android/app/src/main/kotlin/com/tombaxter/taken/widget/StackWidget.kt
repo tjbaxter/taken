@@ -42,6 +42,7 @@ import com.tombaxter.taken.R
 import com.tombaxter.taken.TakenApp
 import com.tombaxter.taken.core.surfaces.StackWidgetFace
 import com.tombaxter.taken.core.surfaces.WidgetBottom
+import com.tombaxter.taken.core.surfaces.TakenWidgetKind
 import com.tombaxter.taken.core.surfaces.WidgetCopy
 import com.tombaxter.taken.core.surfaces.WidgetRowFace
 import com.tombaxter.taken.core.theme.Look
@@ -79,6 +80,11 @@ class StackWidget : GlanceAppWidget() {
             val snapshot = surfaces.snapshot(inputs)
             StackWidgetContent(StackWidgetFace(snapshot, locale), Looks.look(snapshot.theme))
         }
+    }
+
+    /** A widget Android could not draw shows Taken's card in the person's look, never Glance's stock one (NEXT 7). */
+    override fun onCompositionError(context: Context, glanceId: GlanceId, appWidgetId: Int, throwable: Throwable) {
+        WidgetFallback.show(context, appWidgetId, TakenWidgetKind.STACK)
     }
 
     /** Android 15's generated preview: the demo stack in the person's look (SPEC-ANDROID 10.1). */

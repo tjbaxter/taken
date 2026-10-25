@@ -4,7 +4,7 @@
      preview image (Android 9 to 11) is the preview layout as WidgetScreenshotTests draws it (widget-preview-todo.png). -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_todo_description"
-    android:initialLayout="@layout/glance_default_loading_layout"
+    android:initialLayout="@layout/widget_loading"
     android:minWidth="110dp"
     android:minHeight="110dp"
     android:minResizeWidth="110dp"

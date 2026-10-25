@@ -10,7 +10,7 @@
      (https://developer.android.com/develop/ui/views/appwidgets/previews). Change the layout, draw the image again. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_stack_description"
-    android:initialLayout="@layout/glance_default_loading_layout"
+    android:initialLayout="@layout/widget_loading"
     android:minWidth="250dp"
     android:minHeight="110dp"
     android:minResizeWidth="110dp"

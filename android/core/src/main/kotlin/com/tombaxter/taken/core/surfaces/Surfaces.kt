@@ -37,6 +37,24 @@ object TakenWidgetKind {
     fun hasStackWidget(placed: Collection<String>): Boolean = STACK in placed
 }
 
+/**
+ * What a Taken widget shows when Android cannot draw it (SPEC-ANDROID 10.1, NEXT 7): Taken's mark and name in the
+ * person's look, and a tap into Taken, whose return to the front redraws every widget. The iPhone's WidgetKit has no
+ * error state; Glance's own is a stock card ("Can't show content"), so this replaces it [Own choice].
+ */
+data class WidgetFallbackFace(val title: String, val hint: String, val link: String) {
+    /** TalkBack's one line for the card: "Taken. Tap to see today." */
+    val spoken: String get() = "${WidgetCopy.STACK_NAME}. $hint."
+
+    companion object {
+        /** The stack widget opens Today; the to-do widget opens the list, never listening: nothing is asked of a tap here. */
+        fun of(kind: String): WidgetFallbackFace = when (kind) {
+            TakenWidgetKind.TODO -> WidgetFallbackFace(WidgetCopy.TAKEN, WidgetCopy.TODO_EMPTY, TodoCaptureRoute.LIST_URL)
+            else -> WidgetFallbackFace(WidgetCopy.TAKEN, WidgetCopy.FALLBACK_HINT, SurfaceLinks.TODAY)
+        }
+    }
+}
+
 /** Taken's `taken://` links that only Android's surfaces send (SPEC-ANDROID 10.3). */
 object SurfaceLinks {
     const val TODAY = "taken://today"
@@ -362,6 +380,9 @@ object WidgetCopy {
 
     const val TODO = "To-do"
     const val TODO_EMPTY = "Tap to see your list"
+
+    /** A stack widget Android could not draw (WidgetFallbackFace). */
+    const val FALLBACK_HINT = "Tap to see today"
     const val NEW_VOICE_TODO = "New voice to-do"
 
     /** TalkBack. */
@@ -395,6 +416,6 @@ object WidgetCopy {
             pending(2), STACK_NAME, STACK_DESCRIPTION, TODO_NAME, TODO_DESCRIPTION, TODO, TODO_EMPTY, NEW_VOICE_TODO,
             LOCKED_SPOKEN, LOCK_MARK_SPOKEN, ALL_TAKEN_SPOKEN, EMPTY_SPOKEN, TILE_LABEL, TILE_LOCKED, TILE_ALL_TAKEN,
             TILE_NO_STACK, TILE_NOTHING_DUE, left(2), TILE_SECTION, ADD_TILE, ADD_TILE_FOOTNOTE, SHORTCUT_TAKE_ALL, SHORTCUT_VOICE_SHORT,
-            SHORTCUT_VOICE_LONG,
-        )
+            SHORTCUT_VOICE_LONG, FALLBACK_HINT,
+        ) + listOf(TakenWidgetKind.STACK, TakenWidgetKind.TODO).map { WidgetFallbackFace.of(it).spoken }
 }

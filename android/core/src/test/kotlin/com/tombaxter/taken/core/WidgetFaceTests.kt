@@ -12,11 +12,13 @@ import com.tombaxter.taken.core.surfaces.StackWidgetFace
 import com.tombaxter.taken.core.surfaces.SurfaceLinks
 import com.tombaxter.taken.core.surfaces.SurfaceRefresh
 import com.tombaxter.taken.core.surfaces.TakeAllTileFace
+import com.tombaxter.taken.core.surfaces.TakenWidgetKind
 import com.tombaxter.taken.core.surfaces.TileIcon
 import com.tombaxter.taken.core.surfaces.TileState
 import com.tombaxter.taken.core.surfaces.TodoWidgetFace
 import com.tombaxter.taken.core.surfaces.WidgetBottom
 import com.tombaxter.taken.core.surfaces.WidgetCopy
+import com.tombaxter.taken.core.surfaces.WidgetFallbackFace
 import com.tombaxter.taken.core.surfaces.WidgetTap
 import com.tombaxter.taken.core.todo.TodoCaptureRoute
 import com.tombaxter.taken.core.todo.TodoDue
@@ -286,6 +288,21 @@ class WidgetFaceTests {
         assertFalse(SurfaceLinks.isTakeAll("taken://today"))
         assertFalse(SurfaceLinks.isTakeAll("taken://pro?then=take-all"), "the paywall's own link stays the paywall's")
         assertFalse(SurfaceLinks.isTakeAll("not a link"))
+    }
+
+    /** NEXT 7: a widget Android could not draw shows Taken's own card, never Glance's stock one, and a tap into Taken. */
+    @Test
+    fun testAWidgetAndroidCannotDrawOffersAWayIntoTaken() {
+        val stack = WidgetFallbackFace.of(TakenWidgetKind.STACK)
+        assertEquals("TAKEN", stack.title)
+        assertEquals("Tap to see today", stack.hint)
+        assertEquals(SurfaceLinks.TODAY, stack.link)
+        assertEquals("Taken. Tap to see today.", stack.spoken)
+        val todo = WidgetFallbackFace.of(TakenWidgetKind.TODO)
+        assertEquals("TAKEN", todo.title)
+        assertEquals(WidgetCopy.TODO_EMPTY, todo.hint, "the to-do widget's own words for opening the list")
+        assertEquals(TodoCaptureRoute.LIST_URL, todo.link, "the list, never listening: the card offers no capture")
+        assertEquals("Taken. Tap to see your list.", todo.spoken)
     }
 
     @Test
