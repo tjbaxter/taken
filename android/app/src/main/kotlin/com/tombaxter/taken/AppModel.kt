@@ -29,9 +29,11 @@ import com.tombaxter.taken.core.pro.ProRoute
 import com.tombaxter.taken.core.pro.of
 import com.tombaxter.taken.core.reminders.TrialReminder
 import com.tombaxter.taken.core.profile.Profile
+import com.tombaxter.taken.core.reminders.NudgeLink
 import com.tombaxter.taken.core.retention.RetentionCopy
 import com.tombaxter.taken.core.retention.TodayPrompt
 import com.tombaxter.taken.core.retention.TodayPrompts
+import com.tombaxter.taken.core.surfaces.SurfaceLinks
 import com.tombaxter.taken.core.stack.Adherence
 import com.tombaxter.taken.core.stack.CsvExport
 import com.tombaxter.taken.core.stack.DaySummary
@@ -53,6 +55,10 @@ import com.tombaxter.taken.core.stack.setDoseTime
 import com.tombaxter.taken.core.stack.takeAllPending
 import com.tombaxter.taken.core.stack.updateItem
 import com.tombaxter.taken.core.theme.ThemeID
+import com.tombaxter.taken.core.todo.TodoCapture
+import com.tombaxter.taken.core.todo.TodoCaptureRoute
+import com.tombaxter.taken.core.todo.TodoState
+import com.tombaxter.taken.data.MemoryTodoPersistence
 import com.tombaxter.taken.core.weight.WeighIn
 import com.tombaxter.taken.core.weight.WeightOffer
 import com.tombaxter.taken.data.Persistence
@@ -68,10 +74,10 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
 /**
- * The tabs (SPEC-ANDROID 6.2). To-do joins with its phase (NEXT 5). Weight is last and shows only while the person has
- * turned it on (SPEC 3.12, [AppModel.visibleTabs]).
+ * The tabs (SPEC-ANDROID 6.2), in the iPhone's order: Today, To-do, History, then Weight, last, shown only while the person
+ * has turned it on (SPEC 3.12, [AppModel.visibleTabs]).
  */
-enum class AppTab { TODAY, HISTORY, WEIGHT }
+enum class AppTab { TODAY, TODO, HISTORY, WEIGHT }
 
 /** One sheet at a time, presented from the root, so one place can close it. */
 sealed interface Sheet {
@@ -80,6 +86,11 @@ sealed interface Sheet {
     data class SetTime(val itemId: UUID) : Sheet
     data class EditItem(val itemId: UUID) : Sheet
 
+    /** A to-do's words and when it is due (SPEC 3.10). */
+    data class TodoEdit(val taskId: UUID) : Sheet
+
+    /** Typing instead of talking: the same save onto the one list. */
+    data object TodoType : Sheet
     /** All weigh-ins, with its editor page (`WeightModel.editing`). */
     data object WeighIns : Sheet
 
@@ -168,9 +179,23 @@ class AppModel(
     internal val scope: CoroutineScope = MainScope(),
     /** The Weight tab's model (weights.json); tests and screens without one get an empty file in memory. */
     weightModel: WeightModel? = null,
+    /** The To-do tab's model (todos.json); tests and screens without one get an empty list in memory. */
+    todoModel: TodoModel? = null,
+    /** Taken's notification permission and Profile's Reminder rows (SPEC-ANDROID 10.4); tests give their own. */
+    notificationsModel: NotificationsModel? = null,
+    /** The home screen widgets and the tile, as Today and Profile see them (SPEC-ANDROID 10.1 and 10.2). */
+    private val surfaceHost: SurfaceHost = SurfaceHost.none,
 ) {
     /** The Weight tab (SPEC 3.12, SPEC-ANDROID 12): weights.json, off until the person turns the tab on. */
     val weight: WeightModel = weightModel ?: WeightModel(clockNow = clockNow, locale = locale, isDemo = isDemo)
+
+    /** The To-do tab: the one list, the mic and its sheets. */
+    val todo: TodoModel = todoModel ?: TodoModel(
+        MemoryTodoPersistence(), TodoState(), clockNow = clockNow, zone = zone, locale = locale, isDemo = isDemo,
+    )
+
+    /** Notifications: Android's permission asked in context, and what Profile's Reminder section says about it. */
+    val notifications: NotificationsModel = notificationsModel ?: NotificationsModel(isDemo = isDemo)
 
     var state: StackState by mutableStateOf(initialState)
         private set
@@ -199,11 +224,12 @@ class AppModel(
 
     private var frontTab: AppTab by mutableStateOf(launchTab)
 
-    /** The tab in front. Leaving Today ends its edit mode. */
+    /** The tab in front. Leaving Today ends its edit mode; leaving To-do takes Keep as one away. */
     var tab: AppTab
         get() = frontTab
         set(value) {
             if (value != AppTab.TODAY && editingStack) editingStack = false
+            if (frontTab == AppTab.TODO && value != AppTab.TODO) todo.dismissKeepOffer()
             // Leaving the Weight tab ends its visit: the line's sentence and the draft go (the iPhone's onDisappear).
             if (frontTab == AppTab.WEIGHT && value != AppTab.WEIGHT) weight.endVisit()
             frontTab = value
@@ -284,6 +310,21 @@ class AppModel(
     /** Demo captures show a one-time row only when their screen asks for it. */
     private var demoPrompt: TodayPrompt? by mutableStateOf(demoPrompt)
 
+    /**
+     * A Taken stack widget is on the home screen, as last read when Taken came to the front; null until then, which counts
+     * as placed, so the invite waits for the answer (the iPhone passes `lockScreenWidget ?? true`).
+     */
+    var widgetPlaced: Boolean? by mutableStateOf(null)
+        private set
+
+    /** The launcher can pin a widget from inside Taken; without it the invite has nothing to offer and never shows. */
+    var canPinWidget: Boolean by mutableStateOf(surfaceHost.canPinWidget)
+        private set
+
+    /** Profile offers the Take all tile: Android 13 and later, until it is in quick settings (SPEC-ANDROID 10.2). */
+    var tileOffered: Boolean by mutableStateOf(surfaceHost.offersTile)
+        private set
+
     /** Navigation 3's back stack. */
     val backStack: SnapshotStateList<Route> = mutableStateListOf(Route.Main)
 
@@ -300,6 +341,8 @@ class AppModel(
         pro.listen { proDidChange() }
         pro.adoptLedger(initialLedger)
         weight.onWriteFailed = { show(Toast(nextToastId(), com.tombaxter.taken.core.weight.WeightCopy.COULD_NOT_SAVE)) }
+        todo.attach(this)
+        notifications.attach(this)
     }
 
     // MARK: Derived
@@ -354,16 +397,16 @@ class AppModel(
         get() = if (trialReminderDeliverable()) null else TrialReminder.notice(pro.status, renewalPrice, state, now, clock.zone)
 
     /**
-     * The one quiet row under Today's progress line, if any. In CORE no widget exists yet, so the widget invite waits
-     * (the iPhone waits the same way until WidgetKit has answered); the trial notice and the weight offer come with their
-     * phases. The nudge offer waits for Reminders (NEXT 3): until this build can post the nudge, Today never offers one.
+     * The one quiet row under Today's progress line, if any. The widget invite (NEXT 4) waits until Android has said whether
+     * a stack widget is placed, and never shows where the launcher cannot pin one; the trial notice and the weight offer
+     * come with their phases. The nudge offer is back with Reminders (NEXT 3), which can post the nudge it offers.
      */
     val todayPrompt: TodayPrompt?
         get() {
             if (isDemo) return demoPrompt
             return TodayPrompts.pick(
                 settings = settings, hasStack = hasStack, today = today, repairDay = repairDay, locked = isLocked,
-                widgetPlaced = true, trialNotice = trialNotice,
+                widgetPlaced = (widgetPlaced ?: true) || !canPinWidget, trialNotice = trialNotice,
                 // The Weight tab's one-time offer comes last, after every other row (SPEC 3.12).
                 weightOffer = WeightOffer.shows(weight.state, state, today, clock), nudgeAvailable = NUDGE_AVAILABLE,
             )
@@ -407,12 +450,16 @@ class AppModel(
     }
 
     /**
-     * Taken came to the front (`ON_START`): rebuild, since the time zone or the day may have changed while away; offer a
-     * log a widget, the tile or a nudge was refused while locked; and the one intro paywall, if a first dose logged
-     * elsewhere has not had it yet.
+     * Taken came to the front (`ON_START`): rebuild, since the time zone or the day may have changed while away; read
+     * Android's notification answer again and rebuild the reminders (the iPhone's `Reminders.reschedule` on foreground);
+     * let the widgets and the tile catch up; offer a log a widget, the tile or a nudge was refused while locked; and the one
+     * intro paywall, if a first dose logged elsewhere has not had it yet.
      */
     fun didBecomeActive() {
         apply(state)
+        todo.didBecomeActive()
+        notifications.didBecomeActive()
+        checkWidgets()
         if (isDemo) return
         consumePendingLog()
         if (state.doses.isNotEmpty() && !introShown) scheduleIntro()
@@ -421,6 +468,7 @@ class AppModel(
     /** Taken went to the background (`ON_STOP`): the stack's edit mode ends, so the next open is a tap that logs again. */
     fun didEnterBackground() {
         if (editingStack) editingStack = false
+        todo.didEnterBackground()
         // The Weight tab's visit ends when Taken leaves the foreground, as on the iPhone.
         weight.endVisit()
     }
@@ -450,6 +498,8 @@ class AppModel(
         recomputeStats()
         // The last item archived or deleted: Today shows first run, with nothing left to edit.
         if (editingStack && !hasStack) editingStack = false
+        // The To-do tab follows the wake-up time and the haptics switch.
+        todo.refresh()
     }
 
     private fun recomputeStats() {
@@ -494,17 +544,42 @@ class AppModel(
 
     // MARK: Tabs and routes
 
-    /** A `taken://` link (SPEC-ANDROID 10.3): today closes whatever is open; pro opens the paywall. */
+    /**
+     * A `taken://` link (SPEC-ANDROID 10.3): today closes whatever is open; todo brings To-do to the front, and
+     * todo/record starts listening there; pro opens the paywall.
+     */
     fun handle(url: String) {
         if (!url.startsWith("taken://")) return
+        // A tapped nudge, its OPEN, or the note that its TAKE ALL logged nothing: the day it was for.
+        val nudgeDay = NudgeLink.day(url)
+        if (nudgeDay != null) {
+            notifications.nudgeOpened(nudgeDay)
+            openDay(fromNudge = nudgeDay)
+            return
+        }
+        val todoRoute = TodoCaptureRoute.route(url)
+        if (todoRoute != null) {
+            openTodoTab()
+            if (todoRoute == TodoCaptureRoute.Route.RECORD) todo.requestRecording()
+            // A tapped due-time notification: its to-do scrolls into view with a wash.
+            TodoCaptureRoute.taskId(url)?.let(todo::reveal)
+            return
+        }
         val route = ProRoute.parse(url)
         if (route == null) {
             sheet = null
             val host = url.removePrefix("taken://").substringBefore('?').substringBefore('/')
             if (host == "today" || host == "weight") {
                 while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
-                // taken://weight: the Weight tab, or Today while it is off.
-                if (host == "weight") openWeightTab() else tab = AppTab.TODAY
+                if (host == "weight") {
+                    // taken://weight: the Weight tab, or Today while it is off.
+                    openWeightTab()
+                } else {
+                    tab = AppTab.TODAY
+                    // The "Take all" shortcut (SPEC-ANDROID 10.2): Take all with its snackbar and Undo, or the paywall with
+                    // the Take all kept while logging needs Taken Pro.
+                    if (SurfaceLinks.isTakeAll(url)) requirePro { takeAll() }
+                }
             }
             return
         }
@@ -521,6 +596,36 @@ class AppModel(
         }
     }
 
+    /**
+     * A tapped nudge opens on the day it was for (the iPhone's `openDay(fromNudge:)`): today's on Today, an earlier day's
+     * on its day sheet over History. Profile and any other sheet close, as the iPhone's sheet is replaced.
+     */
+    fun openDay(fromNudge: DayKey) {
+        apply(state)
+        while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+        if (fromNudge == today.day) {
+            tab = AppTab.TODAY
+            sheet = null
+        } else {
+            tab = AppTab.HISTORY
+            sheet = Sheet.Day(fromNudge)
+        }
+    }
+
+    /**
+     * A voice to-do request closes any sheet and Profile and brings To-do to the front (the iPhone's
+     * `AppModel.openTodoTab`); a recording it asked for starts once the tab is uncovered.
+     */
+    fun openTodoTab() {
+        sheet = null
+        while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+        tab = AppTab.TODO
+    }
+
+    /** To-do is in front with nothing over it: Listening and the stop button are on screen when the mic opens. */
+    val showsTodoTabUncovered: Boolean
+        get() = tab == AppTab.TODO && sheet == null && paywall == null && backStack.size == 1 && !todo.askingMicrophone
+
     /** The avatar: Profile, as a full screen with Up and back (SPEC-ANDROID 6.3). */
     fun openProfile() {
         if (backStack.lastOrNull() != Route.Profile) backStack.add(Route.Profile)
@@ -536,12 +641,17 @@ class AppModel(
     }
 
     /**
-     * System back on the tabs, in the spec's order (SPEC-ANDROID 6.2): edit mode ends, then History returns to Today.
-     * False when back should leave the app (Today is the start destination).
+     * System back on the tabs, in the spec's order (SPEC-ANDROID 6.2): edit mode ends, then listening stops (keeping the
+     * words, as a tap on the mic would), then To-do or History returns to Today. False when back should leave the app
+     * (Today is the start destination).
      */
     fun backOnTabs(): Boolean {
         if (editingStack) {
             setEditingStack(false)
+            return true
+        }
+        if (todo.phase == TodoCapture.Phase.LISTENING) {
+            todo.micTapped()
             return true
         }
         if (tab != AppTab.TODAY) {
@@ -840,19 +950,45 @@ class AppModel(
     // MARK: One-time rows
 
     /**
-     * Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. Until Reminders
-     * (NEXT 3) the offer shows only in demo captures ([NUDGE_AVAILABLE]); with Reminders, Turn on asks for
-     * POST_NOTIFICATIONS first and keeps `reminderEnabled` only once it is granted, as the iPhone's setReminderEnabled does.
+     * Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. Turn on is, with
+     * Profile's switch, where Android asks for notifications (`requirePro` first): allowed, the nudge comes on and the
+     * toast says when ("Nudge on at 20:00"); refused for good, "Notifications are off for Taken in Settings".
      */
     fun answerNudgeOffer(turnOn: Boolean) {
         if (isDemo) demoPrompt = null
-        if (!turnOn) {
-            write { it.settings.nudgeOfferDone = true }
+        write { it.settings.nudgeOfferDone = true }
+        if (!turnOn) return
+        requirePro { turnOnNudge(fromOffer = true) }
+    }
+
+    /**
+     * Profile's Nudge switch. Turning it off always works. Turning it on needs Pro once something has been logged (no nudge
+     * is scheduled without it): locked, the switch opens the paywall, and the nudge, with Android's prompt, comes on once
+     * Pro does (the iPhone's `setReminder(_:anchor:)`). Either answers Today's offer.
+     */
+    fun setReminder(enabled: Boolean) {
+        if (!enabled) {
+            write { it.settings.setReminder(false) }
+            notifications.nudgeTurnedOff()
             return
         }
-        requirePro {
-            write { it.settings.setReminder(true) }
-            show(Toast(nextToastId(), RetentionCopy.NUDGE_ON, Fmt.minutes(settings.reminderMinutes)))
+        requirePro { turnOnNudge(fromOffer = false) }
+    }
+
+    /** Profile > Reminder > Time: the nudge moves at once (every write rebuilds the reminders). */
+    fun setReminderMinutes(minutes: Int) {
+        write { it.settings.reminderMinutes = minutes }
+    }
+
+    /** The iPhone's `setReminderEnabled(true)`: the nudge comes on only once Android shows Taken's notifications. */
+    private fun turnOnNudge(fromOffer: Boolean) {
+        notifications.request { granted ->
+            if (granted) {
+                write { it.settings.setReminder(true) }
+                if (fromOffer) show(Toast(nextToastId(), RetentionCopy.NUDGE_ON, Fmt.minutes(settings.reminderMinutes)))
+            } else if (fromOffer && notifications.notificationsDenied) {
+                show(Toast(nextToastId(), RetentionCopy.NOTIFICATIONS_OFF))
+            }
         }
     }
 
@@ -867,6 +1003,53 @@ class AppModel(
             feel(Haptic.TICK)
             announce(com.tombaxter.taken.core.weight.WeightCopy.TAB_ADDED)
         }
+    }
+
+    // MARK: Widgets and the tile (SPEC-ANDROID 10.1 and 10.2)
+
+    /**
+     * Taken came to the front: the surfaces catch up, and someone who already has the stack widget on the home screen never
+     * gets the invite (the iPhone's `checkLockScreenWidget`, which reads WidgetKit's configured widgets; Android reads
+     * Taken's placed widgets). A placed widget answers the invite for good.
+     */
+    private fun checkWidgets() {
+        if (isDemo) return
+        surfaceHost.didBecomeActive(theme)
+        canPinWidget = surfaceHost.canPinWidget
+        tileOffered = surfaceHost.offersTile
+        if (settings.widgetInviteDone) {
+            widgetPlaced = false
+            return
+        }
+        surfaceHost.checkStackWidget { found ->
+            widgetPlaced = found
+            if (found && !settings.widgetInviteDone) write { it.settings.widgetInviteDone = true }
+        }
+    }
+
+    /** The widget invite is on screen: the day it first showed is kept, so it shows on that day only. */
+    fun noteWidgetInviteShown() {
+        if (isDemo || settings.widgetInviteDay != null) return
+        val day = today.day.ordinal
+        write { it.settings.widgetInviteDay = day }
+    }
+
+    /**
+     * A tap on the widget invite or its close: either way it is gone for good. The tap asks the launcher to pin the stack
+     * widget, which shows its own dialog (`requestPinGlanceAppWidget`, https://developer.android.com/develop/ui/compose/glance/pin-in-app);
+     * the iPhone's tap opens how to add it, which Android's launcher dialog makes unneeded (SPEC-ANDROID 7.1).
+     */
+    fun closeWidgetInvite(pin: Boolean) {
+        if (isDemo) demoPrompt = null else write { it.settings.widgetInviteDone = true }
+        if (pin) {
+            feel(Haptic.TICK)
+            surfaceHost.requestPinStackWidget()
+        }
+    }
+
+    /** Profile's "Add the Take all tile": Android's own prompt; once the tile is in quick settings the row goes. */
+    fun addTile() {
+        surfaceHost.requestAddTile { added -> if (added) tileOffered = false }
     }
 
     /** The repair line's close: hidden for the day it was about. It never says the streak broke. */
@@ -895,6 +1078,7 @@ class AppModel(
         if (look == theme) return
         feel(Haptic.TICK)
         write { it.settings.theme = look }
+        surfaceHost.lookChanged(look)
     }
 
     // MARK: Profile
@@ -918,11 +1102,12 @@ class AppModel(
     }
 
     /**
-     * Erase all data: the stack, every dose, the settings, the profile and any unreadable copy set aside. The look stays,
-     * and so does pro.json.
+     * Erase all data: the stack, every dose, the settings, the to-dos, the weigh-ins and the weight goal, the profile and any
+     * unreadable copy set aside. The look stays, and so do pro.json and the to-dos' first note on the house.
      */
     fun eraseAll() {
         write { it.eraseAll() }
+        todo.eraseAll()
         weight.eraseAll()
         persistence.eraseExtras()
         profile = Profile()
@@ -962,8 +1147,8 @@ class AppModel(
     fun say(text: String) = announce(text)
 
     companion object {
-        /** This build can post the evening nudge. False until Reminders (NEXT 3), so Today never offers it before then. */
-        const val NUDGE_AVAILABLE = false
+        /** This build can post the evening nudge (Reminders, NEXT 3), so Today offers it. */
+        const val NUDGE_AVAILABLE = true
 
         /** The package Play knows: debug builds add `.debug`, which Play sells nothing to. */
         const val PLAY_PACKAGE = "com.tombaxter.taken"

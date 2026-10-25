@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Taken's two static shortcuts (SPEC-ANDROID 10.2, https://developer.android.com/develop/ui/views/launch/shortcuts/creating-shortcuts):
+     New voice to-do opens To-do listening; Take all opens Today and takes all, with its snackbar and Undo, or the paywall
+     while logging needs Taken Pro. The intents name com.tombaxter.taken.debug, which an intent here cannot take from a resource;
+     this is the debug build's copy of src/main/res/xml/shortcuts.xml, with the .debug package (resource merging prefers the build type's files, https://developer.android.com/build/build-variants#sourcesets); keep the two the same in every other way. -->
+<shortcuts xmlns:android="http://schemas.android.com/apk/res/android">
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_voice"
+        android:shortcutId="voice-todo"
+        android:shortcutLongLabel="@string/shortcut_voice_long"
+        android:shortcutShortLabel="@string/shortcut_voice_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="taken://todo/record"
+            android:targetClass="com.tombaxter.taken.MainActivity"
+            android:targetPackage="com.tombaxter.taken.debug" />
+    </shortcut>
+    <shortcut
+        android:enabled="true"
+        android:icon="@drawable/ic_shortcut_take_all"
+        android:shortcutId="take-all"
+        android:shortcutLongLabel="@string/shortcut_take_all_long"
+        android:shortcutShortLabel="@string/shortcut_take_all_short">
+        <intent
+            android:action="android.intent.action.VIEW"
+            android:data="taken://today?then=take-all"
+            android:targetClass="com.tombaxter.taken.MainActivity"
+            android:targetPackage="com.tombaxter.taken.debug" />
+    </shortcut>
+</shortcuts>

@@ -67,6 +67,7 @@ import com.tombaxter.taken.AppModel
 import com.tombaxter.taken.Sheet
 import com.tombaxter.taken.core.format.Fmt
 import com.tombaxter.taken.core.model.Item
+import com.tombaxter.taken.core.surfaces.WidgetCopy
 import com.tombaxter.taken.core.profile.Profile
 import com.tombaxter.taken.core.weight.WeightCSV
 import com.tombaxter.taken.core.weight.WeightCopy
@@ -110,8 +111,8 @@ object ProfileCopy {
 
 /**
  * Profile (SPEC-ANDROID 6.3 and 7.1): a full screen with Up and back, changes saved as they are made. The sections, in
- * the iPhone's order: the header (photo, name, streak), Stack, Look, Your day, Feel, Weight, Taken Pro, Data, About.
- * Reminder joins with its phase.
+ * the iPhone's order: the header (photo, name, streak), Stack, Look, Reminder, Quick settings (Android's own, while the
+ * tile is offered), Your day, Feel, Weight, Taken Pro, Data, About.
  */
 @Composable
 fun ProfileScreen(model: AppModel, platform: Platform) {
@@ -141,6 +142,14 @@ fun ProfileScreen(model: AppModel, platform: Platform) {
                 Section("Look", trailing = model.theme.title)
                 Card { Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) { LookPicker(model.theme) { model.setLook(it) } } }
                 Footnote(ProfileCopy.LOOK_FOOTNOTE)
+                ReminderSection(model)
+                // Android 13 and later, until the tile is there: the only place Taken offers it, so Today keeps one quiet
+                // row (SPEC-ANDROID 10.2).
+                if (model.tileOffered) {
+                    Section(WidgetCopy.TILE_SECTION)
+                    Card(Modifier.testTag("add-tile")) { LinkRow(WidgetCopy.ADD_TILE) { model.addTile() } }
+                    Footnote(WidgetCopy.ADD_TILE_FOOTNOTE)
+                }
                 Section("Your day")
                 Card {
                     SettingRow("Wake-up time") { MonoTimeButton("Wake-up time", model.settings.wakeMinutes) { model.setWakeMinutes(it) } }

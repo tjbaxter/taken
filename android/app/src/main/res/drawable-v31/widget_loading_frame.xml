@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The loading widget's frame from Android 12: the launch canvas with the system's widget corner radius, as Taken's
+     widgets draw their frames (https://developer.android.com/develop/ui/views/appwidgets/enhance, WS-2). -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android" android:shape="rectangle">
+    <solid android:color="@color/launch_canvas" />
+    <corners android:radius="@android:dimen/system_app_widget_background_radius" />
+</shape>

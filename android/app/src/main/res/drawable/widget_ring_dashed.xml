@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A pending row's dashed ring on the stack widget (the iPhone's dashed circle): six arcs, white for the widget to tint.
+     Drawn as a vector, which scales cleanly at 9 dp where a shape's dashed stroke does not. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="9dp"
+    android:height="9dp"
+    android:viewportWidth="9"
+    android:viewportHeight="9">
+    <path
+        android:fillColor="#00000000"
+        android:pathData="M4.500,0.500 A4.0,4.0 0 0,1 6.500,1.036 M7.964,2.500 A4.0,4.0 0 0,1 8.500,4.500 M7.964,6.500 A4.0,4.0 0 0,1 6.500,7.964 M4.500,8.500 A4.0,4.0 0 0,1 2.500,7.964 M1.036,6.500 A4.0,4.0 0 0,1 0.500,4.500 M1.036,2.500 A4.0,4.0 0 0,1 2.500,1.036"
+        android:strokeWidth="1"
+        android:strokeColor="#FFFFFFFF" />
+</vector>

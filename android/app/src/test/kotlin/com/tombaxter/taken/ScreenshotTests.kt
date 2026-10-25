@@ -11,6 +11,7 @@ import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.WindowInsets
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -79,8 +80,10 @@ class ScreenshotTests {
 
     private val looks = ThemeID.entries
 
-    /** Every CORE screen in every look: Today empty, pending, partly taken, all taken, in edit mode, with each quiet row,
-     * locked; Add and its type-ahead; the item sheet; Set time; History; the day sheet; Profile. */
+    /** Every screen in every look: Today empty, pending, partly taken, all taken, in edit mode, with each quiet row,
+     * locked; Add and its type-ahead; the item sheet; Set time; History; the day sheet; Profile; and the To-do tab (the
+     * list, listening, past 4:00, empty, the blockers, a note just saved, the undo bar, the edit and type sheets, the
+     * microphone's rationale). */
     @Test
     fun everyScreenInEveryLook() {
         start()
@@ -191,6 +194,51 @@ class ScreenshotTests {
     }
 
     /**
+     * Profile's Reminder section in every look (SPEC-ANDROID 10.4), scrolled to it: the nudge on with its time, the
+     * Settings link once notifications are off, the nudge's own channel off, and locked; and the nudge time's dialog.
+     */
+    @Test
+    fun reminderSettings() {
+        start()
+        for (look in looks) {
+            for (screen in DemoScreens.reminderScreens) {
+                capture("${screen}_${look.raw}", DemoScreens.make(screen, look)) {
+                    compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE).performScrollTo()
+                }
+            }
+            // The nudge time's 24-hour dialog, "Set 20:00".
+            capture("nudge-time_${look.raw}", DemoScreens.make("settings-reminder", look)) {
+                compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE).performScrollTo()
+                compose.onNodeWithContentDescription("Nudge time, 20:00").performClick()
+            }
+        }
+    }
+
+    /** Profile's offer of the Take all tile (Android 13 and later, SPEC-ANDROID 10.2), scrolled to it. */
+    @Test
+    fun theTileOffer() {
+        start()
+        for (look in listOf(ThemeID.SIGNAL, ThemeID.BLUSH)) {
+            capture("settings-tile_${look.raw}", DemoScreens.make("settings", look)) {
+                compose.onNodeWithText(com.tombaxter.taken.core.surfaces.WidgetCopy.ADD_TILE_FOOTNOTE).performScrollTo()
+            }
+        }
+    }
+
+    /** The Reminder section and the explanation at 200% text: nothing is cut to a word. */
+    @Test
+    @Config(fontScale = 2f)
+    fun reminderSettingsLargerText() {
+        start()
+        for (screen in listOf("settings-reminder", "settings-reminder-off", "settings-reminder-locked")) {
+            capture("${screen}_signal_font200", DemoScreens.make(screen)) {
+                compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE).performScrollTo()
+            }
+        }
+        capture("notify-ask_signal_font200", DemoScreens.make("notify-ask"))
+    }
+
+    /**
      * 200% text, Android 14's largest (https://developer.android.com/about/versions/14/features), set as the device's
      * font scale (https://robolectric.org/device-configuration/) so the sheets, which are their own windows, scale too.
      */
@@ -198,7 +246,7 @@ class ScreenshotTests {
     @Config(fontScale = 2f)
     fun largerText() {
         start()
-        for (screen in listOf("today", "today-edit", "item", "log", "add", "settings", "paywall", "locked")) {
+        for (screen in listOf("today", "today-edit", "item", "log", "add", "settings", "paywall", "locked", "todo", "todo-recording", "todo-edit")) {
             capture("${screen}_signal_font200", DemoScreens.make(screen))
         }
         capture("settings-pro-trial_signal_font200", DemoScreens.make("settings-pro-trial")) { scrollToPro("settings-pro-trial") }
@@ -208,7 +256,7 @@ class ScreenshotTests {
     @Config(qualifiers = SMALL_PHONE)
     fun smallPhone() {
         start()
-        for (screen in listOf("today", "today-edit", "add", "day", "paywall")) {
+        for (screen in listOf("today", "today-edit", "add", "day", "paywall", "todo", "todo-recording")) {
             capture("${screen}_signal_small", DemoScreens.make(screen))
         }
     }
@@ -217,7 +265,7 @@ class ScreenshotTests {
     @Config(qualifiers = TABLET)
     fun landscapeTablet() {
         start()
-        for (screen in listOf("today", "log", "settings", "paywall")) {
+        for (screen in listOf("today", "log", "settings", "paywall", "todo")) {
             capture("${screen}_signal_tablet", DemoScreens.make(screen))
         }
     }

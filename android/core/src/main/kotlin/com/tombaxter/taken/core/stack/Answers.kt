@@ -141,4 +141,16 @@ class WidgetSnapshot(state: StackState, now: Instant, zone: ZoneId = ZoneId.syst
     }
 
     val allTaken: Boolean get() = dueDoses > 0 && takenDue >= dueDoses
+
+    companion object {
+        /**
+         * The widget gallery's preview, in the look chosen in the app (Shared/WidgetViews.swift `WidgetSnapshot.demo`):
+         * Android's generated previews and the pin dialog draw it (SPEC-ANDROID 10.1).
+         */
+        fun demo(now: Instant, theme: ThemeID = ThemeID.SIGNAL, zone: ZoneId = ZoneId.systemDefault()): WidgetSnapshot {
+            val state = com.tombaxter.taken.core.demo.DemoData.state(now, allTaken = false, zone = zone)
+            state.settings.theme = theme
+            return WidgetSnapshot(state, now, zone)
+        }
+    }
 }

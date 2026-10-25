@@ -232,6 +232,14 @@ for activity in androidx.compose.ui.tooling.PreviewActivity androidx.activity.Co
 done
 [ "$debug_ok" = 1 ] && ok "no debug or demo code"
 
+# --- Widget callbacks (SPEC-ANDROID 10.1) ----------------------------------------------------------------------------
+# Glance builds the widgets' callbacks by class name (proguard-rules.pro keeps them): R8 must keep them, unrenamed.
+callbacks_ok=1
+for callback in LogNextAction TakeAllAction; do
+  grep -a -q "Lcom/tombaxter/taken/widget/$callback;" "$dex" || { fail "widget callback $callback renamed or removed by R8"; callbacks_ok=0; }
+done
+[ "$callbacks_ok" = 1 ] && ok "widget callbacks kept for Glance"
+
 # --- Signature -------------------------------------------------------------------------------------------------------
 # A bundle carries a JAR signature by the upload key; Play checks it against the upload certificate it holds and re-signs
 # with the app signing key (https://support.google.com/googleplay/android-developer/answer/9842756). jarsigner proves the

@@ -41,6 +41,8 @@ import kotlin.test.assertEquals
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
+import com.tombaxter.taken.notify.NotificationHost
+import com.tombaxter.taken.voice.VoiceHost
 
 /**
  * The paywall, the intro paywall, locked Today and Profile's Taken Pro section on screen (SPEC-ANDROID 9.5 and 9.6), over
@@ -56,7 +58,7 @@ class PaywallTests {
     private val zone = ZoneId.of("Europe/London")
     private val now = Instant.parse("2026-10-28T09:14:00Z")
 
-    private class Opened(val urls: MutableList<String>) : Platform {
+    private class Opened(val urls: MutableList<String>) : Platform, VoiceHost by VoiceHost.none, NotificationHost by NotificationHost.none {
         override val touchExploration = false
         override fun shareCsv(make: () -> String) = Unit
         override fun pickPhoto() = Unit

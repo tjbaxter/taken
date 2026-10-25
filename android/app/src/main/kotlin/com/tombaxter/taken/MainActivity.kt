@@ -11,6 +11,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -22,16 +23,26 @@ import androidx.activity.viewModels
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
-import androidx.core.app.NotificationManagerCompat
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
+import com.tombaxter.taken.core.reminders.ReminderKind
+import com.tombaxter.taken.notify.AndroidNotifications
+import com.tombaxter.taken.notify.NotificationHost
+import com.tombaxter.taken.notify.ReminderChannels
+import com.tombaxter.taken.ui.shell.LaunchVeil
 import com.tombaxter.taken.ui.shell.Platform
 import com.tombaxter.taken.ui.shell.TakenRoot
+import com.tombaxter.taken.voice.OnDeviceSpeechCapture
+import com.tombaxter.taken.voice.VoiceCapture
+import com.tombaxter.taken.voice.VoiceHost
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -82,9 +93,38 @@ class MainActivity : ComponentActivity(), Platform {
         }
     }
 
+     * RECORD_AUDIO, asked in context at the first mic tap (SPEC-ANDROID 11,
+     * https://developer.android.com/training/permissions/requesting). Registered here, before the activity starts, so the
+     * answer reaches the To-do tab after a rotation too.
+     */
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        viewModel.model?.todo?.microphoneAnswered(granted)
+    }
+
+    /**
+     * POST_NOTIFICATIONS on Android 13 and later, asked in context from the nudge's Turn on and Profile's Nudge switch
+     * (SPEC-ANDROID 10.4, https://developer.android.com/develop/ui/views/notifications/notification-permission).
+     * Registered here, before the activity starts, so the answer reaches the model after a rotation too.
+     */
+    private val notificationPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        viewModel.model?.notifications?.answered(granted)
+    }
+
+    /**
+     * Whether the splash screen stays: until Taken has read its files, a few milliseconds, so the first frame is the real
+     * screen and never a blank canvas (SPEC-ANDROID 6.1). Google's own case for keeping it: "loading in-app settings from
+     * a local disk asynchronously" (https://developer.android.com/develop/ui/views/launch/splash-screen).
+     */
+    internal val keepsSplash: Boolean get() = viewModel.model == null
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The splash screen on every API level, installed before super.onCreate as core-splashscreen requires
+        // (https://developer.android.com/develop/ui/views/launch/splash-screen/migrate): Signal's canvas and the capsule,
+        // then Theme.Taken.
+        val splash = installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        splash.setKeepOnScreenCondition { keepsSplash }
         // A link is handled once. A recreated activity (rotation, fold, resize, a return after process death) gets its
         // launch intent again, and so does a task relaunched from Recents: neither replays the link. Navigation does the
         // same with the deep-link-handled flag it keeps in saved state (NavController's KEY_DEEP_LINK_HANDLED).
@@ -108,6 +148,12 @@ class MainActivity : ComponentActivity(), Platform {
                     navigationBarStyle = if (light) SystemBarStyle.light(Color.TRANSPARENT, Color.TRANSPARENT) else SystemBarStyle.dark(Color.TRANSPARENT),
                 )
             }
+            // Android's notification answers come from this activity, set before ON_START reads them (an observer added
+            // to a started lifecycle hears ON_START at once, so this effect comes first).
+            DisposableEffect(model) {
+                model.notifications.host = this@MainActivity
+                onDispose { model.notifications.host = NotificationHost.none }
+            }
             LifecycleEventEffect(Lifecycle.Event.ON_START) { model.didBecomeActive() }
             // A configuration change (rotation, fold, resize, dark mode, font size) stops the activity too; only a real
             // trip to the background ends edit mode
@@ -124,7 +170,8 @@ class MainActivity : ComponentActivity(), Platform {
                     }
                 }
             }
-            TakenRoot(model, this)
+            // A light look fades in from the splash screen's canvas, as on the iPhone (SPEC-ANDROID 6.1).
+            LaunchVeil(com.tombaxter.taken.core.theme.Looks.look(model.theme)) { TakenRoot(model, this) }
         }
     }
 
@@ -221,13 +268,81 @@ class MainActivity : ComponentActivity(), Platform {
         }
     }
 
+    /**
+     * Notifications are off for Taken where Android lets the person turn them off: for the whole app (Settings, or a
+     * refused prompt Android will not show again), or the "Trial reminder" channel alone. The paywall then promises no
+     * reminder it knows cannot come. Not asked yet counts as on: the ask follows a trial (SPEC-ANDROID 10.4).
+     */
     override val notificationsOff: Boolean
-        get() {
-            if (NotificationManagerCompat.from(this).areNotificationsEnabled()) return false
-            // Before Android 13 notifications are on unless turned off; from 13 a prompt not yet answered may still come.
-            if (Build.VERSION.SDK_INT < 33) return true
-            return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        get() = if (notificationsAllowed) ReminderChannels.isOff(this, ReminderKind.TRIAL) else !notificationsAskable
+
+    // MARK: VoiceHost
+
+    override val microphoneGranted: Boolean
+        get() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    override val microphoneRationaleDue: Boolean
+        get() = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+
+    override fun requestMicrophone() {
+        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    /** The app's details page, where the microphone is turned back on (SPEC-ANDROID 6.3). */
+    override fun openAppSettings() {
+        val details = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+        try {
+            startActivity(details)
+        } catch (e: ActivityNotFoundException) {
+            // No Settings app to open: the blocker still offers typing.
         }
+    }
+
+    // MARK: NotificationHost
+
+    override val notificationsAllowed: Boolean
+        get() = AndroidNotifications.allowed(this)
+
+    override val notificationsAskable: Boolean
+        get() = Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED
+
+    override val notificationRationaleDue: Boolean
+        get() = Build.VERSION.SDK_INT >= 33 && shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)
+
+    override val nudgeChannelOff: Boolean
+        get() = ReminderChannels.isOff(this, ReminderKind.NUDGE)
+
+    override fun requestNotifications() {
+        if (Build.VERSION.SDK_INT >= 33) {
+            notificationPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
+        } else {
+            // No runtime prompt before Android 13: notifications are on unless turned off in Settings.
+            viewModel.model?.notifications?.answered(AndroidNotifications.allowed(this))
+        }
+    }
+
+    /**
+     * Taken's notification settings (`ACTION_APP_NOTIFICATION_SETTINGS`, SPEC-ANDROID 6.3), or one channel's page
+     * (`ACTION_CHANNEL_NOTIFICATION_SETTINGS` with the package and the channel,
+     * https://developer.android.com/develop/ui/views/notifications/channels).
+     */
+    override fun openNotificationSettings(channelId: String?) {
+        val settings = if (channelId != null) {
+            Intent(Settings.ACTION_CHANNEL_NOTIFICATION_SETTINGS).putExtra(Settings.EXTRA_CHANNEL_ID, channelId)
+        } else {
+            Intent(Settings.ACTION_APP_NOTIFICATION_SETTINGS)
+        }
+        try {
+            startActivity(settings.putExtra(Settings.EXTRA_APP_PACKAGE, packageName))
+        } catch (e: ActivityNotFoundException) {
+            openAppSettings()
+        }
+    }
+
+    /** Android 12 and later hear on the phone; below that there is no on-device recognizer to ask (SPEC-ANDROID 11). */
+    override fun newVoiceCapture(): VoiceCapture =
+        if (Build.VERSION.SDK_INT >= 31) OnDeviceSpeechCapture(this) else VoiceHost.none.newVoiceCapture()
 
     override val versionName: String
         get() = try {

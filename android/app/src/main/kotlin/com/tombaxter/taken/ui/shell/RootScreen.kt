@@ -78,6 +78,7 @@ import com.tombaxter.taken.Haptic
 import com.tombaxter.taken.Route
 import com.tombaxter.taken.Sheet
 import com.tombaxter.taken.Toast
+import com.tombaxter.taken.core.todo.TodoCapture
 import com.tombaxter.taken.ui.add.AddSheet
 import com.tombaxter.taken.ui.components.Announcement
 import com.tombaxter.taken.ui.components.AvatarImage
@@ -100,9 +101,19 @@ import com.tombaxter.taken.core.weight.WeightCopy
 import com.tombaxter.taken.ui.weight.WeighInsSheet
 import com.tombaxter.taken.ui.weight.WeightGoalSheet
 import com.tombaxter.taken.ui.weight.WeightScreen
+import com.tombaxter.taken.ui.todo.MicrophoneRationale
+import com.tombaxter.taken.ui.todo.TodoEditSheet
+import com.tombaxter.taken.ui.todo.TodoScreen
+import com.tombaxter.taken.ui.todo.TodoTypeSheet
+import com.tombaxter.taken.notify.NotificationHost
+import com.tombaxter.taken.ui.profile.NotificationRationale
+import com.tombaxter.taken.voice.VoiceHost
 
-/** What the screen needs from Android beyond the model: TalkBack's state, sharing a file, picking a photo. */
-interface Platform {
+/**
+ * What the screen needs from Android beyond the model: TalkBack's state, sharing a file, picking a photo, the microphone
+ * for voice to-dos ([VoiceHost]) and notifications for the reminders ([NotificationHost]).
+ */
+interface Platform : VoiceHost, NotificationHost {
     /** TalkBack is on: the toast stays until it is dismissed, as VoiceOver keeps it on the iPhone. */
     val touchExploration: Boolean
     /** Shares taken-log.csv; `make` builds its text, off the main thread. */
@@ -130,7 +141,7 @@ interface Platform {
 
     companion object {
         /** For tests and captures: nothing leaves the screen. */
-        val none: Platform = object : Platform {
+        val none: Platform = object : Platform, VoiceHost by VoiceHost.none, NotificationHost by NotificationHost.none {
             override val touchExploration = false
             override fun shareCsv(make: () -> String) = Unit
             override fun pickPhoto() = Unit
@@ -159,6 +170,24 @@ fun TakenRoot(model: AppModel, platform: Platform) {
             }
             onDispose { model.onEffect = {} }
         }
+        // The microphone for voice to-dos comes from the activity on screen.
+        DisposableEffect(model, platform) {
+            model.todo.host = platform
+            onDispose { model.todo.host = VoiceHost.none }
+        }
+        // Notifications are asked for, and their settings opened, by the activity on screen.
+        DisposableEffect(model, platform) {
+            model.notifications.host = platform
+            onDispose { model.notifications.host = NotificationHost.none }
+        }
+        // The screen stays on only while a note is starting or being heard, so a five-minute note is never cut short by
+        // the screen timeout: the view's keepScreenOn is FLAG_KEEP_SCREEN_ON, cleared the moment listening ends
+        // (https://developer.android.com/develop/background-work/background-tasks/awake/screen-on).
+        val keepOn = TodoCapture.keepsScreenOn(model.todo.phase, model.todo.isDemo)
+        DisposableEffect(keepOn, view) {
+            view.keepScreenOn = keepOn
+            onDispose { view.keepScreenOn = false }
+        }
         Box(Modifier.fillMaxSize().background(Taken.colors.bg)) {
             NavDisplay(
                 backStack = model.backStack,
@@ -175,6 +204,8 @@ fun TakenRoot(model: AppModel, platform: Platform) {
         }
         SheetsHost(model, platform)
         PaywallHost(model, platform)
+        if (model.todo.askingMicrophone) MicrophoneRationale(model.todo)
+        if (model.notifications.asking) NotificationRationale(model.notifications, model.settings.reminderMinutes)
     }
 }
 
@@ -185,7 +216,8 @@ fun TakenRoot(model: AppModel, platform: Platform) {
 @Composable
 fun MainShell(model: AppModel, platform: Platform) {
     val colors = Taken.colors
-    BackHandler(enabled = model.editingStack || model.tab != AppTab.TODAY) { model.backOnTabs() }
+    val listening = model.todo.phase == TodoCapture.Phase.LISTENING
+    BackHandler(enabled = model.editingStack || listening || model.tab != AppTab.TODAY) { model.backOnTabs() }
     // A tab that is not on the bar never stays in front (weights.json changed elsewhere with the Weight tab in front).
     LaunchedEffect(model.weight.showsTab) { if (model.tab !in model.visibleTabs) model.tab = AppTab.TODAY }
     BoxWithConstraints(Modifier.fillMaxSize().background(colors.bg)) {
@@ -239,13 +271,16 @@ fun MainShell(model: AppModel, platform: Platform) {
 
 private fun tabTitle(tab: AppTab): String = when (tab) {
     AppTab.TODAY -> "Today"
+    AppTab.TODO -> "To-do"
     AppTab.HISTORY -> "History"
     AppTab.WEIGHT -> WeightCopy.TAB
 }
 
-/** Material Symbols: pill, calendar_month and, for Weight, monitor_weight (a bathroom scale; the iPhone's scalemass). */
+/** Material Symbols: pill, checklist, calendar_month and, for Weight, monitor_weight (a bathroom scale; the iPhone's scalemass). */
 private fun tabIcon(tab: AppTab, selected: Boolean) = when (tab) {
     AppTab.TODAY -> if (selected) Symbols.PillFill else Symbols.Pill
+    // Material Symbols' checklist has one form, filled or not.
+    AppTab.TODO -> Symbols.Checklist
     AppTab.HISTORY -> if (selected) Symbols.CalendarMonthFill else Symbols.CalendarMonth
     AppTab.WEIGHT -> if (selected) Symbols.MonitorWeightFill else Symbols.MonitorWeight
 }
@@ -270,6 +305,7 @@ private fun TabContent(model: AppModel, platform: Platform, wide: Boolean) {
                     TakeAllButton(model)
                 }
             }
+            AppTab.TODO -> TodoScreen(model, platform)
             AppTab.HISTORY -> Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f)) { HistoryScreen(model) }
                 ToastHost(model, platform)
@@ -334,6 +370,8 @@ private fun SheetsHost(model: AppModel, platform: Platform) {
         is Sheet.EditItem -> ItemSheet(model, sheet.itemId) { model.sheet = null }
         Sheet.WeighIns -> WeighInsSheet(model, platform) { model.closeWeighIns() }
         Sheet.WeightGoal -> WeightGoalSheet(model) { model.sheet = null }
+        is Sheet.TodoEdit -> TodoEditSheet(model, sheet.taskId) { model.sheet = null }
+        Sheet.TodoType -> TodoTypeSheet(model) { model.sheet = null }
     }
 }
 

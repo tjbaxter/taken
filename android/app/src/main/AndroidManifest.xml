@@ -1,9 +1,30 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Taken for Android. Permissions: none of its own in this phase (SPEC-ANDROID 3.3 lists every one the later phases add).
+<!-- Taken for Android. Permissions (SPEC-ANDROID 3.3 lists every one): RECORD_AUDIO for voice to-dos, asked at the first
+     mic tap; POST_NOTIFICATIONS for the reminders, asked in context; RECEIVE_BOOT_COMPLETED to put the reminders' alarms
+     back after a restart, never asked. No exact-alarm permission: the reminders use inexact alarms (SPEC-ANDROID 10.4).
      The Advertising ID is removed as a guard, so no library can bring it in
      (https://support.google.com/googleplay/android-developer/answer/6048248). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Voice to-dos: heard by the on-device recognizer only, never saved (SPEC-ANDROID 11). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- The evening nudge, the trial reminder and the to-dos' due times (SPEC-ANDROID 10.4). Android 13 and later ask the
+         person, in context (https://developer.android.com/develop/ui/views/notifications/notification-permission). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Alarms are cancelled when the phone shuts down; the reminders are rebuilt once it has started
+         (https://developer.android.com/develop/background-work/services/alarms/schedule). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- Apps targeting Android 11 and later must declare the speech recognition service they talk to
+         (https://developer.android.com/reference/android/speech/SpeechRecognizer#createSpeechRecognizer(android.content.Context)). -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
 
     <uses-permission
         android:name="com.google.android.gms.permission.AD_ID"
@@ -21,23 +42,103 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Taken">
 
+        <!-- Starts on the splash screen's theme; MainActivity hands over to Theme.Taken once Taken has read its files
+             (SPEC-ANDROID 6.1). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:theme="@style/Theme.Taken.Starting"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- taken:// links (SPEC-ANDROID 10.3). Today and Pro now; To-do and Weight come with their tabs. -->
+            <!-- taken:// links (SPEC-ANDROID 10.3): today, todo, todo/record and pro now; weight comes with its tab. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="taken" />
             </intent-filter>
+            <!-- The two static shortcuts, New voice to-do and Take all (SPEC-ANDROID 10.2): declared on the launcher activity
+                 (https://developer.android.com/develop/ui/views/launch/shortcuts/creating-shortcuts). -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- The home screen widgets (SPEC-ANDROID 10.1), Glance receivers: exported, as Android's AppWidgetManager sends
+             them their updates (https://developer.android.com/develop/ui/compose/glance/create-app-widget). -->
+        <receiver
+            android:name=".widget.StackWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_stack_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_stack_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.TodoWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_todo_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_todo_info" />
+        </receiver>
+        <!-- The widgets' and the tile's own refresh alarm (the rollover, an item's hour, Pro's end, a due time): not
+             exported, only Taken's PendingIntent reaches it. -->
+        <receiver
+            android:name=".widget.SurfaceRefreshReceiver"
+            android:exported="false" />
+
+        <!-- The Quick Settings tile "Take all" (SPEC-ANDROID 10.2), in active mode: drawn when Taken asks after a write, not
+             each time the panel opens (https://developer.android.com/develop/ui/views/quicksettings-tiles). Only the system
+             can bind it (BIND_QUICK_SETTINGS_TILE). -->
+        <service
+            android:name=".tile.TakeAllTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_taken"
+            android:label="@string/tile_take_all"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
+
+        <!-- The reminders (SPEC-ANDROID 10.4). The alarm and TAKE ALL receivers are not exported: only Taken's own
+             PendingIntents reach them. -->
+        <receiver
+            android:name=".notify.ReminderAlarmReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".notify.NudgeActionReceiver"
+            android:exported="false" />
+        <!-- Off until an alarm is armed, as Google's alarm guide does with its boot receiver; Taken enables it while any
+             reminder, or the widgets' and the tile's refresh, is armed and disables it when none is. Exported because the system sends these: "If this receiver
+             listens for broadcasts sent from the system ... set android:exported to "true""
+             (https://developer.android.com/develop/background-work/background-tasks/broadcasts). Anything else that sends
+             one only starts a rebuild, which changes nothing that is already right. -->
+        <receiver
+            android:name=".notify.RescheduleReceiver"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Profile > Data > Export CSV shares taken-log.csv through the Android Sharesheet
              (https://developer.android.com/training/sharing/send). -->

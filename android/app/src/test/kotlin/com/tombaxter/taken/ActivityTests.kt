@@ -60,6 +60,25 @@ class ActivityTests {
         }
     }
 
+    /**
+     * SPEC-ANDROID 6.1: the splash screen stays only until Taken has read its files, then MainActivity runs in Theme.Taken,
+     * whose window is Signal's canvas, not the splash screen's layers.
+     */
+    @Test
+    fun theSplashScreenHandsOverToTakensThemeOnceTheFilesAreRead() {
+        seed()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.awaitModel()
+            scenario.onActivity { activity ->
+                assertFalse(activity.keepsSplash, "the files are read: the splash screen goes")
+                val window = activity.theme.obtainStyledAttributes(intArrayOf(android.R.attr.windowBackground))
+                val background = window.getDrawable(0)
+                window.recycle()
+                assertEquals(0xFF08090A.toInt(), (background as android.graphics.drawable.ColorDrawable).color, "Theme.Taken's window")
+            }
+        }
+    }
+
     @Test
     fun aRotationKeepsEditModeSoARowStillOpensItsItem() {
         seed()
@@ -99,6 +118,28 @@ class ActivityTests {
             compose.waitForIdle()
             assertEquals(Route.Profile, model.backStack.last(), "Profile stays open")
             assertEquals(AppTab.HISTORY, model.tab, "the link does not bring Today forward again")
+        }
+    }
+
+    /** SPEC-ANDROID 15.3's link checks: `taken://todo` and `taken://todo/record` bring To-do to the front over Profile. */
+    @Test
+    fun toDoLinksBringToDoToTheFrontOverProfile() {
+        seed()
+        val link = Intent(Intent.ACTION_VIEW, Uri.parse("taken://todo"), app, MainActivity::class.java)
+        ActivityScenario.launch<MainActivity>(link).use { scenario ->
+            val model = scenario.awaitModel()
+            compose.waitForIdle()
+            assertEquals(AppTab.TODO, model.tab, "taken://todo opens the To-do tab")
+            compose.onNodeWithTag("mic").assertExists()
+
+            model.tab = AppTab.HISTORY
+            model.openProfile()
+            compose.waitForIdle()
+            scenario.onActivity { model.handle("taken://todo/record") }
+            compose.waitForIdle()
+            assertEquals(AppTab.TODO, model.tab, "taken://todo/record too")
+            assertEquals(listOf<Route>(Route.Main), model.backStack.toList(), "over Profile")
+            compose.onNodeWithTag("mic").assertExists()
         }
     }
 
