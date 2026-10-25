@@ -143,6 +143,13 @@ dependencies {
     implementation(libs.datastore)
     // Google Play Billing (SPEC-ANDROID 9). The library brings its own BILLING permission and Play services pieces.
     implementation(libs.billing.ktx)
+    constraints {
+        // Those Play services pieces bring Fragment 1.1.0; this raises it to the catalog's version without making
+        // Fragment a dependency of Taken's own (https://docs.gradle.org/current/userguide/dependency_constraints.html).
+        implementation("androidx.fragment:fragment:${libs.versions.fragment.get()}") {
+            because("the Activity Result API needs Fragment 1.3.0 or later wherever Fragment is present")
+        }
+    }
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)
