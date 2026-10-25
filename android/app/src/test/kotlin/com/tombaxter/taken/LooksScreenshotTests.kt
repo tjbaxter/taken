@@ -30,11 +30,13 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
+import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onRoot
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.style.TextAlign
@@ -281,10 +283,16 @@ class LooksScreenshotTests {
             compose.mainClock.autoAdvance = !veiled
             current = DemoScreens.make("today", look)
             if (veiled) {
+                // The new model reaches the recomposer before the held clock moves: the change is applied and the main
+                // looper idled (which, with the clock held, waits for no frame), then the first frame and 0.1 s run.
+                Snapshot.sendApplyNotifications()
+                compose.waitForIdle()
                 compose.mainClock.advanceTimeByFrame()
                 compose.mainClock.advanceTimeBy(100)
+                compose.onNodeWithTag("launch-veil").assertExists()
             } else {
                 compose.waitForIdle()
+                compose.onNodeWithTag("launch-veil").assertDoesNotExist()
             }
             captureScreenRoboImage("build/outputs/roborazzi/launch_${look.raw}.png")
         }
