@@ -76,8 +76,10 @@ class ScreenshotTests {
 
     private val looks = ThemeID.entries
 
-    /** Every CORE screen in every look: Today empty, pending, partly taken, all taken, in edit mode, with each quiet row,
-     * locked; Add and its type-ahead; the item sheet; Set time; History; the day sheet; Profile. */
+    /** Every screen in every look: Today empty, pending, partly taken, all taken, in edit mode, with each quiet row,
+     * locked; Add and its type-ahead; the item sheet; Set time; History; the day sheet; Profile; and the To-do tab (the
+     * list, listening, past 4:00, empty, the blockers, a note just saved, the undo bar, the edit and type sheets, the
+     * microphone's rationale). */
     @Test
     fun everyScreenInEveryLook() {
         start()
@@ -148,7 +150,7 @@ class ScreenshotTests {
     @Config(fontScale = 2f)
     fun largerText() {
         start()
-        for (screen in listOf("today", "today-edit", "item", "log", "add", "settings")) {
+        for (screen in listOf("today", "today-edit", "item", "log", "add", "settings", "todo", "todo-recording", "todo-edit")) {
             capture("${screen}_signal_font200", DemoScreens.make(screen))
         }
     }
@@ -157,7 +159,7 @@ class ScreenshotTests {
     @Config(qualifiers = SMALL_PHONE)
     fun smallPhone() {
         start()
-        for (screen in listOf("today", "today-edit", "add", "day")) {
+        for (screen in listOf("today", "today-edit", "add", "day", "todo", "todo-recording")) {
             capture("${screen}_signal_small", DemoScreens.make(screen))
         }
     }
@@ -166,7 +168,7 @@ class ScreenshotTests {
     @Config(qualifiers = TABLET)
     fun landscapeTablet() {
         start()
-        for (screen in listOf("today", "log", "settings")) {
+        for (screen in listOf("today", "log", "settings", "todo")) {
             capture("${screen}_signal_tablet", DemoScreens.make(screen))
         }
     }

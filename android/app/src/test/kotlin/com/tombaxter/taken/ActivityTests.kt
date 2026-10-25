@@ -102,6 +102,28 @@ class ActivityTests {
         }
     }
 
+    /** SPEC-ANDROID 15.3's link checks: `taken://todo` and `taken://todo/record` bring To-do to the front over Profile. */
+    @Test
+    fun toDoLinksBringToDoToTheFrontOverProfile() {
+        seed()
+        val link = Intent(Intent.ACTION_VIEW, Uri.parse("taken://todo"), app, MainActivity::class.java)
+        ActivityScenario.launch<MainActivity>(link).use { scenario ->
+            val model = scenario.awaitModel()
+            compose.waitForIdle()
+            assertEquals(AppTab.TODO, model.tab, "taken://todo opens the To-do tab")
+            compose.onNodeWithTag("mic").assertExists()
+
+            model.tab = AppTab.HISTORY
+            model.openProfile()
+            compose.waitForIdle()
+            scenario.onActivity { model.handle("taken://todo/record") }
+            compose.waitForIdle()
+            assertEquals(AppTab.TODO, model.tab, "taken://todo/record too")
+            assertEquals(listOf<Route>(Route.Main), model.backStack.toList(), "over Profile")
+            compose.onNodeWithTag("mic").assertExists()
+        }
+    }
+
     @Test
     fun aRelaunchFromRecentsCarriesNoLink() {
         val link = Intent(Intent.ACTION_VIEW, Uri.parse("taken://today"))
