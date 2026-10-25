@@ -4,6 +4,7 @@ import androidx.activity.ComponentActivity
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
+import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
@@ -72,7 +73,8 @@ class WeightScreenTests {
         compose.waitForIdle()
         compose.onNodeWithTag("weight-field").performTextReplacement("883")
         compose.waitForIdle()
-        compose.onNodeWithText(WeightCopy.rangeHint(model.weight.unit)).assertIsDisplayed()
+        // The small line is one TalkBack node with the hint's spoken words.
+        compose.onNodeWithTag("weight-line").assertContentDescriptionEquals(WeightCopy.spokenRangeHint(model.weight.unit))
         val before = model.weight.state.weighIns.size
         compose.onNodeWithTag("weigh-in").performClick()
         compose.waitForIdle()

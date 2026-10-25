@@ -114,7 +114,10 @@ class WeightTests {
         assertEquals("Weighed in", toast.message)
         assertNull(toast.time, "the value lives in the big number, not the toast")
         assertNotNull(toast.undo)
-        assertEquals("Weighed in, 88.35 kilograms.", toast.spoken, "TalkBack hears the weight")
+        assertEquals(
+            "Weighed in, ${com.tombaxter.taken.core.weight.WeightFormat.spoken(88.35, model.weight.unit, java.util.Locale.getDefault())}.",
+            toast.spoken, "TalkBack hears the weight, in the unit the page shows",
+        )
         val saved = model.weight.state.weighIns.first()
         assertEquals(saved.id, model.weight.justSaved)
         assertNotNull(model.weight.state.firstWeighInAt)
