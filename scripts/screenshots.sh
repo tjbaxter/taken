@@ -244,6 +244,17 @@ shoot 54-trial-ask trial-ask
 lands 54-trial-ask "ask=1"
 shoot 54-trial-ask-blush trial-ask blush
 lands 54-trial-ask-blush "ask=1"
+# Tap the row to log (Tom 2026-10-25; REDESIGN.md, "Tap the row to log"): Today in edit mode, with Done beside the Stack
+# title, a chevron where each row's ring was (a tap opens the item sheet) and Take all stepped aside, in Signal, in Blush
+# and at accessibility size 3; and Today logging at that size, where the whole row is the tap target. Every other
+# capture shows Today logging (edit=0).
+shoot 41-today-edit today-edit
+lands 41-today-edit "tab=today sheet=none edit=1"
+shoot 41-today-edit-blush today-edit blush
+lands 41-today-edit-blush "tab=today sheet=none edit=1"
+shoot 41-today-edit-ax3 today-edit signal standard "-type ax3"
+shoot 42-today-ax3 today signal standard "-type ax3"
+lands 42-today-ax3 "tab=today sheet=none edit=0"
 # The Weight tab (SPEC 3.12; REDESIGN.md, "Weight tab page: entry first"; in every build since 1.1, off by default). Screen
 # one: the grey last weigh-in with the caret in every look, typing (the number must not move, and the line must clear the
 # Weigh in bar), the range hint, never weighed in, weighed in today, locked, and pounds. Screen two: the first weigh-in's
@@ -350,9 +361,10 @@ link 67-link-weight-off settings "taken://weight" "tab=today sheet=none weight=0
 # "Weekly · Thu") and shows the Add sheet's chip grid; the neutral set has a "Weekly shot" row, no prescription-only
 # medicine, and the type-ahead with "mag" typed in place of the chip grid. The probe proves each launch took its stack,
 # and gives the day it shows, for the Lock Screen the composer draws. Every frame is the app as it installs: the Weight
-# tab, in every build since 1.1, is off (weight=0) and its one-time offer is not showing (offer=0).
+# tab, in every build since 1.1, is off (weight=0), its one-time offer is not showing (offer=0), and Today logs on a
+# tap, not in edit mode (edit=0).
 store_set() {
-  local set="$1" add="$2" default="weight=0 offer=0"
+  local set="$1" add="$2" default="weight=0 offer=0 edit=0"
   shoot "store/$set/01-today" today signal "$set"
   lands "store/$set/01-today" "tab=today sheet=none stack=$set $default"
   sed -n 's/^day=//p' "$(probe_file)" > "$out/store/$set/demo-date.txt"

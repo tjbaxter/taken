@@ -5,6 +5,7 @@ import Foundation
 /// Lines: `tab=today|todo|history|weight`, `sheet=<route or none>`, `paywall=0|1`, `todo=idle|starting|listening|sorting`,
 /// `ask=0|1` (the notification ask after a trial starts), `stack=standard|us|neutral` (`-demo-stack`),
 /// `day=YYYY-MM-DD`, the day being lived (the store sets' Thursday, which the drawn Lock Screen frame shows too),
+/// `edit=0|1` (Today's stack is in edit mode),
 /// `weight=0|1` (the Weight tab is on), `offer=0|1` (Today's one-time weight offer is showing),
 /// `goal=0|1` (a weight goal is set), `points=N` (the goal's lit points in the chart's range), `focus=0|1` (the big
 /// number is being typed into), `figure=empty|ghost|today|typing`, `line=last|range|closing|moment` (the small line
@@ -32,6 +33,7 @@ enum DemoProbe {
             "ask=\(model.trialAsk == nil ? 0 : 1)",
             "stack=\(model.demoStack.rawValue)",
             "day=\(String(format: "%04d-%02d-%02d", year, month, day))",
+            "edit=\(model.editingStack ? 1 : 0)",
         ] + weightLines(model)
         let url = FileManager.default.temporaryDirectory.appendingPathComponent(fileName)
         try? Data((lines.joined(separator: "\n") + "\n").utf8).write(to: url, options: .atomic)
