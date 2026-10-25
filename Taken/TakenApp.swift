@@ -42,6 +42,7 @@ struct TakenApp: App {
         }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { model.didBecomeActive() }
+            if phase == .background { model.didEnterBackground() }
         }
     }
 }
