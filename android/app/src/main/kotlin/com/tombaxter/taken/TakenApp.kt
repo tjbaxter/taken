@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tombaxter.taken.core.pro.PlayEntitlement
 import com.tombaxter.taken.core.pro.ProGate
 import com.tombaxter.taken.core.pro.ProLedger
 import com.tombaxter.taken.core.model.StackState
@@ -39,6 +40,7 @@ import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.merge
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeoutOrNull
 import java.io.IOException
 import java.time.Instant
 import java.time.ZoneId
@@ -111,6 +113,7 @@ class AppContainer(context: Context) {
         clock = { clock() },
         zone = { zone() },
         scope = scope,
+        recheckPro = { recheckProIfStale() },
         onArmed = { any ->
             surfacesArmed = any
             restartReceiverFollows()
@@ -173,10 +176,34 @@ class AppContainer(context: Context) {
     }
 
     /**
+     * Asks Google Play again when the cached answer is a subscription past its check horizon (`PlayEntitlement.needsCheck`),
+     * before the widgets, the tile or the nudge are worked out from it. On Android that horizon is not the end of the period
+     * paid for (SPEC-ANDROID 9.4): a cancelled plan is still returned by Play "until it expires", and access must not be
+     * removed while the person is still entitled to it (https://developer.android.com/google/play/billing/lifecycle/subscriptions).
+     * So an expired horizon means "ask Play", never "ended": the surfaces' refresh (their alarm at the horizon, a restart,
+     * every write) and every reminder rebuild (an alarm, a restart, a write) ask here first, inside the broadcast's time.
+     * `queryPurchasesAsync` needs no activity. A change of Pro runs [proChanged]; Play's answer is written to pro.json either
+     * way, which moves the horizon on. [Own choice: where the background recheck runs, and its 5 s bound, which keeps a
+     * rebuild well inside a broadcast's time.]
+     */
+    internal suspend fun recheckProIfStale() {
+        val status = pro.status ?: try {
+            stores.ledger.data.first().ledger?.status
+        } catch (e: IOException) {
+            return
+        }
+        if (!PlayEntitlement.needsCheck(status, clock())) return
+        val changed = withTimeoutOrNull(RECHECK_TIMEOUT_MS) { pro.refresh() } ?: false
+        if (changed) proChanged()
+    }
+
+    /**
      * What the reminders are planned from, read from the files. Pro's answer is the source's, or pro.json's cached one
-     * while the source has none yet (a receiver in a fresh process), as the iPhone's surfaces read the ledger.
+     * while the source has none yet (a receiver in a fresh process), as the iPhone's surfaces read the ledger; Play is asked
+     * first when that answer's horizon has passed ([recheckProIfStale]), so a nudge is never dropped on a guess.
      */
     private suspend fun reminderSnapshot(): ReminderSnapshot? = try {
+        recheckProIfStale()
         val stack = stores.stack.data.first()
         val tasks = stores.todos.data.first().tasks
         val ledger = stores.ledger.data.first().ledger
@@ -203,6 +230,11 @@ class AppContainer(context: Context) {
                 // a later nudge time on the same day could plan it again.
             }
         }
+
+    companion object {
+        /** How long a background recheck waits for Google Play before the cached answer stands. [Own choice] */
+        const val RECHECK_TIMEOUT_MS = 5_000L
+    }
 }
 
 /**

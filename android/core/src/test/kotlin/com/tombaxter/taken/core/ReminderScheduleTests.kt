@@ -247,6 +247,11 @@ class ReminderScheduleTests {
             "Taken nudges you at 20:00 if anything is still pending, and tells you when a to-do with a time is due. Nothing else.",
             ReminderCopy.askBody(20 * 60),
         )
+        assertEquals(
+            "Taken nudges you at 21:00 if anything is still pending, tells you when a to-do with a time is due, and reminds you once, 3 days before your trial ends. Nothing else.",
+            ReminderCopy.askBody(21 * 60, trialReminder = true),
+            "while the trial reminder can still come under the same permission, the explanation names it",
+        )
         assertEquals(listOf("Evening nudge", "Trial reminder", "To-do due times"), ReminderKind.entries.map { it.channelName })
         assertEquals(3, ReminderKind.entries.map { it.channelId }.toSet().size, "one channel each, so each can be silenced")
     }

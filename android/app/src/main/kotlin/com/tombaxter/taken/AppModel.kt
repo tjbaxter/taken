@@ -410,7 +410,9 @@ class AppModel(
                 settings = settings, hasStack = hasStack, today = today, repairDay = repairDay, locked = isLocked,
                 widgetPlaced = (widgetPlaced ?: true) || !canPinWidget, trialNotice = trialNotice,
                 // The Weight tab's one-time offer comes last, after every other row (SPEC 3.12).
-                weightOffer = WeightOffer.shows(weight.state, state, today, clock), nudgeAvailable = NUDGE_AVAILABLE,
+                // A launcher that cannot pin never shows the widget invite, so the offer does not wait for it.
+                weightOffer = WeightOffer.shows(weight.state, state, today, clock, inviteImpossible = !canPinWidget),
+                nudgeAvailable = NUDGE_AVAILABLE,
             )
         }
 
@@ -754,8 +756,14 @@ class AppModel(
         }
     }
 
-    /** Logs what was asked for, at the time it was asked for. */
+    /**
+     * Logs what was asked for, at the time it was asked for, on Today: the log's snackbar and its Undo are Today's, as
+     * the Take all shortcut's are, so a log kept from a widget, the tile or a nudge never happens unseen behind To-do,
+     * which has no snackbar of its own.
+     */
     private fun applyPending(pending: PendingLog) {
+        while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+        tab = AppTab.TODAY
         when (val action = pending.action) {
             ProPendingAction.TakeAll -> takeAll(pending.at)
             is ProPendingAction.Log -> logIfPending(action.itemId, pending.at)
@@ -1004,6 +1012,12 @@ class AppModel(
 
     /** The Trial reminder switch shows while a trial is on and set to renew, the only time the reminder can come. */
     val showsTrialReminderSwitch: Boolean get() = TrialReminder.isRenewingTrial(pro.status, now)
+
+    /**
+     * Taken Pro's trial reminder can still come as a notification under the permission being asked for: a renewing trial
+     * with Profile's switch on. Taken's explanation before Android's prompt then names it (`ReminderCopy.askBody`).
+     */
+    val trialReminderCanCome: Boolean get() = showsTrialReminderSwitch && settings.trialReminderEnabled
 
     // MARK: The trial ask (SPEC-ANDROID 10.4)
 

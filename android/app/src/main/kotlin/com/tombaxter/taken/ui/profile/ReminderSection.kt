@@ -111,7 +111,7 @@ private fun LockedNudgeRow(onClick: () -> Unit) {
  * permission" (https://developer.android.com/training/permissions/requesting). Continue shows Android's prompt.
  */
 @Composable
-fun NotificationRationale(notifications: NotificationsModel, nudgeMinutes: Int) {
+fun NotificationRationale(notifications: NotificationsModel, nudgeMinutes: Int, trialReminder: Boolean = false) {
     val colors = Taken.colors
     AlertDialog(
         onDismissRequest = { notifications.answerRationale(false) },
@@ -120,7 +120,7 @@ fun NotificationRationale(notifications: NotificationsModel, nudgeMinutes: Int) 
         textContentColor = colors.fgMuted,
         shape = RoundedCornerShape(Taken.shapes.card),
         title = { Text(ReminderCopy.ASK_TITLE, style = TakenType.sans(20, FontWeight.SemiBold)) },
-        text = { Text(ReminderCopy.askBody(nudgeMinutes), style = TakenType.sans(15)) },
+        text = { Text(ReminderCopy.askBody(nudgeMinutes, trialReminder), style = TakenType.sans(15)) },
         confirmButton = {
             TextButton(onClick = { notifications.answerRationale(true) }) {
                 Text(ReminderCopy.CONTINUE, style = TakenType.sans(16, FontWeight.SemiBold), color = colors.signalInk)

@@ -619,17 +619,28 @@ object WeightOffer {
     /** Semaglutide, Tirzepatide, Oral Semaglutide (Catalog codes; their brand names typed in full map to these). */
     val MEDICINE_CODES: Set<String> = setOf("SEM", "TRZ", "OSM")
 
-    fun shows(weight: WeightState, state: StackState, today: DaySummary, clock: DayClock): Boolean {
+    /**
+     * `inviteImpossible`: Android only. The launcher cannot pin a widget (`AppWidgetManager.isRequestPinAppWidgetSupported`
+     * is false), so Today never shows the widget invite there and nothing ever answers it; the offer then waits only for
+     * the first dose's day. Nothing is written, so a later launcher that can pin still gets the invite first.
+     */
+    fun shows(
+        weight: WeightState,
+        state: StackState,
+        today: DaySummary,
+        clock: DayClock,
+        inviteImpossible: Boolean = false,
+    ): Boolean {
         if (weight.showsTab != null || weight.offerAnswered || !today.allTaken) return false
         val medicines = state.items.filter { !it.archived && it.code.uppercase(Locale.ROOT) in MEDICINE_CODES }.map { it.id }.toSet()
         if (medicines.isEmpty() || state.doses.none { it.itemId in medicines }) return false
         val first = state.doses.minByOrNull { it.takenAt } ?: return false
         if (clock.day(first) >= today.day) return false
         // The widget invite has had its day: shown on an earlier day, or answered without showing (a Taken widget already
-        // there). Until then it comes first, and never on the same day as this.
+        // there), or it can never show on this phone. Until then it comes first, and never on the same day as this.
         val inviteDay = state.settings.widgetInviteDay
         if (inviteDay != null) return inviteDay < today.day.ordinal
-        return state.settings.widgetInviteDone
+        return state.settings.widgetInviteDone || inviteImpossible
     }
 }
 

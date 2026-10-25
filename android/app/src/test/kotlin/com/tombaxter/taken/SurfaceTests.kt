@@ -381,6 +381,34 @@ class SurfaceTests {
         assertNull(cannot.todayPrompt, "Android's launcher dialog is the only way Taken offers the widget")
     }
 
+    /**
+     * Semaglutide logged every day for a week and All taken today: the weight offer (SPEC 3.12) waits for the widget
+     * invite's day where the launcher can pin, and does not wait for an invite that can never show where it cannot.
+     */
+    @Test
+    fun testTheWeightOfferDoesNotWaitForAnInviteTheLauncherCannotShow() {
+        fun glp1Model(host: SurfaceHost): AppModel {
+            val today = at(2026, 10, 19, 9)
+            val shot = Item(name = "Semaglutide", code = "SEM", frequency = Frequency.Daily(1), createdAt = at(2026, 10, 12, 7), sortIndex = 0)
+            val state = StackState(items = listOf(shot))
+            state.settings.nudgeOfferDone = true
+            for (day in 12..19) state.logDose(shot.id, at(2026, 10, day, 8), london)
+            return AppModel(
+                MemoryPersistence(stack = state), state, ProLedger(firstSeenAt = at(2026, 10, 12, 7)), Profile(), null,
+                ProSource.untilBilling, clockNow = { today }, zone = { london }, locale = { Locale.US }, surfaceHost = host,
+            )
+        }
+        val cannot = glp1Model(RecordingHost(canPinWidget = false))
+        cannot.didBecomeActive()
+        assertTrue(cannot.today.allTaken)
+        assertEquals(TodayPrompt.WeightOffer, cannot.todayPrompt, "no invite can show, so the offer does not wait for one")
+        assertFalse(cannot.settings.widgetInviteDone, "nothing marks the invite answered, for a later launcher that can pin")
+
+        val can = glp1Model(RecordingHost(canPinWidget = true))
+        can.didBecomeActive()
+        assertEquals(TodayPrompt.WidgetInvite, can.todayPrompt, "a launcher that can pin: the widget invite has its day first")
+    }
+
     @Test
     fun testProfileOffersTheTileUntilItIsAdded() {
         val host = RecordingHost(offers = true)

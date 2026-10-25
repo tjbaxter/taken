@@ -256,8 +256,18 @@ object ReminderCopy {
      */
     const val ASK_TITLE = "Notifications for Taken"
 
-    fun askBody(minutes: Int): String =
-        "Taken nudges you at ${Fmt.minutes(minutes)} if anything is still pending, and tells you when a to-do with a time is due. Nothing else."
+    /**
+     * `trialReminder`: Taken Pro's one trial reminder can still come under the same permission (a renewing trial with
+     * Profile's Trial reminder switch on), so the explanation names it too and never promises less than Taken will send.
+     */
+    fun askBody(minutes: Int, trialReminder: Boolean = false): String {
+        val nudge = "Taken nudges you at ${Fmt.minutes(minutes)} if anything is still pending"
+        return if (trialReminder) {
+            "$nudge, tells you when a to-do with a time is due, and reminds you once, 3 days before your trial ends. Nothing else."
+        } else {
+            "$nudge, and tells you when a to-do with a time is due. Nothing else."
+        }
+    }
 
     const val CONTINUE = "Continue"
     const val NOT_NOW = "Not now"
@@ -275,7 +285,7 @@ object ReminderCopy {
     val all: List<String>
         get() = listOf(
             SECTION, NUDGE, TIME, NUDGE_TIME, TRIAL_REMINDER, FOOTNOTE, NUDGE_LOCKED, NOTIFICATIONS_OFF, NUDGE_CHANNEL_OFF, TAKE_ALL, OPEN,
-            ASK_TITLE, askBody(20 * 60), CONTINUE, NOT_NOW, nudgePublic(Reminders.body(listOf("VD3", "FSH"))), ReminderKind.NUDGE.channelName,
+            ASK_TITLE, askBody(20 * 60), askBody(20 * 60, trialReminder = true), CONTINUE, NOT_NOW, nudgePublic(Reminders.body(listOf("VD3", "FSH"))), ReminderKind.NUDGE.channelName,
             ReminderKind.NUDGE.channelDescription, ReminderKind.TRIAL.channelName, ReminderKind.TRIAL.channelDescription,
             ReminderKind.TODO.channelName, ReminderKind.TODO.channelDescription,
         )

@@ -332,6 +332,32 @@ class WeightTests {
         assertTrue(shows(answered), "a Taken widget already there answered the invite without a day")
     }
 
+    /**
+     * Android only: a launcher that cannot pin a widget never shows the widget invite, so nothing answers it. The offer
+     * then waits only for a later day than the first dose, and nothing is written for the invite.
+     */
+    @Test
+    fun testTheOfferDoesNotWaitForAnInviteThatCanNeverShow() {
+        val base = glp1Day()
+        val neverInvited = base.edited { settings.widgetInviteDay = null }
+        assertFalse(shows(neverInvited), "a launcher that can pin: the invite still comes first")
+        assertTrue(
+            WeightOffer.shows(WeightState(), neverInvited.state, neverInvited.summary, londonClock(), inviteImpossible = true),
+            "a launcher that cannot pin: the invite never shows, so the offer does not wait for it",
+        )
+        assertFalse(neverInvited.state.settings.widgetInviteDone, "the invite is not marked answered")
+        val firstDay = neverInvited.edited { doses = doses.filter { it.takenAt >= at(2026, 10, 22, 4) } }
+        assertFalse(
+            WeightOffer.shows(WeightState(), firstDay.state, firstDay.summary, londonClock(), inviteImpossible = true),
+            "still never on the first dose's day",
+        )
+        val inviteToday = base.edited { settings.widgetInviteDay = day(22).ordinal }
+        assertFalse(
+            WeightOffer.shows(WeightState(), inviteToday.state, inviteToday.summary, londonClock(), inviteImpossible = true),
+            "an invite shown today, before the launcher changed, still keeps the offer to a later day",
+        )
+    }
+
     /** After the trial notice, the nudge offer, the repair and the widget invite; never while locked. */
     @Test
     fun testTheOfferComesAfterEveryOtherRowAndNeverWhileLocked() {

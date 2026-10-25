@@ -71,6 +71,11 @@ class Surfaces(
     private val clock: () -> Instant,
     private val zone: () -> ZoneId,
     private val scope: CoroutineScope,
+    /**
+     * Asks Google Play again when the cached answer is a subscription past its check horizon, before anything is drawn
+     * locked (`AppContainer.recheckProIfStale`): on Android that horizon is not the end of the period paid for.
+     */
+    private val recheckPro: suspend () -> Unit = {},
     /** Whether anything is armed, so the restart receiver is enabled while a surface needs the alarm put back. */
     private val onArmed: (Boolean) -> Unit = {},
     private val dispatcher: CoroutineDispatcher = Dispatchers.IO,
@@ -107,7 +112,7 @@ class Surfaces(
      * Logging needs Taken Pro (PRO.md): Pro's answer is the source's, or pro.json's cached one while the source has none yet
      * (a widget in a fresh process), as the iPhone's surfaces read the ledger. This is how the surfaces are drawn; a tap
      * that logs goes through [com.tombaxter.taken.ProRecheck] in [SurfaceActions], which also asks Google Play once more
-     * when a renewing plan's cache ran out (the iPhone's `ProGate.mayLog`, SPEC-ANDROID 9.3).
+     * when a subscription's cached horizon ran out (the iPhone's `ProGate.mayLog`, SPEC-ANDROID 9.3 and 9.4).
      */
     fun locked(inputs: Inputs, now: Instant, source: ProSource = pro()): Boolean {
         val status = source.status ?: inputs.ledger?.status
@@ -158,6 +163,8 @@ class Surfaces(
             if (synchronized(lock) { finished >= ticket }) return@withContext
             val covers = synchronized(lock) { requested }
             try {
+                // An expired horizon means "ask Play", never "ended": the widget's redraw at cached Pro's end asks first.
+                recheckPro()
                 ticks.value = ticks.value + 1
                 redraw()
                 armNow()

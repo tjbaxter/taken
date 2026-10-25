@@ -254,7 +254,7 @@ enum class ProAccess {
 /** How far ahead the nudge may be scheduled. */
 sealed class NudgeWindow {
     data object Open : NudgeWindow()
-    /** A subscription set not to renew: nudges stop when it ends. */
+    /** A trial set not to renew: nudges stop when it ends (on Android the only subscription end the phone knows). */
     data class Until(val end: Instant) : NudgeWindow()
     /** Locked: no nudges. */
     data object Closed : NudgeWindow()
@@ -282,10 +282,20 @@ object ProGate {
         hasLogged = hasLogged(state, ledger), now = now,
     )
 
+    /**
+     * The nudge's window. Locked: closed. A trial set not to renew: until its end, which this phone recorded when the trial
+     * was bought, so it is real. Any other subscription stays open: on Android its `expiresAt` is only a check horizon
+     * (`PlayEntitlement.facts`), not the end of the period paid for, and "When a subscription is canceled, the user retains
+     * access to the content until the end of the current billing cycle"
+     * (https://developer.android.com/google/play/billing/lifecycle/subscriptions). Each rebuild asks Play again once that
+     * horizon has passed, before this is worked out, so a plan that really ended closes the window then.
+     */
     fun nudgeWindow(access: ProAccess, status: ProStatus?): NudgeWindow {
         if (!access.allowsLogging) return NudgeWindow.Closed
         val end = status?.activeUntil
-        if (access == ProAccess.PRO && status != null && status.willRenew == false && end != null) return NudgeWindow.Until(end)
+        if (access == ProAccess.PRO && status != null && status.reason == ProReason.TRIAL && status.willRenew == false && end != null) {
+            return NudgeWindow.Until(end)
+        }
         return NudgeWindow.Open
     }
 }

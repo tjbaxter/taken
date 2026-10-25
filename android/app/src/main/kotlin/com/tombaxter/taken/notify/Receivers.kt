@@ -155,8 +155,8 @@ object NudgeActions {
                 if (day != null) notifications.postNote(Reminders.STALE_IDENTIFIER, Reminders.staleBody(day), NudgeLink.url(day))
                 return TakeAllOutcome.Stale
             }
-            // The iPhone's `ProGate.mayLog`: Pro's answer, and for a renewing plan whose cache ran out, one more question to
-            // Google Play (`ProSource.refresh()`) inside this broadcast's time (SPEC-ANDROID 9.3).
+            // The iPhone's `ProGate.mayLog`: Pro's answer, and for a subscription whose cached horizon ran out, one more
+            // question to Google Play (`ProSource.refresh()`) inside this broadcast's time (SPEC-ANDROID 9.3 and 9.4).
             val allowed = ProRecheck.mayLog(pro, state, now, { stores.ledger.data.first().ledger }, container::proChanged)
             if (!allowed) {
                 stores.ledger.updateData { file -> LedgerFile(ProLedgers.recordPending(file.ledger, ProPendingAction.TakeAll, now)) }

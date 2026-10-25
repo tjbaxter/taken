@@ -152,6 +152,15 @@ class ProSeamTests {
 
     private fun renewed() = lapsed().copy(checkedAt = now, expiresAt = now.plus(Duration.ofDays(30)))
 
+    /**
+     * A yearly plan cancelled in Google Play inside the year paid for, as Android caches it: Play's last answer two days
+     * ago, held for 24 hours (`PlayEntitlement.ENDING_HORIZON`), so the cache has run out though the year has not.
+     */
+    private fun cancelledPastHorizon() = ProStatus(
+        isPro = true, reason = ProReason.YEARLY, checkedAt = now.minus(Duration.ofDays(2)),
+        expiresAt = now.minus(Duration.ofDays(1)), willRenew = false, plan = ProPlan.YEARLY,
+    )
+
     private fun ledger(status: ProStatus? = null) = ProLedger(
         status = status, firstSeenAt = at(2026, 10, 20, 9), firstDoseAt = at(2026, 10, 21, 9),
         prices = mapOf(ProPlan.YEARLY.productId to yearlyPrice),
@@ -338,7 +347,7 @@ class ProSeamTests {
     // MARK: The one recheck before a log from outside Taken is refused
 
     @Test
-    fun testTheRecheckAsksPlayOnlyForARenewalItHasNotSeen() {
+    fun testTheRecheckAsksPlayForAnySubscriptionPastItsHorizon() {
         val state = StackState(items = listOf(vd3)).also { it.logDose(vd3.id, at(2026, 10, 21, 9), london) }
         var changes = 0
         val renewing = FakePro(lapsed()) { it.current = renewed(); true }
@@ -354,9 +363,15 @@ class ProSeamTests {
         val none = FakePro(null)
         assertFalse(runBlocking { ProRecheck.mayLog(none, state, now, { ledger() }) })
         assertEquals(0, none.refreshes, "no Pro to renew: refused without asking, as on the iPhone")
-        val cancelled = FakePro(lapsed().copy(willRenew = false))
-        assertFalse(runBlocking { ProRecheck.mayLog(cancelled, state, now, { ledger() }) })
-        assertEquals(0, cancelled.refreshes, "a cancelled plan that ran out is not rechecked")
+
+        // Android: a cancelled plan's cached end is only a check horizon (24 hours after Play last answered), not the end of
+        // the year paid for. Play still returns the purchase until the period ends, so the log goes ahead.
+        val cancelled = FakePro(cancelledPastHorizon()) { it.current = cancelledPastHorizon().copy(checkedAt = now, expiresAt = now.plus(Duration.ofHours(24))); false }
+        assertTrue(runBlocking { ProRecheck.mayLog(cancelled, state, now, { ledger() }) }, "still inside the year paid for")
+        assertEquals(1, cancelled.refreshes, "one question to Play, never a refusal on a guess")
+        val cancelledEnded = FakePro(cancelledPastHorizon()) { it.current = ProStatus.notPro(now); true }
+        assertFalse(runBlocking { ProRecheck.mayLog(cancelledEnded, state, now, { ledger() }) }, "Play no longer returns it: the period ended")
+        assertEquals(1, cancelledEnded.refreshes)
 
         // A fresh process: the source has no answer yet, so pro.json's cached one is read, and rechecked.
         val fresh = FakePro(null) { it.current = renewed(); true }
@@ -408,6 +423,51 @@ class ProSeamTests {
         assertIs<TakeAllOutcome.Locked>(runBlocking { NudgeActions.takeAll(container, today, now, london, ended) })
         assertEquals(1, ended.refreshes, "refused only after the one recheck")
         assertEquals(ProPendingAction.TakeAll, storedLedger()?.pending?.action)
+    }
+
+    /**
+     * A cancelled yearly plan inside its paid year, with Taken not opened for two days: the nudge's rebuild asks Play once
+     * its 24-hour horizon has passed, and keeps the nudge while Play still returns the purchase. Only Play's own answer
+     * that it ended closes the nudge.
+     */
+    @Test
+    fun testARebuildPastTheHorizonAsksPlayAndKeepsTheNudgeWhilePlayStillReturnsThePlan() {
+        allowNotifications()
+        now = at(2026, 10, 28, 18)
+        val stillPaid = FakePro(cancelledPastHorizon()) {
+            it.current = cancelledPastHorizon().copy(checkedAt = now, expiresAt = now.plus(Duration.ofHours(24)))
+            false
+        }
+        container.pro = stillPaid
+        seed(nudge = true, status = cancelledPastHorizon(), takenToday = false)
+        rebuild()
+        assertTrue(stillPaid.refreshes >= 1, "Play asked before the nudge's window was worked out")
+        assertEquals(at(2026, 10, 28, 21).toEpochMilli(), alarm(ReminderKind.NUDGE)?.triggerAtMs, "tonight's nudge is planned")
+
+        val ended = FakePro(cancelledPastHorizon()) {
+            it.current = ProStatus.notPro(now)
+            true
+        }
+        container.pro = ended
+        rebuild()
+        assertTrue(ended.refreshes >= 1)
+        assertNull(alarm(ReminderKind.NUDGE), "Play says the plan ended: no nudge")
+    }
+
+    /** The widgets and the tile: their redraw at cached Pro's end asks Play first, and stays unlocked while Play says Pro. */
+    @Test
+    fun testTheSurfacesRedrawAtTheHorizonAsksPlayBeforeDrawingLocked() {
+        seed(status = cancelledPastHorizon(), takenToday = false)
+        val stillPaid = FakePro(cancelledPastHorizon()) {
+            it.current = cancelledPastHorizon().copy(checkedAt = now, expiresAt = now.plus(Duration.ofHours(24)))
+            false
+        }
+        container.pro = stillPaid
+        val inputs = runBlocking { container.surfaces.read() }
+        assertTrue(container.surfaces.locked(inputs, now, stillPaid), "the cache alone would draw LOCKED")
+        runBlocking { container.surfaces.refresh() }
+        assertEquals(1, stillPaid.refreshes, "the redraw asked Play first")
+        assertFalse(container.surfaces.locked(runBlocking { container.surfaces.read() }, now, stillPaid), "still Pro: drawn unlocked")
     }
 
     // MARK: The trial ask (Continue and Not now)
@@ -504,6 +564,20 @@ class ProSeamTests {
         val short = model(FakePro(trial().copy(expiresAt = now.plus(Duration.ofDays(2)))), Host())
         startTrial(short)
         assertEquals(TrialAsk.BODY_NUDGE_ONLY, short.trialAskBody, "a trial too short for the reminder asks for the nudge only")
+    }
+
+    /**
+     * Taken's explanation before Android's prompt names the trial reminder while it can come under that permission (a
+     * renewing trial, Profile's switch on), so "Nothing else" is never wrong.
+     */
+    @Test
+    fun testTheExplanationBeforeAndroidsPromptNamesTheTrialReminderWhileItCanCome() {
+        val renewing = model(FakePro(trial()), Host())
+        assertTrue(renewing.trialReminderCanCome)
+        renewing.setTrialReminder(false)
+        assertFalse(renewing.trialReminderCanCome, "Profile's Trial reminder switch off")
+        assertFalse(model(FakePro(trial(willRenew = false)), Host()).trialReminderCanCome, "a cancelled trial gets no reminder")
+        assertFalse(model(FakePro(lapsed()), Host()).trialReminderCanCome, "a paid plan gets no reminder")
     }
 
     // MARK: Today's notice while the reminder cannot come

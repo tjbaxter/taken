@@ -154,9 +154,14 @@ class ProGateTests {
         assertEquals(NudgeWindow.Closed, ProGate.nudgeWindow(ProAccess.LOCKED, notPro))
         assertEquals(NudgeWindow.Open, ProGate.nudgeWindow(ProAccess.PRO, pro), "a renewing plan keeps its nudges")
         assertEquals(NudgeWindow.Open, ProGate.nudgeWindow(ProAccess.FIRST_SESSION, null))
+        // Android: a paid plan's expiresAt is only a check horizon, not the end of the period paid for, so a cancelled
+        // plan keeps its nudges; the rebuild asks Play once the horizon has passed (SPEC-ANDROID 9.4).
         val cancelled = pro.copy(willRenew = false)
-        assertEquals(NudgeWindow.Until(at(2027, 10, 13, 9)), ProGate.nudgeWindow(ProAccess.PRO, cancelled))
-        assertEquals(NudgeWindow.Until(cancelled.activeUntil!!), ProGate.nudgeWindow(ProAccess.PRO, cancelled), "nudges stop when cached Pro does")
+        assertEquals(NudgeWindow.Open, ProGate.nudgeWindow(ProAccess.PRO, cancelled), "a cancelled paid plan is nudged until Play says it ended")
+        // A trial's end is recorded on this phone when it is bought: real, so its nudges stop then.
+        val cancelledTrial = cancelled.copy(reason = ProReason.TRIAL)
+        assertEquals(NudgeWindow.Until(at(2027, 10, 13, 9)), ProGate.nudgeWindow(ProAccess.PRO, cancelledTrial))
+        assertEquals(NudgeWindow.Until(cancelledTrial.activeUntil!!), ProGate.nudgeWindow(ProAccess.PRO, cancelledTrial), "nudges stop when a cancelled trial does")
         assertEquals(
             NudgeWindow.Open,
             ProGate.nudgeWindow(ProAccess.PRO, ProStatus(isPro = true, reason = ProReason.LIFETIME, checkedAt = now)),

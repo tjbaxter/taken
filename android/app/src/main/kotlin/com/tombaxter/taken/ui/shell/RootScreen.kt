@@ -208,7 +208,9 @@ fun TakenRoot(model: AppModel, platform: Platform) {
         // The one notification ask after a trial started, once nothing else holds the screen (SPEC-ANDROID 10.4).
         if (model.showsTrialAsk) TrialAskSheet(model)
         if (model.todo.askingMicrophone) MicrophoneRationale(model.todo)
-        if (model.notifications.asking) NotificationRationale(model.notifications, model.settings.reminderMinutes)
+        if (model.notifications.asking) {
+            NotificationRationale(model.notifications, model.settings.reminderMinutes, model.trialReminderCanCome)
+        }
     }
 }
 

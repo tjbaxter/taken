@@ -136,6 +136,33 @@ class PaywallTests {
         assertEquals(1, play.launches.size)
     }
 
+    /**
+     * A locked tile or widget opens Taken on To-do with the paywall (`taken://pro?then=take-all`). Once Pro is on, the
+     * kept Take all logs on Today, with its snackbar and Undo: To-do has no snackbar, so the log never happens unseen.
+     */
+    @Test
+    fun testAKeptTakeAllFromToDoLogsOnTodayWithItsSnackbar() {
+        val play = FakeBilling()
+        val model = open(play)
+        model.tab = AppTab.TODO
+        compose.waitForIdle()
+        model.handle("taken://pro?then=take-all")
+        compose.waitForIdle()
+        assertEquals(PaywallOrigin.LINK, model.paywall?.origin)
+
+        play.buys(now)
+        compose.onNodeWithTag("paywall-cta").performClick()
+        compose.waitForIdle()
+        compose.mainClock.advanceTimeBy(1_500)
+        compose.waitForIdle()
+        assertNull(model.paywall)
+        assertEquals(2, model.state.doses.size, "the kept Take all ran")
+        assertEquals(AppTab.TODAY, model.tab, "on Today, where its snackbar is")
+        assertEquals("1 taken at", model.toast?.message)
+        compose.onNodeWithTag("toast").assertIsDisplayed()
+        compose.onNodeWithTag("undo").assertIsDisplayed()
+    }
+
     @Test
     fun testTheCloseAlwaysWorksAndLogsNothing() {
         val model = open(FakeBilling())
