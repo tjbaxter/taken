@@ -106,8 +106,8 @@ final class AppModel {
     var toast: Toast?
     var expandedItemID: UUID?
     /// Today's stack is being edited (Edit beside the Stack title): a tap on a row opens its item sheet instead of
-    /// logging, and Take all steps aside. It ends on Done, on leaving Today, when Taken goes to the background and when
-    /// the stack empties (REDESIGN.md, "Tap the row to log").
+    /// logging, and Take all steps aside. It ends on Done, on leaving Today, when Taken goes to the background with no
+    /// sheet up and when the stack empties (REDESIGN.md, "Tap the row to log").
     private(set) var editingStack: Bool
     /// How many doses a tap on each Today row has logged, by item: the row's ring pops and the row washes each time its
     /// count goes up (`ItemRowView`), so the moment plays where the finger is and not for Take all, a widget or Siri.
@@ -919,9 +919,12 @@ final class AppModel {
         }
     }
 
-    /// Taken went to the background: the stack's edit mode ends, so the next open is a tap that logs again.
+    /// Taken went to the background: the stack's edit mode ends, so the next open is a tap that logs again. A sheet
+    /// still up over Today keeps it, so the mode never changes where it cannot be seen: closing an item sheet finds the
+    /// chevrons it left, and the next row opens as edit mode promised.
     func didEnterBackground() {
-        if editingStack { editingStack = false }
+        guard editingStack, sheet == nil else { return }
+        editingStack = false
     }
 
     // MARK: Taking

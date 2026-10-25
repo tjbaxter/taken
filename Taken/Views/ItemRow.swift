@@ -26,8 +26,11 @@ struct ItemRowView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.theme) private var theme
-    /// The logging moment: how many have played, the signal's wash over the row, and the ring lifted above its size.
+    /// The logging moment: how many a tap has asked for, how many have played, the signal's wash over the row, and the
+    /// ring lifted above its size. `.task` runs again each time Today comes back to the front, so only a moment not yet
+    /// played plays.
     @State private var moments = 0
+    @State private var played = 0
     @State private var washed = false
     @State private var lifted = false
 
@@ -123,7 +126,8 @@ struct ItemRowView: View {
     /// A tap just logged a dose here: the row washes in the look's signal and fades, and the ring lifts and settles on
     /// DoseRing's spring, with the haptic AppModel plays. Reduce Motion keeps the wash, a fade, and drops the lift.
     private func playMoment() async {
-        guard moments > 0 else { return }
+        guard moments > played else { return }
+        played = moments
         withAnimation(.easeOut(duration: 0.1)) {
             washed = true
             if !reduceMotion { lifted = true }
@@ -270,7 +274,7 @@ struct DoseRing: View {
 }
 
 /// The time and the ring on the right of a row. The ring gives a little while the row is held, like a button you can
-/// feel, and lifts when a tap logs.
+/// feel, and lifts when a tap logs. Reduce Motion keeps it still: the row's inset highlight shows the press.
 private struct RingSlot: View {
     let row: ItemDay
     let today: DayKey
@@ -279,6 +283,7 @@ private struct RingSlot: View {
     let locked: Bool
     let lifted: Bool
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.rowPressed) private var pressed
     @Environment(\.theme) private var theme
 
@@ -301,13 +306,14 @@ private struct RingSlot: View {
             }
             DoseRing(total: row.isDue ? row.dosesPerDay : 1, taken: row.takenCount, quiet: quiet,
                      locked: locked && (row.isPending || quiet))
-                .scaleEffect(pressed ? 0.9 : (lifted ? 1.12 : 1))
+                .scaleEffect(pressed && !reduceMotion ? 0.9 : (lifted ? 1.12 : 1))
                 .animation(.snappy(duration: 0.16), value: pressed)
         }
     }
 }
 
-/// The row's press: the flat inset highlight every row has, and the ring gives a little (`RingSlot`).
+/// The row's press: the flat inset highlight every row has, and the ring gives a little (`RingSlot`, not with Reduce
+/// Motion).
 private struct ItemRowPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         RowPressStyle().makeBody(configuration: configuration)
