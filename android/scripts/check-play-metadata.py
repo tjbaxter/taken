@@ -21,28 +21,35 @@ Google's limits and policies, as of October 2026:
 - Release notes "up to 500 Unicode characters per language":
   https://support.google.com/googleplay/android-developer/answer/9859348
 - Metadata policy: no emojis or ALL CAPS in the title, nothing that indicates price, promotion, store performance or a
-  Google Play program ("New", "Editor's choice"); no misleading, improperly formatted or repetitive metadata and no
-  unattributed testimonials: https://support.google.com/googleplay/android-developer/answer/9898842
+  Google Play program ("New", "Editor's choice"); the title and description "accurately describe your app's
+  functionality"; no misleading, improperly formatted or repetitive metadata and no unattributed testimonials:
+  https://support.google.com/googleplay/android-developer/answer/9898842
 - Store listing best practices: "Don't repeat your short description in your full description"; no "free", "discount",
-  "#1" or "Best" in the short description: https://support.google.com/googleplay/android-developer/answer/13393723
+  "#1" or "Best" in the short description; in app descriptions "your images and text should not indicate the price and
+  promotional information", so no price anywhere in the listing:
+  https://support.google.com/googleplay/android-developer/answer/13393723
 - Health Content and Services: an app that is not a regulated medical device states it is "not a medical device and
   does not diagnose, treat, cure, or prevent any medical condition" in its description, and reminds users "to consult a
   healthcare professional for medical advice, diagnosis, or treatment"; a privacy policy link in the store listing:
   https://support.google.com/googleplay/android-developer/answer/16679511 . Both sentences, as SPEC-ANDROID 14.2 words
   them, must be in the full description word for word.
-- Subscriptions: disclose "the cost of your subscription, the frequency of your billing cycle", "whether a subscription
-  is required to use the app", for a free trial its duration, "how and when a free trial will convert to a paid
-  subscription", "how much the paid subscription will cost" and how to cancel:
-  https://support.google.com/googleplay/android-developer/answer/9900533 . Prices are SPEC-ANDROID 9.1's.
+- Subscriptions: before enrollment, in the app ("in-app promotions, splash screens, and subscription plan selection
+  screens"), the cost, the billing period, "whether a subscription is required to use the app", a trial's length, "how
+  and when a free trial will convert to a paid subscription" and how to cancel; no wording is prescribed:
+  https://support.google.com/googleplay/android-developer/answer/9900533 . The paywall carries them with Play's prices
+  (SPEC-ANDROID 9.6); the listing names the plans, the trial and how it turns paid, renewal and cancelling, with no
+  price, the iPhone listing's form (REDESIGN.md, "Review fixes and the Weight tab in 1.1").
 
 The house rules (SPEC-ANDROID 6.4 and 14.2, REDESIGN.md "Extras policy, 2026-10-22", scripts/check-store-metadata.py
 for the iPhone): plain ASCII text plus the bullet, so no em or en dash and no emoji; no spaced hyphen standing in for a
-dash; no exclamation mark; never "free", even inside a word, except Play's own term "free trial", once, in the full
-description; no hype; Taken is its own brand; no Apple words (Taken for Android has no Siri, Lock Screen, Control
-Center or Action button); US spelling; no medicine name, brand or generic, from the catalog (the en-US listing is Play's
-default for every country, and the iPhone check holds every storefront to the same rule), and no "GLP-1", "jab" or
-"pen"; the extras (voice to-dos, the Weight tab) never in the title, the short description or the description's first
-lines; weight words only in the one Weight paragraph, in the second half of the description.
+dash; no exclamation mark; never "free", even inside a word (the trial is "7 days on us", as in PRO.md and the iPhone
+listing; Play's purchase sheet says the rest); no hype; Taken is its own brand; no Apple words (Taken for Android has no
+Siri, Lock Screen, Control Center or Action button); US spelling; no medicine name, brand or generic, from the catalog
+(the en-US listing is Play's default for every country, and the iPhone check holds every storefront to the same rule),
+and no "GLP-1", "jab" or "pen"; no feature Android 1.0 does not show ("Keep as one" waits for an on-device model,
+SPEC-ANDROID 11); the extras never in the title, the short description or the description's first lines, voice to-dos
+as the last feature paragraph, right before Taken Pro, and the Weight tab never named at all (REDESIGN.md, "Weight tab
+in 1.1, 2026-10-23": "never in the name, subtitle, keywords, description, promotional text or screenshots").
 Exits 1 with every problem listed; prints each field's count against its limit.
 """
 import re
@@ -68,28 +75,29 @@ DISCLAIMERS = [
     "Always consult a healthcare professional for medical advice, diagnosis, or treatment.",
 ]
 PRIVACY_URL = "https://tjbaxter.github.io/taken/privacy.html"
-ALLOWED_URLS = {PRIVACY_URL, "https://tjbaxter.github.io/taken/"}
+# Taken's own terms for Google Play (docs/terms.html); Apple's standard EULA does not apply there (SPEC-ANDROID 19.9).
+TERMS_URL = "https://tjbaxter.github.io/taken/terms.html"
+ALLOWED_URLS = {PRIVACY_URL, TERMS_URL, "https://tjbaxter.github.io/taken/"}
 CONTACT_EMAIL = "tjpb2@cantab.ac.uk"
 
-# Taken Pro (SPEC-ANDROID 9.1 and 9.2) and the Subscriptions policy's disclosures (answer/9900533). Each phrase must be
-# in the full description's Taken Pro paragraph, and no price may appear anywhere else.
+# Taken Pro (SPEC-ANDROID 9.1 and 9.2) and the Subscriptions policy's terms (answer/9900533). Each phrase must be in
+# the full description's Taken Pro paragraph. No price anywhere (best practices, answer/13393723): Play's en-US listing
+# shows in every country, and the paywall and Play's purchase sheet show the price in the buyer's currency.
 PRO_HEADING = "Taken Pro"
 PRO_PHRASES = {
-    "US$19.99 a year": "the yearly price and billing period",
-    "US$3.99 a month": "the monthly price and billing period",
-    "US$49.99": "the lifetime price",
-    "one payment": "that the lifetime is one payment",
-    "7-day free trial": "the trial's length",
-    "When the 7 days are up, Google Play charges US$19.99": "when and at what price the trial turns into a paid plan",
+    "a yearly plan": "the yearly plan",
+    "a monthly plan": "the monthly plan",
+    "one payment for good": "that the lifetime is one payment",
+    "7 days on us": "the trial's length",
+    "New subscribers": "who the trial is for",
+    "When the 7 days are up, Google Play charges the yearly price": "when the trial turns into the paid yearly plan",
     "unless you cancel before the trial ends": "how to avoid the charge",
     "renew automatically until you cancel": "that the subscriptions renew",
     "Cancel anytime in Google Play": "how to cancel",
     "first dose": "whether a subscription is needed to use the app",
-    "in your currency": "that prices are shown in US dollars and Play shows the local price",
+    "in your currency": "that Google Play shows the price before the purchase",
 }
-PRICE = re.compile(r"(?:US)?[$£€¥]\s?\d|\d+[.,]\d\d\s?(?:usd|gbp|eur)\b", re.I)
-# An annual plan shown most prominently as a monthly cost is a Subscriptions policy violation (answer/9900533).
-MONTHLY_EQUIVALENT = re.compile(r"1[.,]67|per month.*yearly|a month.*yearly", re.I)
+PRICE = re.compile(r"(?:US)?[$£€¥]\s?\d|\d+[.,]\d\d\s?(?:usd|gbp|eur)\b|\b(?:usd|us dollars?)\b", re.I)
 
 # Apple's surfaces and brands. "Home Screen" is Apple's capitalization; Android says "home screen".
 APPLE_WORDS = [r"(?i)\bsiri\b", r"(?i)\biphone", r"(?i)\bipad", r"(?i)\bios\b", r"(?i)\bicloud", r"(?i)app store",
@@ -112,8 +120,11 @@ BANNED_WORDS = [r"glp-?1", r"jabs?", r"pens?"]
 WEIGHT_STEMS = [r"weigh\w*", r"slim\w*", r"fat(?:s|ty|ter|test|ten\w*)?", r"diet\w*", r"calor\w*", r"obes\w*",
                 r"los(?:e|es|er|ers|ing|s|t)", r"pounds?", r"lbs?", r"kgs?", r"kilo\w*", r"bmi", r"waist\w*",
                 r"bell(?:y|ies)", r"trim\w*", r"burn\w*"]
-WEIGHT_HEADING = "Weight, if you want it"
 TODO_WORDS = [r"to-?dos?", r"voice\w*", r"mic\b", r"speech", r"notes?"]
+TODO_HEADING = "Voice to-dos"
+# Built but not shown on Android 1.0: Keep as one is offered only after a model split a note, and 1.0 has no model
+# (SPEC-ANDROID 11; TodoExtraction.kt, keepable needs TodoSorting.MODEL). Remove a phrase here once it ships.
+NOT_IN_1_0 = [r"keep as one"]
 # The chips that are medicines, as in the iPhone check; every other chip is a supplement.
 CHIP_MEDICINES = ["Melatonin", "Finasteride", "Minoxidil", "Birth Control", "Metformin", "Semaglutide", "Tirzepatide"]
 UK_SPELLINGS = [r"colour", r"favourite", r"organis", r"personalis", r"customis", r"recognis", r"centre", r"licence",
@@ -200,7 +211,7 @@ def search_all(patterns, text):
             yield hit.group(0)
 
 
-def copy_rules(where, text, free_trial_ok=False):
+def copy_rules(where, text):
     # Plain ASCII and the bullet: no em or en dash, no curly quotes, no emoji or other symbol.
     odd = sorted({c for c in text if not (c == "\n" or " " <= c <= "~" or c == "•")})
     if odd:
@@ -209,13 +220,12 @@ def copy_rules(where, text, free_trial_ok=False):
         problem(where, "a spaced hyphen stands in for a dash")
     if "!" in text:
         problem(where, "contains an exclamation mark")
-    rest = text
-    if free_trial_ok:
-        if len(re.findall(r"(?i)\bfree trial\b", text)) > 1:
-            problem(where, 'says "free trial" more than once')
-        rest = re.sub(r"(?i)\bfree trial\b", "", text, count=1)
-    if re.search(r"(?i)free", rest):
-        problem(where, 'contains "free" (only Play\'s "free trial", once, in the full description)')
+    if re.search(r"(?i)free", text):
+        problem(where, 'contains "free" (the trial is "7 days on us")')
+    for phrase in NOT_IN_1_0:
+        hit = re.search(rf"(?i){phrase}", text)
+        if hit:
+            problem(where, f'promises "{hit.group(0)}", which Android 1.0 does not show')
     for hit in search_all(APPLE_WORDS, text):
         problem(where, f'names an Apple surface or brand: "{hit}"')
     for hit in search_all(OTHER_BRANDS, text):
@@ -298,30 +308,16 @@ for locale in LOCALES:
 
     # Full description.
     where = f"{locale}/full_description"
-    copy_rules(where, full, free_trial_ok=True)
+    copy_rules(where, full)
     paragraphs = full.split("\n\n")
-    starts = []
-    offset = 0
-    for paragraph in paragraphs:
-        starts.append(offset)
-        offset += len(paragraph) + 2
 
     # The opening lines Play shows first sell the log, never an extra.
     for paragraph in paragraphs[:3]:
         check_extras_out(f"{where} (first three paragraphs)", paragraph)
 
-    # Weight words only in the Weight paragraph, which starts in the second half.
-    weight_at = [i for i, p in enumerate(paragraphs) if p.split("\n", 1)[0] == WEIGHT_HEADING]
-    for i, paragraph in enumerate(paragraphs):
-        if i in weight_at:
-            continue
-        for hit in words_in(WEIGHT_STEMS, paragraph):
-            problem(where, f'weight word "{hit}" outside the "{WEIGHT_HEADING}" paragraph')
-    if len(weight_at) > 1:
-        problem(where, f'more than one "{WEIGHT_HEADING}" paragraph')
-    for i in weight_at:
-        if starts[i] < len(full) / 2:
-            problem(where, f'the "{WEIGHT_HEADING}" paragraph starts in the first half; extras are listed last')
+    # The Weight tab is never in the description, as on the iPhone.
+    for hit in words_in(WEIGHT_STEMS, full):
+        problem(where, f'weight word "{hit}"; the Weight tab stays out of the listing')
 
     # Not the short description again.
     if short and short.lower() in full.lower():
@@ -337,9 +333,14 @@ for locale in LOCALES:
             problem(where, f'lacks the health disclaimer sentence "{sentence}"')
     if PRIVACY_URL not in full:
         problem(where, f"lacks the privacy policy link {PRIVACY_URL}")
+    if TERMS_URL not in full:
+        problem(where, f"lacks the Terms of Use link {TERMS_URL}")
+    if PRICE.search(full):
+        problem(where, f'shows a price: "{PRICE.search(full).group(0)}"')
 
-    # Taken Pro's terms (Subscriptions policy), and prices only there.
+    # Taken Pro's terms (Subscriptions policy), and voice to-dos as the last feature, right before it.
     pro_at = [i for i, p in enumerate(paragraphs) if p.split("\n", 1)[0] == PRO_HEADING]
+    todo_at = [i for i, p in enumerate(paragraphs) if p.split("\n", 1)[0] == TODO_HEADING]
     if len(pro_at) != 1:
         problem(where, f'needs exactly one paragraph headed "{PRO_HEADING}", found {len(pro_at)}')
     else:
@@ -347,13 +348,12 @@ for locale in LOCALES:
         for phrase, why in PRO_PHRASES.items():
             if phrase not in pro:
                 problem(where, f'Taken Pro paragraph lacks "{phrase}" ({why})')
-        if MONTHLY_EQUIVALENT.search(pro):
-            problem(where, "shows the yearly plan as a monthly cost")
-        if not re.search(r"(?i)\bfree trial\b", pro):
-            problem(where, 'the "free trial" term belongs in the Taken Pro paragraph')
-        for i, paragraph in enumerate(paragraphs):
-            if i != pro_at[0] and PRICE.search(paragraph):
-                problem(where, f'a price outside the Taken Pro paragraph: "{PRICE.search(paragraph).group(0)}"')
+        if len(todo_at) > 1:
+            problem(where, f'more than one "{TODO_HEADING}" paragraph')
+        for i in todo_at:
+            if i != pro_at[0] - 1:
+                problem(where, f'the "{TODO_HEADING}" paragraph must come right before "{PRO_HEADING}"; extras are '
+                               "listed last")
 
     # Release notes.
     changelogs = sorted((folder / "changelogs").glob("*")) if (folder / "changelogs").is_dir() else []
