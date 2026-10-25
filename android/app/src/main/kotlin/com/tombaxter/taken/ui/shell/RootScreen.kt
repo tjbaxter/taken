@@ -81,6 +81,7 @@ import com.tombaxter.taken.Route
 import com.tombaxter.taken.Sheet
 import com.tombaxter.taken.Toast
 import com.tombaxter.taken.core.pro.ProCopy
+import com.tombaxter.taken.core.todo.TodoCapture
 import com.tombaxter.taken.ui.add.AddSheet
 import com.tombaxter.taken.ui.components.Announcement
 import com.tombaxter.taken.ui.components.AvatarImage
@@ -98,9 +99,17 @@ import com.tombaxter.taken.ui.theme.TakenTheme
 import com.tombaxter.taken.ui.theme.TakenType
 import com.tombaxter.taken.ui.today.TakeAllButton
 import com.tombaxter.taken.ui.today.TodayScreen
+import com.tombaxter.taken.ui.todo.MicrophoneRationale
+import com.tombaxter.taken.ui.todo.TodoEditSheet
+import com.tombaxter.taken.ui.todo.TodoScreen
+import com.tombaxter.taken.ui.todo.TodoTypeSheet
+import com.tombaxter.taken.voice.VoiceHost
 
-/** What the screen needs from Android beyond the model: TalkBack's state, sharing a file, picking a photo. */
-interface Platform {
+/**
+ * What the screen needs from Android beyond the model: TalkBack's state, sharing a file, picking a photo, and the
+ * microphone for voice to-dos ([VoiceHost]).
+ */
+interface Platform : VoiceHost {
     /** TalkBack is on: the toast stays until it is dismissed, as VoiceOver keeps it on the iPhone. */
     val touchExploration: Boolean
     /** Shares taken-log.csv; `make` builds its text, off the main thread. */
@@ -111,7 +120,7 @@ interface Platform {
 
     companion object {
         /** For tests and captures: nothing leaves the screen. */
-        val none: Platform = object : Platform {
+        val none: Platform = object : Platform, VoiceHost by VoiceHost.none {
             override val touchExploration = false
             override fun shareCsv(make: () -> String) = Unit
             override fun pickPhoto() = Unit
@@ -139,6 +148,19 @@ fun TakenRoot(model: AppModel, platform: Platform) {
             }
             onDispose { model.onEffect = {} }
         }
+        // The microphone for voice to-dos comes from the activity on screen.
+        DisposableEffect(model, platform) {
+            model.todo.host = platform
+            onDispose { model.todo.host = VoiceHost.none }
+        }
+        // The screen stays on only while a note is starting or being heard, so a five-minute note is never cut short by
+        // the screen timeout: the view's keepScreenOn is FLAG_KEEP_SCREEN_ON, cleared the moment listening ends
+        // (https://developer.android.com/develop/background-work/background-tasks/awake/screen-on).
+        val keepOn = TodoCapture.keepsScreenOn(model.todo.phase, model.todo.isDemo)
+        DisposableEffect(keepOn, view) {
+            view.keepScreenOn = keepOn
+            onDispose { view.keepScreenOn = false }
+        }
         Box(Modifier.fillMaxSize().background(Taken.colors.bg)) {
             NavDisplay(
                 backStack = model.backStack,
@@ -155,6 +177,7 @@ fun TakenRoot(model: AppModel, platform: Platform) {
         }
         SheetsHost(model)
         PaywallHost(model)
+        if (model.todo.askingMicrophone) MicrophoneRationale(model.todo)
     }
 }
 
@@ -165,7 +188,8 @@ fun TakenRoot(model: AppModel, platform: Platform) {
 @Composable
 fun MainShell(model: AppModel, platform: Platform) {
     val colors = Taken.colors
-    BackHandler(enabled = model.editingStack || model.tab != AppTab.TODAY) { model.backOnTabs() }
+    val listening = model.todo.phase == TodoCapture.Phase.LISTENING
+    BackHandler(enabled = model.editingStack || listening || model.tab != AppTab.TODAY) { model.backOnTabs() }
     BoxWithConstraints(Modifier.fillMaxSize().background(colors.bg)) {
         val wide = maxWidth >= 600.dp
         if (wide) {
@@ -217,11 +241,14 @@ fun MainShell(model: AppModel, platform: Platform) {
 
 private fun tabTitle(tab: AppTab): String = when (tab) {
     AppTab.TODAY -> "Today"
+    AppTab.TODO -> "To-do"
     AppTab.HISTORY -> "History"
 }
 
 private fun tabIcon(tab: AppTab, selected: Boolean) = when (tab) {
     AppTab.TODAY -> if (selected) Symbols.PillFill else Symbols.Pill
+    // Material Symbols' checklist has one form, filled or not.
+    AppTab.TODO -> Symbols.Checklist
     AppTab.HISTORY -> if (selected) Symbols.CalendarMonthFill else Symbols.CalendarMonth
 }
 
@@ -245,6 +272,7 @@ private fun TabContent(model: AppModel, platform: Platform, wide: Boolean) {
                     TakeAllButton(model)
                 }
             }
+            AppTab.TODO -> TodoScreen(model, platform)
             AppTab.HISTORY -> Column(Modifier.fillMaxSize()) {
                 Box(Modifier.weight(1f)) { HistoryScreen(model) }
                 ToastHost(model, platform)
@@ -300,6 +328,8 @@ private fun SheetsHost(model: AppModel) {
         is Sheet.Day -> DaySheet(model, sheet.day) { model.sheet = null }
         is Sheet.SetTime -> SetTimeSheet(model, sheet.itemId) { model.sheet = null }
         is Sheet.EditItem -> ItemSheet(model, sheet.itemId) { model.sheet = null }
+        is Sheet.TodoEdit -> TodoEditSheet(model, sheet.taskId) { model.sheet = null }
+        Sheet.TodoType -> TodoTypeSheet(model) { model.sheet = null }
     }
 }
 

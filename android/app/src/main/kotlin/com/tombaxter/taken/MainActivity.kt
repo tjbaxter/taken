@@ -1,5 +1,6 @@
 package com.tombaxter.taken
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ContentResolver
 import android.content.Intent
@@ -10,6 +11,7 @@ import android.graphics.Color
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.provider.Settings
 import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -23,6 +25,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -30,6 +33,9 @@ import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.repeatOnLifecycle
 import com.tombaxter.taken.ui.shell.Platform
 import com.tombaxter.taken.ui.shell.TakenRoot
+import com.tombaxter.taken.voice.OnDeviceSpeechCapture
+import com.tombaxter.taken.voice.VoiceCapture
+import com.tombaxter.taken.voice.VoiceHost
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -56,6 +62,15 @@ class MainActivity : ComponentActivity(), Platform {
             val jpeg = withContext(Dispatchers.Default) { ProfilePhotos.prepare(contentResolver, uri) } ?: return@launch
             viewModel.model?.setProfilePhoto(jpeg)
         }
+    }
+
+    /**
+     * RECORD_AUDIO, asked in context at the first mic tap (SPEC-ANDROID 11,
+     * https://developer.android.com/training/permissions/requesting). Registered here, before the activity starts, so the
+     * answer reaches the To-do tab after a rotation too.
+     */
+    private val microphonePermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
+        viewModel.model?.todo?.microphoneAnswered(granted)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -160,6 +175,32 @@ class MainActivity : ComponentActivity(), Platform {
             // No browser on this phone: nothing to open.
         }
     }
+
+    // MARK: VoiceHost
+
+    override val microphoneGranted: Boolean
+        get() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED
+
+    override val microphoneRationaleDue: Boolean
+        get() = shouldShowRequestPermissionRationale(Manifest.permission.RECORD_AUDIO)
+
+    override fun requestMicrophone() {
+        microphonePermission.launch(Manifest.permission.RECORD_AUDIO)
+    }
+
+    /** The app's details page, where the microphone is turned back on (SPEC-ANDROID 6.3). */
+    override fun openAppSettings() {
+        val details = Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+        try {
+            startActivity(details)
+        } catch (e: ActivityNotFoundException) {
+            // No Settings app to open: the blocker still offers typing.
+        }
+    }
+
+    /** Android 12 and later hear on the phone; below that there is no on-device recognizer to ask (SPEC-ANDROID 11). */
+    override fun newVoiceCapture(): VoiceCapture =
+        if (Build.VERSION.SDK_INT >= 31) OnDeviceSpeechCapture(this) else VoiceHost.none.newVoiceCapture()
 
     override val versionName: String
         get() = try {

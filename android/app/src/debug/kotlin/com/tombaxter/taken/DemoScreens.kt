@@ -9,11 +9,17 @@ import com.tombaxter.taken.core.pro.ProLedger
 import com.tombaxter.taken.core.profile.Profile
 import com.tombaxter.taken.core.retention.TodayPrompt
 import com.tombaxter.taken.core.theme.ThemeID
+import com.tombaxter.taken.core.demo.TodoDemo
+import com.tombaxter.taken.core.todo.TodoCopy
+import com.tombaxter.taken.core.todo.TodoState
+import com.tombaxter.taken.core.todo.TodoValidation
 import com.tombaxter.taken.data.MemoryPersistence
+import com.tombaxter.taken.data.MemoryTodoPersistence
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
 import java.util.Locale
+import java.util.UUID
 
 /**
  * Debug builds only (never in release, SPEC-ANDROID 4): the demo screens CI draws for Tom, named as the iPhone's
@@ -34,7 +40,35 @@ object DemoScreens {
     val screens = listOf(
         "empty", "today", "today-pending", "today-done", "today-edit", "today-nudge-offer", "today-repair", "locked",
         "add", "add-search", "item", "set-time", "log", "day", "settings",
+        // The To-do tab (SPEC-ANDROID 11): the list, listening, past 4:00, empty, the blockers, a note just saved as
+        // said, the undo bar, the edit and type sheets, and the microphone's rationale.
+        "todo", "todo-recording", "todo-cap", "todo-empty", "todo-blocker", "todo-unavailable", "todo-saved",
+        "todo-deleted", "todo-edit", "todo-type", "todo-mic-ask",
     )
+
+    /**
+     * The to-dos a screen shows: TodoDemo's one list (a time tonight, a day this week, two done today, and what the
+     * recording's ramble became), empty for `todo-empty`. `todo-saved` adds the ramble as Android saves it: as said, one
+     * line per sentence. `todo-deleted` has "Send Mum the photos" swiped away.
+     */
+    private fun todos(screen: String, now: Instant): TodoState {
+        val recording = screen == "todo-recording" || screen == "todo-cap" || screen == "todo-saved"
+        val state = when (screen) {
+            "todo-empty" -> TodoState()
+            else -> TodoDemo.state(now, recording = recording, zone = zone)
+        }
+        if (screen == "todo-saved") {
+            var counter = 0L
+            state.add(TodoValidation.lines(TodoDemo.TRANSCRIPT), noteId = UUID(0x7A4E_0000_0000_4000L, 0x0BADL), at = now.minusSeconds(4)) {
+                counter += 1
+                UUID(0x7A4E_0000_0000_4000L, 0x0C00L + counter)
+            }
+        }
+        if (screen == "todo-deleted") state.tasks = state.tasks.filter { it.title != DELETED_TITLE }
+        return state
+    }
+
+    private const val DELETED_TITLE = "Send Mum the photos"
 
     fun make(screen: String, look: ThemeID = ThemeID.SIGNAL, stack: DemoStack = DemoStack.STANDARD): AppModel {
         val pending = screen == "today-pending"
@@ -60,6 +94,10 @@ object DemoScreens {
             "today-repair" -> TodayPrompt.Repair(com.tombaxter.taken.core.day.DayClock(state.settings.dayStartHour, zone).day(now).adding(-1))
             else -> null
         }
+        val todoState = todos(screen, now)
+        val todo = TodoModel(
+            MemoryTodoPersistence(todoState), todoState, clockNow = { now }, zone = { zone }, locale = { Locale.US }, isDemo = true,
+        )
         val model = AppModel(
             persistence = persistence,
             initialState = state,
@@ -71,9 +109,14 @@ object DemoScreens {
             zone = { zone },
             locale = { Locale.US },
             isDemo = true,
-            launchTab = if (screen == "log" || screen == "day") AppTab.HISTORY else AppTab.TODAY,
+            launchTab = when {
+                screen == "log" || screen == "day" -> AppTab.HISTORY
+                screen.startsWith("todo") -> AppTab.TODO
+                else -> AppTab.TODAY
+            },
             launchEditing = screen == "today-edit",
             demoPrompt = prompt,
+            todoModel = todo,
         )
         when (screen) {
             "add" -> {
@@ -91,6 +134,22 @@ object DemoScreens {
             "set-time" -> model.state.items.firstOrNull { it.name == "Magnesium" }?.let { model.sheet = Sheet.SetTime(it.id) }
             "day" -> model.sheet = Sheet.Day(DemoData.sheetDay(now, zone))
             "settings" -> model.openProfile()
+            "todo-recording" -> todo.showDemoRecording(lastMinute = false)
+            "todo-cap" -> todo.showDemoRecording(lastMinute = true)
+            "todo-blocker" -> todo.stageDemo(blocker = TodoModel.Blocker.MICROPHONE)
+            "todo-unavailable" -> todo.stageDemo(blocker = TodoModel.Blocker.UNAVAILABLE)
+            "todo-saved" -> {
+                val note = todoState.tasks.filter { it.noteId == UUID(0x7A4E_0000_0000_4000L, 0x0BADL) }
+                todo.stageArrived(note.map { it.id }.toSet())
+                todo.stageDemo(notice = TodoCopy.ALL_UNSORTED)
+            }
+            "todo-deleted" -> {
+                val gone = TodoDemo.state(now, recording = false, zone = zone).tasks.first { it.title == DELETED_TITLE }
+                todo.stageDemo(deleted = gone)
+            }
+            "todo-edit" -> todoState.tasks.firstOrNull { it.title == "Take the bins out" }?.let { model.sheet = Sheet.TodoEdit(it.id) }
+            "todo-type" -> model.sheet = Sheet.TodoType
+            "todo-mic-ask" -> todo.stageDemo(askingMicrophone = true)
         }
         return model
     }

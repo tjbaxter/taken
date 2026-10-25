@@ -11,7 +11,9 @@ import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tombaxter.taken.core.pro.ProLedger
+import com.tombaxter.taken.core.todo.TodoNotificationScheduler
 import com.tombaxter.taken.data.DataStorePersistence
+import com.tombaxter.taken.data.DataStoreTodoPersistence
 import com.tombaxter.taken.data.TakenStores
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -34,14 +36,22 @@ class TakenApp : Application() {
 
 /**
  * Taken's few objects, by hand (SPEC-ANDROID 3.1: no DI framework for a graph this small,
- * https://developer.android.com/training/dependency-injection/manual): the stores, the persistence over them, and Taken
- * Pro's answer (until Google Play Billing, NEXT 2).
+ * https://developer.android.com/training/dependency-injection/manual): the stores, the persistence over them, Taken
+ * Pro's answer (until Google Play Billing, NEXT 2), and the to-dos' due-time notifications.
  */
 class AppContainer(context: Context) {
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val stores = TakenStores(context)
     val persistence = DataStorePersistence(stores, scope)
+    val todoPersistence = DataStoreTodoPersistence(stores, scope)
     val pro: ProSource = ProSource.untilBilling
+
+    /**
+     * Where the To-do tab hands its tasks after every change and every return to the front (SPEC-ANDROID 10.4). The
+     * Reminders step (NEXT 3) replaces this with one that posts on the "To-do due times" channel through one inexact
+     * alarm for the soonest of `TodoNotifications.plan`; until then nothing is posted.
+     */
+    val todoNotifications: TodoNotificationScheduler = TodoNotificationScheduler.none
 }
 
 /**
@@ -61,7 +71,18 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 container.persistence.updateLedger { it ?: fresh }
             }
             val profile = stores.profile.data.first()
+            val todos = stores.todos.data.first()
             val photo = withContext(Dispatchers.IO) { com.tombaxter.taken.data.PhotoFile.read(stores.photoFile) }
+            val clockNow = { Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS) }
+            // The To-do tab's model lives in the app's scope, not this ViewModel's: a note being saved when the activity
+            // finishes (back, a swipe home) still reaches its file.
+            val todo = TodoModel(
+                persistence = container.todoPersistence,
+                initialState = todos,
+                clockNow = clockNow,
+                notifications = container.todoNotifications,
+                scope = container.scope,
+            )
             val loaded = AppModel(
                 persistence = container.persistence,
                 initialState = state,
@@ -69,11 +90,13 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 initialProfile = profile,
                 initialPhoto = photo,
                 pro = container.pro,
-                clockNow = { Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS) },
+                clockNow = clockNow,
+                todoModel = todo,
             )
             model = loaded
             launch { stores.stack.data.collect { loaded.adopt(it) } }
             launch { stores.ledger.data.collect { file -> file.ledger?.let(loaded::adoptLedger) } }
+            launch { stores.todos.data.collect { todo.adopt(it) } }
         }
     }
 

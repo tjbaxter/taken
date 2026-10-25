@@ -47,6 +47,10 @@ import com.tombaxter.taken.core.stack.setDoseTime
 import com.tombaxter.taken.core.stack.takeAllPending
 import com.tombaxter.taken.core.stack.updateItem
 import com.tombaxter.taken.core.theme.ThemeID
+import com.tombaxter.taken.core.todo.TodoCapture
+import com.tombaxter.taken.core.todo.TodoCaptureRoute
+import com.tombaxter.taken.core.todo.TodoState
+import com.tombaxter.taken.data.MemoryTodoPersistence
 import com.tombaxter.taken.data.Persistence
 import java.time.Instant
 import java.time.ZoneId
@@ -54,8 +58,11 @@ import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
 
-/** The tabs (SPEC-ANDROID 6.2). To-do and Weight join with their phases (NEXT 5 and 6). */
-enum class AppTab { TODAY, HISTORY }
+/**
+ * The tabs (SPEC-ANDROID 6.2), in the iPhone's order: Today, To-do, History. Weight joins last with its phase (NEXT 6),
+ * only while it is on.
+ */
+enum class AppTab { TODAY, TODO, HISTORY }
 
 /** One sheet at a time, presented from the root, so one place can close it. */
 sealed interface Sheet {
@@ -63,6 +70,12 @@ sealed interface Sheet {
     data class Day(val day: DayKey) : Sheet
     data class SetTime(val itemId: UUID) : Sheet
     data class EditItem(val itemId: UUID) : Sheet
+
+    /** A to-do's words and when it is due (SPEC 3.10). */
+    data class TodoEdit(val taskId: UUID) : Sheet
+
+    /** Typing instead of talking: the same save onto the one list. */
+    data object TodoType : Sheet
 }
 
 /** Navigation 3's back stack: the tabs, then Profile, then an item opened from Profile's Stack list. */
@@ -156,7 +169,14 @@ class AppModel(
     launchTab: AppTab = AppTab.TODAY,
     launchEditing: Boolean = false,
     demoPrompt: TodayPrompt? = null,
+    /** The To-do tab's model (todos.json); tests and screens without one get an empty list in memory. */
+    todoModel: TodoModel? = null,
 ) {
+    /** The To-do tab: the one list, the mic and its sheets. */
+    val todo: TodoModel = todoModel ?: TodoModel(
+        MemoryTodoPersistence(), TodoState(), clockNow = clockNow, zone = zone, locale = locale, isDemo = isDemo,
+    )
+
     var state: StackState by mutableStateOf(initialState)
         private set
     var ledger: ProLedger? by mutableStateOf(initialLedger)
@@ -184,11 +204,12 @@ class AppModel(
 
     private var frontTab: AppTab by mutableStateOf(launchTab)
 
-    /** The tab in front. Leaving Today ends its edit mode. */
+    /** The tab in front. Leaving Today ends its edit mode; leaving To-do takes Keep as one away. */
     var tab: AppTab
         get() = frontTab
         set(value) {
             if (value != AppTab.TODAY && editingStack) editingStack = false
+            if (frontTab == AppTab.TODO && value != AppTab.TODO) todo.dismissKeepOffer()
             frontTab = value
         }
 
@@ -238,6 +259,7 @@ class AppModel(
 
     init {
         recomputeStats()
+        todo.attach(this)
     }
 
     // MARK: Derived
@@ -319,11 +341,13 @@ class AppModel(
     /** Taken came to the front (`ON_START`): rebuild, since the time zone or the day may have changed while away. */
     fun didBecomeActive() {
         apply(state)
+        todo.didBecomeActive()
     }
 
     /** Taken went to the background (`ON_STOP`): the stack's edit mode ends, so the next open is a tap that logs again. */
     fun didEnterBackground() {
         if (editingStack) editingStack = false
+        todo.didEnterBackground()
     }
 
     /** The file changed under the screen (a later surface wrote it). Adopted only when no write of ours is on its way. */
@@ -344,6 +368,8 @@ class AppModel(
         recomputeStats()
         // The last item archived or deleted: Today shows first run, with nothing left to edit.
         if (editingStack && !hasStack) editingStack = false
+        // The To-do tab follows the wake-up time and the haptics switch.
+        todo.refresh()
     }
 
     private fun recomputeStats() {
@@ -386,9 +412,18 @@ class AppModel(
 
     // MARK: Tabs and routes
 
-    /** A `taken://` link (SPEC-ANDROID 10.3): today closes whatever is open; pro opens the paywall. */
+    /**
+     * A `taken://` link (SPEC-ANDROID 10.3): today closes whatever is open; todo brings To-do to the front, and
+     * todo/record starts listening there; pro opens the paywall.
+     */
     fun handle(url: String) {
         if (!url.startsWith("taken://")) return
+        val todoRoute = TodoCaptureRoute.route(url)
+        if (todoRoute != null) {
+            openTodoTab()
+            if (todoRoute == TodoCaptureRoute.Route.RECORD) todo.requestRecording()
+            return
+        }
         val route = ProRoute.parse(url)
         if (route == null) {
             sheet = null
@@ -400,6 +435,20 @@ class AppModel(
         }
         if (!access.allowsLogging) presentPaywall(PaywallOrigin.LINK)
     }
+
+    /**
+     * A voice to-do request closes any sheet and Profile and brings To-do to the front (the iPhone's
+     * `AppModel.openTodoTab`); a recording it asked for starts once the tab is uncovered.
+     */
+    fun openTodoTab() {
+        sheet = null
+        while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+        tab = AppTab.TODO
+    }
+
+    /** To-do is in front with nothing over it: Listening and the stop button are on screen when the mic opens. */
+    val showsTodoTabUncovered: Boolean
+        get() = tab == AppTab.TODO && sheet == null && paywall == null && backStack.size == 1 && !todo.askingMicrophone
 
     /** The avatar: Profile, as a full screen with Up and back (SPEC-ANDROID 6.3). */
     fun openProfile() {
@@ -416,12 +465,17 @@ class AppModel(
     }
 
     /**
-     * System back on the tabs, in the spec's order (SPEC-ANDROID 6.2): edit mode ends, then History returns to Today.
-     * False when back should leave the app (Today is the start destination).
+     * System back on the tabs, in the spec's order (SPEC-ANDROID 6.2): edit mode ends, then listening stops (keeping the
+     * words, as a tap on the mic would), then To-do or History returns to Today. False when back should leave the app
+     * (Today is the start destination).
      */
     fun backOnTabs(): Boolean {
         if (editingStack) {
             setEditingStack(false)
+            return true
+        }
+        if (todo.phase == TodoCapture.Phase.LISTENING) {
+            todo.micTapped()
             return true
         }
         if (tab != AppTab.TODAY) {
@@ -681,11 +735,12 @@ class AppModel(
     }
 
     /**
-     * Erase all data: the stack, every dose, the settings, the profile and any unreadable copy set aside. The look stays,
-     * and so does pro.json.
+     * Erase all data: the stack, every dose, the settings, the to-dos, the profile and any unreadable copy set aside. The
+     * look stays, and so do pro.json and the to-dos' first note on the house.
      */
     fun eraseAll() {
         write { it.eraseAll() }
+        todo.eraseAll()
         persistence.eraseExtras()
         profile = Profile()
         photo = null
