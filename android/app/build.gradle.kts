@@ -105,6 +105,8 @@ dependencies {
     implementation(libs.navigation3.runtime)
     implementation(libs.navigation3.ui)
     implementation(libs.datastore)
+    // Google Play Billing (SPEC-ANDROID 9). The library brings its own BILLING permission and Play services pieces.
+    implementation(libs.billing.ktx)
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

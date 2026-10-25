@@ -10,6 +10,7 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
+import com.tombaxter.taken.billing.PlayBilling
 import com.tombaxter.taken.core.pro.ProLedger
 import com.tombaxter.taken.data.DataStorePersistence
 import com.tombaxter.taken.data.TakenStores
@@ -34,13 +35,15 @@ class TakenApp : Application() {
 
 /**
  * Taken's few objects, by hand (SPEC-ANDROID 3.1: no DI framework for a graph this small,
- * https://developer.android.com/training/dependency-injection/manual): the stores, the persistence over them, and Taken
- * Pro's answer (until Google Play Billing, NEXT 2).
+ * https://developer.android.com/training/dependency-injection/manual): the stores, the persistence over them, the one
+ * Google Play Billing client (SPEC-ANDROID 9.3; it connects and asks nothing yet), and Taken Pro's answer, which stays
+ * [ProSource.untilBilling] until NEXT 2 reads Play's purchases.
  */
 class AppContainer(context: Context) {
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val stores = TakenStores(context)
     val persistence = DataStorePersistence(stores, scope)
+    val billing = PlayBilling(context)
     val pro: ProSource = ProSource.untilBilling
 }
 

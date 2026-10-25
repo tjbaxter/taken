@@ -111,9 +111,10 @@ enum class PaywallOrigin { INTRO, ACTION, BAR, SETTINGS, LINK }
 class PaywallRequest(val origin: PaywallOrigin, val pending: (() -> Unit)?)
 
 /**
- * Where Taken Pro's answer comes from. Google Play Billing arrives with NEXT 2 (SPEC-ANDROID 17); until then the app
- * uses [ProSource.untilBilling], so a CORE build never locks anyone out, and tests use a locked source to drive locked
- * mode through the real gate.
+ * Where Taken Pro's answer comes from. The Billing client is in the app from NEXT 1 but asks Play nothing yet; Play's
+ * purchases reach the gate with NEXT 2 (SPEC-ANDROID 17). Until then the app uses [ProSource.untilBilling], so no build
+ * locks anyone out before Taken Pro can be bought, and tests use a locked source to drive locked mode through the real
+ * gate.
  */
 interface ProSource {
     val status: ProStatus?

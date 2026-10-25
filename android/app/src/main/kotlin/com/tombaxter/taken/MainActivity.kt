@@ -104,6 +104,13 @@ class MainActivity : ComponentActivity(), Platform {
         }
     }
 
+    override fun onStart() {
+        super.onStart()
+        // Google: connect the BillingClient "when your app is launched or comes to the foreground"
+        // (https://developer.android.com/google/play/billing/integrate). It asks Play for nothing yet (NEXT 1).
+        (application as TakenApp).container.billing.connect()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         pendingLink?.let { outState.putString(PENDING_LINK, it) }
