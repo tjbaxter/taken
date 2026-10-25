@@ -11,6 +11,7 @@ import androidx.compose.ui.test.DeviceConfigurationOverride
 import androidx.compose.ui.test.WindowInsets
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
+import androidx.compose.ui.test.onNodeWithContentDescription
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.onNodeWithText
 import androidx.compose.ui.test.performClick
@@ -144,7 +145,7 @@ class ScreenshotTests {
 
     /**
      * Profile's Reminder section in every look (SPEC-ANDROID 10.4), scrolled to it: the nudge on with its time, the
-     * Settings link once notifications are off, the nudge's own channel off, and locked.
+     * Settings link once notifications are off, the nudge's own channel off, and locked; and the nudge time's dialog.
      */
     @Test
     fun reminderSettings() {
@@ -154,6 +155,11 @@ class ScreenshotTests {
                 capture("${screen}_${look.raw}", DemoScreens.make(screen, look)) {
                     compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE).performScrollTo()
                 }
+            }
+            // The nudge time's 24-hour dialog, "Set 20:00".
+            capture("nudge-time_${look.raw}", DemoScreens.make("settings-reminder", look)) {
+                compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE).performScrollTo()
+                compose.onNodeWithContentDescription("Nudge time, 20:00").performClick()
             }
         }
     }

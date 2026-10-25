@@ -45,6 +45,7 @@ data class Reminder(
  * Where the trial reminder plugs in. Taken Pro (NEXT 2, SPEC-ANDROID 9.7) owns its rules (`TrialReminder.plan`, the mark
  * in pro.json); Reminders owns its delivery: the "Trial reminder" channel and its alarm. Until the integrator plugs the
  * Pro lane's plan in here, [none] plans nothing and the trial reminder's words stay on Today (`trialReminderDeliverable`).
+ * The scheduler calls it off the main thread, one rebuild at a time.
  */
 interface TrialReminderSlot {
     /** The trial reminder that should exist with its moment after `at` (a [Reminder] of kind TRIAL, tag [TAG]), or null. */
