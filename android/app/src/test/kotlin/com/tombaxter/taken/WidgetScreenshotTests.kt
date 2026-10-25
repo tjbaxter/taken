@@ -188,18 +188,23 @@ class WidgetScreenshotTests {
             setBackgroundColor(WALLPAPER)
         }
         val inflater = LayoutInflater.from(activity)
-        for ((layout, size) in listOf(R.layout.widget_preview_stack to WidgetSizes.MEDIUM, R.layout.widget_preview_todo to WidgetSizes.TALL)) {
+        val previews = listOf("stack" to (R.layout.widget_preview_stack to WidgetSizes.MEDIUM), "todo" to (R.layout.widget_preview_todo to WidgetSizes.TALL))
+        val views = previews.map { (name, layoutAndSize) ->
+            val (layout, size) = layoutAndSize
             val view = inflater.inflate(layout, column, false)
             column.addView(
                 view,
                 LinearLayout.LayoutParams(activity.px(size.width.value), activity.px(size.height.value)).apply { bottomMargin = gap },
             )
+            name to view
         }
         val frame = FrameLayout(activity)
         frame.addView(column, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
         activity.setContentView(frame)
         shadowOf(Looper.getMainLooper()).idle()
         column.captureRoboImage("build/outputs/roborazzi/widgets-picker.png")
+        // Each alone, as res/drawable-nodpi's `previewImage` for Android 9 to 11 is made from it.
+        for ((name, view) in views) view.captureRoboImage("build/outputs/roborazzi/widget-preview-$name.png")
     }
 
     companion object {
