@@ -60,6 +60,25 @@ class ActivityTests {
         }
     }
 
+    /**
+     * SPEC-ANDROID 6.1: the splash screen stays only until Taken has read its files, then MainActivity runs in Theme.Taken,
+     * whose window is Signal's canvas, not the splash screen's layers.
+     */
+    @Test
+    fun theSplashScreenHandsOverToTakensThemeOnceTheFilesAreRead() {
+        seed()
+        ActivityScenario.launch(MainActivity::class.java).use { scenario ->
+            scenario.awaitModel()
+            scenario.onActivity { activity ->
+                assertFalse(activity.keepsSplash, "the files are read: the splash screen goes")
+                val window = activity.theme.obtainStyledAttributes(intArrayOf(android.R.attr.windowBackground))
+                val background = window.getDrawable(0)
+                window.recycle()
+                assertEquals(0xFF08090A.toInt(), (background as android.graphics.drawable.ColorDrawable).color, "Theme.Taken's window")
+            }
+        }
+    }
+
     @Test
     fun aRotationKeepsEditModeSoARowStillOpensItsItem() {
         seed()

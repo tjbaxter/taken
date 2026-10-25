@@ -10,6 +10,7 @@ import android.view.LayoutInflater
 import android.view.View
 import android.widget.FrameLayout
 import android.widget.LinearLayout
+import android.widget.RemoteViews
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.unit.DpSize
 import androidx.glance.appwidget.ExperimentalGlanceRemoteViewsApi
@@ -23,12 +24,15 @@ import com.tombaxter.taken.core.model.StackState
 import com.tombaxter.taken.core.stack.WidgetSnapshot
 import com.tombaxter.taken.core.stack.logDose
 import com.tombaxter.taken.core.surfaces.StackWidgetFace
+import com.tombaxter.taken.core.surfaces.TakenWidgetKind
 import com.tombaxter.taken.core.surfaces.TodoWidgetFace
+import com.tombaxter.taken.core.surfaces.WidgetFallbackFace
 import com.tombaxter.taken.core.theme.Looks
 import com.tombaxter.taken.core.theme.ThemeID
 import com.tombaxter.taken.core.todo.TodoState
 import com.tombaxter.taken.widget.StackWidgetContent
 import com.tombaxter.taken.widget.TodoWidgetContent
+import com.tombaxter.taken.widget.WidgetFallback
 import com.tombaxter.taken.widget.WidgetSizes
 import kotlinx.coroutines.runBlocking
 import org.junit.Test
@@ -54,6 +58,7 @@ import java.util.Locale
  * - `widgets_signal_font200`: the 4x2 and 2x2 widgets at 200% text.
  * - `widgets-picker`: the picker's preview layouts for Android 12 to 14 (Android 15 and later generate theirs from the
  *   same compositions as `widgets_<look>`).
+ * - `widget-loading` and `widget-fallback_<look>`: before the first drawing, and a widget Android could not draw (NEXT 7).
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -73,7 +78,12 @@ class WidgetScreenshotTests {
         }
     }
 
-    private class Placed(val size: DpSize, val content: @Composable () -> Unit)
+    /** A widget on the board: its size and what the launcher is handed for it. */
+    private class Placed(val size: DpSize, val views: (Context) -> RemoteViews)
+
+    /** A Glance composition, turned into RemoteViews as the launcher receives them. */
+    private fun glance(size: DpSize, content: @Composable () -> Unit) =
+        Placed(size) { context -> runBlocking { GlanceRemoteViews().compose(context, size, content = content).remoteViews } }
 
     /** Draws rows of widgets on a plain wallpaper and saves the board. */
     private fun board(name: String, rows: List<List<Placed>>) {
@@ -87,7 +97,7 @@ class WidgetScreenshotTests {
         for (row in rows) {
             val line = LinearLayout(activity).apply { orientation = LinearLayout.HORIZONTAL }
             for ((index, placed) in row.withIndex()) {
-                val remote = runBlocking { GlanceRemoteViews().compose(activity, placed.size, content = placed.content).remoteViews }
+                val remote = placed.views(activity)
                 val host = HostView(activity)
                 val params = LinearLayout.LayoutParams(activity.px(placed.size.width.value), activity.px(placed.size.height.value))
                 if (index > 0) params.marginStart = gap
@@ -107,12 +117,12 @@ class WidgetScreenshotTests {
     }
 
     private fun stackWidget(size: DpSize, state: StackState, look: ThemeID, locked: Boolean = false, at: java.time.Instant = now) =
-        Placed(size) {
+        glance(size) {
             StackWidgetContent(StackWidgetFace(WidgetSnapshot(state, at, zone, locked), Locale.US), Looks.look(look))
         }
 
     private fun todoWidget(size: DpSize, todos: TodoState, look: ThemeID, at: java.time.Instant = now) =
-        Placed(size) {
+        glance(size) {
             TodoWidgetContent(TodoWidgetFace(todos, at, DayClock(DemoData.settings.dayStartHour, zone), Locale.US), Looks.look(look))
         }
 
@@ -175,6 +185,32 @@ class WidgetScreenshotTests {
                 listOf(stackWidget(WidgetSizes.SMALL, state, ThemeID.SIGNAL), todoWidget(WidgetSizes.SMALL, todos, ThemeID.SIGNAL)),
             ),
         )
+    }
+
+    /**
+     * NEXT 7: what the launcher shows before a widget's first drawing (`widget-loading`: Taken's canvas and capsule, not
+     * Glance's spinner), and a widget Android could not draw (`widget-fallback_<look>`: Taken's card in every look, the
+     * stack widget's at 4x2 and 2x1, the to-do widget's at 2x2).
+     */
+    @Test
+    fun theLoadingAndFallbackCards() {
+        fun loading(size: DpSize) = Placed(size) { context: Context -> RemoteViews(context.packageName, R.layout.widget_loading) }
+        board(
+            "widget-loading",
+            listOf(listOf(loading(WidgetSizes.MEDIUM)), listOf(loading(WidgetSizes.TALL), loading(WidgetSizes.SMALL))),
+        )
+        for (look in ThemeID.entries) {
+            fun fallback(size: DpSize, kind: String) = Placed(size) { context: Context ->
+                WidgetFallback.remoteViews(context, WidgetFallbackFace.of(kind), Looks.look(look), 1)
+            }
+            board(
+                "widget-fallback_${look.raw}",
+                listOf(
+                    listOf(fallback(WidgetSizes.MEDIUM, TakenWidgetKind.STACK)),
+                    listOf(fallback(WidgetSizes.TALL, TakenWidgetKind.TODO), fallback(WidgetSizes.SMALL, TakenWidgetKind.STACK)),
+                ),
+            )
+        }
     }
 
     /** The widget picker's previews on Android 12 to 14: the preview layouts, at the widgets' default sizes. */
