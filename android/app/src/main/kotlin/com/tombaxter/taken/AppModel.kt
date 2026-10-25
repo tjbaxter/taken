@@ -200,6 +200,8 @@ class AppModel(
      * Take all steps aside. It ends on the check, on leaving Today, when Taken goes to the background, when the stack
      * empties, and on system back (SPEC-ANDROID 7.2).
      */
+    // The private setter takes another JVM name so it does not clash with setEditingStack below.
+    @set:JvmName("assignEditingStack")
     var editingStack: Boolean by mutableStateOf(launchEditing)
         private set
 
