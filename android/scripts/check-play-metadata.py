@@ -50,10 +50,26 @@ and no "GLP-1", "jab" or "pen"; no feature Android 1.0 does not show ("Keep as o
 SPEC-ANDROID 11); the extras never in the title, the short description or the description's first lines, voice to-dos
 as the last feature paragraph, right before Taken Pro, and the Weight tab never named at all (REDESIGN.md, "Weight tab
 in 1.1, 2026-10-23": "never in the name, subtitle, keywords, description, promotional text or screenshots").
+
+The graphics in images/ (SPEC-ANDROID 14.2), from "Add preview assets to showcase your app"
+(https://support.google.com/googleplay/android-developer/answer/9866151, read 25 Oct 2026), each read from the file's
+own header with the standard library:
+- Phone screenshots: "JPEG or 24-bit PNG (no alpha)", "Minimum dimension: 320px", "Maximum dimension: 3840px", "The
+  maximum dimension of your screenshot can't be more than twice as long as the minimum dimension", "up to 8
+  screenshots"; for promotion "at least four screenshots with minimum 1080px resolution" in 9:16 portrait. So 4 to 8,
+  named 1.png to n.png in the order Play shows them, each 9:16 and at least 1080 x 1920 (Tom's brief, 25 Oct 2026).
+- Feature graphic: "JPEG or 24-bit PNG (no alpha)", "1024px by 500px".
+- App icon: "32-bit PNG (with alpha)", "512px by 512px", "Maximum file size: 1024KB"; it must be
+  android/store-assets/icon-512.png byte for byte, the file brand/icon.py draws and checks.
+With --rendered DIR (the screenshots job), every phone screenshot must also be byte for byte the frame the app draws now
+(app/src/test/.../PlayStoreScreenshotTests.kt writes them to DIR), so the listing never shows an older app.
 Exits 1 with every problem listed; prints each field's count against its limit.
 """
+import argparse
 import re
+import struct
 import sys
+import zlib
 from pathlib import Path
 
 ANDROID = Path(__file__).resolve().parent.parent
@@ -68,6 +84,14 @@ IMAGE_NAMES = {"featureGraphic", "icon", "promoGraphic", "tvBanner"}
 SCREENSHOT_FOLDERS = {"phoneScreenshots", "sevenInchScreenshots", "tenInchScreenshots", "tvScreenshots",
                       "wearScreenshots"}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg"}
+# Google's sizes (answer/9866151) and the set Tom asked for: 4 to 8 phone screenshots at 9:16, 1080 x 1920 or larger.
+SCREENSHOTS_MIN, SCREENSHOTS_MAX = 4, 8
+SCREENSHOT_MIN_SIDE, SCREENSHOT_MAX_SIDE, PROMOTION_MIN_SIDE = 320, 3840, 1080
+FEATURE_SIZE = (1024, 500)
+ICON_SIZE = (512, 512)
+ICON_MAX_BYTES = 1024 * 1024
+PLAY_ICON = ANDROID / "store-assets" / "icon-512.png"
+PNG_SIGNATURE = b"\x89PNG\r\n\x1a\n"
 
 # Health Content and Services (answer/16679511), in SPEC-ANDROID 14.2's words.
 DISCLAIMERS = [
@@ -134,6 +158,11 @@ UK_SPELLINGS = [r"colour", r"favourite", r"organis", r"personalis", r"customis",
 ALLOWED_CAPS = {"CSV"}
 
 problems = []
+
+arguments = argparse.ArgumentParser(description="Checks the Google Play listing in android/store/play.")
+arguments.add_argument("--rendered", type=Path, help="the phone screenshots the app draws now "
+                       "(app/build/outputs/roborazzi/play/phoneScreenshots); each committed one must match it byte for byte")
+ARGS = arguments.parse_args()
 
 
 def problem(where, text):
@@ -269,6 +298,156 @@ def check_extras_out(where, text):
         problem(where, f'names an extra ("{hit}"); Taken is sold as the pill and supplement log')
 
 
+def png_facts(raw, where):
+    """Width, height, bit depth, colour type and whether it has alpha, from a PNG's chunks; every chunk's CRC checked."""
+    if not raw.startswith(PNG_SIGNATURE):
+        return None
+    pos, kinds, header = 8, [], None
+    while pos + 12 <= len(raw):
+        length, kind = struct.unpack(">I4s", raw[pos:pos + 8])
+        data = raw[pos + 8:pos + 8 + length]
+        if pos + 12 + length > len(raw):
+            problem(where, "the PNG is cut short")
+            return None
+        (crc,) = struct.unpack(">I", raw[pos + 8 + length:pos + 12 + length])
+        if zlib.crc32(kind + data) & 0xFFFFFFFF != crc:
+            problem(where, f"the PNG's {kind.decode('latin-1')} chunk is damaged")
+            return None
+        kinds.append(kind)
+        if kind == b"IHDR":
+            header = struct.unpack(">IIBB", data[:10])
+        pos += 12 + length
+        if kind == b"IEND":
+            break
+    if header is None or kinds[0] != b"IHDR" or kinds[-1] != b"IEND":
+        problem(where, "not a whole PNG (IHDR first, IEND last)")
+        return None
+    width, height, depth, colour = header
+    return {"format": "PNG", "size": (width, height), "depth": depth, "colour": colour,
+            "alpha": colour in (4, 6) or b"tRNS" in kinds}
+
+
+def jpeg_facts(raw, where):
+    """Width, height and components from a JPEG's frame header (SOF0 to SOF15, not DHT, JPG or DAC)."""
+    if not raw.startswith(b"\xff\xd8"):
+        return None
+    pos = 2
+    while pos + 4 <= len(raw):
+        if raw[pos] != 0xFF:
+            break
+        marker = raw[pos + 1]
+        (length,) = struct.unpack(">H", raw[pos + 2:pos + 4])
+        if 0xC0 <= marker <= 0xCF and marker not in (0xC4, 0xC8, 0xCC):
+            height, width, components = struct.unpack(">HHB", raw[pos + 5:pos + 10])
+            return {"format": "JPEG", "size": (width, height), "depth": raw[pos + 4], "colour": components,
+                    "alpha": components == 4}
+        pos += 2 + length
+    problem(where, "a JPEG without a frame header")
+    return None
+
+
+def image_facts(path, where):
+    raw = path.read_bytes()
+    if raw.startswith(PNG_SIGNATURE):
+        facts = png_facts(raw, where)
+    elif raw.startswith(b"\xff\xd8"):
+        facts = jpeg_facts(raw, where)
+    else:
+        problem(where, "neither a PNG nor a JPEG")
+        return None
+    if facts is not None:
+        facts["bytes"] = len(raw)
+        facts["raw"] = raw
+    return facts
+
+
+def no_alpha(where, facts):
+    """Google's "JPEG or 24-bit PNG (no alpha)": 8-bit RGB without a transparency chunk, or an RGB JPEG."""
+    if facts["format"] == "PNG" and not (facts["depth"] == 8 and facts["colour"] == 2 and not facts["alpha"]):
+        problem(where, f"must be a 24-bit PNG with no alpha (bit depth {facts['depth']}, colour type {facts['colour']}"
+                       + (", has alpha" if facts["alpha"] else "") + ")")
+    if facts["format"] == "JPEG" and facts["colour"] != 3:
+        problem(where, f"a JPEG with {facts['colour']} components; Play takes RGB")
+
+
+graphics = []
+
+
+def check_images(folder, locale):
+    images = folder / "images"
+    shots = images / "phoneScreenshots"
+    files = sorted(p for p in shots.iterdir() if p.name != ".gitkeep") if shots.is_dir() else []
+    where = f"{locale}/images/phoneScreenshots"
+    if not SCREENSHOTS_MIN <= len(files) <= SCREENSHOTS_MAX:
+        problem(where, f"{len(files)} screenshots; the set is {SCREENSHOTS_MIN} to {SCREENSHOTS_MAX}")
+    names = [p.name for p in files]
+    stems = sorted(p.stem for p in files)
+    if stems != [str(n) for n in range(1, len(files) + 1)]:
+        problem(where, f"must be named 1 to {len(files)} in Play's order, found {names}")
+    if (shots / ".gitkeep").exists() and files:
+        problem(f"{where}/.gitkeep", "no longer needed once the screenshots are there")
+    for path in files:
+        w = f"{where}/{path.name}"
+        facts = image_facts(path, w)
+        if not facts:
+            continue
+        no_alpha(w, facts)
+        width, height = facts["size"]
+        short, long = min(width, height), max(width, height)
+        if short < SCREENSHOT_MIN_SIDE or long > SCREENSHOT_MAX_SIDE:
+            problem(w, f"{width} x {height}; each side must be {SCREENSHOT_MIN_SIDE} to {SCREENSHOT_MAX_SIDE} px")
+        if long > 2 * short:
+            problem(w, f"{width} x {height}; the long side may be at most twice the short")
+        if width * 16 != height * 9 or width < PROMOTION_MIN_SIDE:
+            problem(w, f"{width} x {height}; the set is 9:16 portrait at 1080 x 1920 or larger, as promotion needs")
+        graphics.append(f"{w}: {width} x {height}, {facts['format']} {facts['depth']}-bit colour type {facts['colour']}, "
+                        f"{facts['bytes']} bytes")
+        if ARGS.rendered is not None:
+            fresh = ARGS.rendered / path.name
+            if not fresh.is_file():
+                problem(w, f"the app drew no {fresh}")
+            elif fresh.read_bytes() != facts["raw"]:
+                problem(w, f"is not what the app draws now; copy {path.name} from the android-screenshots artifact "
+                           f"(play/phoneScreenshots) into {where}, after looking at it")
+    if ARGS.rendered is not None and ARGS.rendered.is_dir():
+        extra = sorted(p.name for p in ARGS.rendered.iterdir() if p.name not in names)
+        if extra:
+            problem(where, f"the app draws {extra} too, which are not committed")
+    elif ARGS.rendered is not None:
+        problem(where, f"no rendered screenshots in {ARGS.rendered}")
+
+    feature = [p for p in images.glob("featureGraphic.*")]
+    if len(feature) != 1:
+        problem(f"{locale}/images/featureGraphic", f"needs exactly one feature graphic, found {len(feature)}")
+    for path in feature:
+        w = f"{locale}/images/{path.name}"
+        facts = image_facts(path, w)
+        if facts:
+            no_alpha(w, facts)
+            if facts["size"] != FEATURE_SIZE:
+                problem(w, "{} x {}; must be 1024 x 500".format(*facts["size"]))
+            graphics.append(f"{w}: {facts['size'][0]} x {facts['size'][1]}, {facts['format']} {facts['depth']}-bit "
+                            f"colour type {facts['colour']}, {facts['bytes']} bytes")
+
+    icon = images / "icon.png"
+    w = f"{locale}/images/icon.png"
+    if not icon.is_file():
+        problem(w, "missing")
+    else:
+        facts = image_facts(icon, w)
+        if facts:
+            if facts["format"] != "PNG" or facts["depth"] != 8 or facts["colour"] != 6:
+                problem(w, "must be a 32-bit PNG (8-bit RGBA)")
+            if facts["size"] != ICON_SIZE:
+                problem(w, "{} x {}; must be 512 x 512".format(*facts["size"]))
+            if facts["bytes"] > ICON_MAX_BYTES:
+                problem(w, f"{facts['bytes']} bytes; at most 1024 KB")
+            if not PLAY_ICON.is_file() or facts["raw"] != PLAY_ICON.read_bytes():
+                problem(w, f"must be {PLAY_ICON.relative_to(ANDROID)} byte for byte (brand/play.py copies it)")
+            graphics.append(f"{w}: {facts['size'][0]} x {facts['size'][1]}, PNG {facts['depth']}-bit colour type "
+                            f"{facts['colour']}, {facts['bytes']} bytes")
+
+
 counts = {}
 for locale in LOCALES:
     folder = PLAY / locale
@@ -388,11 +567,16 @@ for locale in LOCALES:
                         problem(f"{name}/{shot.name}", "not a PNG or JPEG")
             elif path.name != ".gitkeep" and (path.stem not in IMAGE_NAMES or path.suffix.lower() not in IMAGE_EXTENSIONS):
                 problem(name, "not an image supply reads")
+        check_images(folder, locale)
 
 width = max(len(k) for k in counts)
 for key, (n, limit) in counts.items():
     print(f"{key:<{width}}  {n:5d} / {limit} characters")
 print(f"medicine names from Catalog.kt: {len(MEDICINES)}")
+for line in graphics:
+    print(line)
+if ARGS.rendered is not None:
+    print(f"phone screenshots compared with {ARGS.rendered}")
 if problems:
     print("\nProblems:", file=sys.stderr)
     for p in problems:

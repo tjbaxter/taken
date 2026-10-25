@@ -48,10 +48,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      # The Google Play listing text in store/play (fastlane supply's layout): Play's limits, the Health Content and
-      # Services disclaimer, the Subscriptions policy's terms and the house copy rules (SPEC-ANDROID 14.2). Python's
-      # standard library only, so it runs first and needs neither Java nor Gradle.
-      - name: Play listing text
+      # The Google Play listing in store/play (fastlane supply's layout): Play's limits, the Health Content and Services
+      # disclaimer, the Subscriptions policy's terms and the house copy rules, and the graphics' sizes, formats and
+      # alpha read from each file's header (SPEC-ANDROID 14.2). Python's standard library only, so it runs first and
+      # needs neither Java nor Gradle.
+      - name: Play listing text and graphics
         run: python3 scripts/check-play-metadata.py
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
@@ -131,6 +132,11 @@ jobs:
       # verifyRoborazziDebug (SPEC-ANDROID 15.2).
       - name: Draw every screen (Robolectric + Roborazzi)
         run: ./gradlew :app:recordRoborazziDebug --stacktrace
+      # The Play phone screenshots (SPEC-ANDROID 14.2) must be what the app draws now: PlayStoreScreenshotTests writes
+      # them to play/phoneScreenshots, and each committed one must match byte for byte, so the listing never shows an
+      # older app. The fresh ones are in the android-screenshots artifact below.
+      - name: The Play screenshots are what the app draws
+        run: python3 scripts/check-play-metadata.py --rendered app/build/outputs/roborazzi/play/phoneScreenshots
       - name: android-screenshots
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
