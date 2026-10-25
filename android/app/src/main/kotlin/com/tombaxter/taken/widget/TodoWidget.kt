@@ -6,7 +6,6 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.glance.ColorFilter
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
@@ -46,6 +45,7 @@ import com.tombaxter.taken.core.surfaces.WidgetCopy
 import com.tombaxter.taken.core.surfaces.WidgetTap
 import com.tombaxter.taken.core.theme.Look
 import com.tombaxter.taken.core.theme.Looks
+import java.util.Locale
 
 /**
  * The to-do capture widget (SPEC-ANDROID 10.1), the iPhone's to-do Lock Screen widget on Android's home screen: a mic that
@@ -62,9 +62,10 @@ class TodoWidget : GlanceAppWidget() {
     override suspend fun provideGlance(context: Context, id: GlanceId) {
         val surfaces = (context.applicationContext as TakenApp).container.surfaces
         val initial = surfaces.read()
+        val locale = Locale.getDefault()
         provideContent {
             val inputs by surfaces.inputs.collectAsState(initial)
-            TodoWidgetContent(surfaces.todoFace(inputs), Looks.look(inputs.stack.settings.theme))
+            TodoWidgetContent(surfaces.todoFace(inputs, locale = locale), Looks.look(inputs.stack.settings.theme))
         }
     }
 
@@ -94,48 +95,60 @@ class TodoWidgetReceiver : GlanceAppWidgetReceiver() {
 /** Everything the to-do widget draws. */
 @Composable
 fun TodoWidgetContent(face: TodoWidgetFace, look: Look) {
-    val palette = WidgetPalette(look)
     val context = LocalContext.current
+    val palette = WidgetPalette(look, context)
     val size = LocalSize.current
     val list = WidgetTap.Open(face.listUrl).action(context)
-    var root = GlanceModifier.widgetFrame(palette).padding(12.dp)
+    val narrow = size.width < WidgetSizes.MEDIUM.width
+    var root = GlanceModifier.widgetFrame(palette).padding(if (narrow) 10.dp else 12.dp)
     if (list != null) root = root.clickable(list)
     Box(root.semantics { testTag = "todo-widget" }) {
         if (size.height < WidgetSizes.TALL.height) {
             // 2x1: the mic and the count.
             Row(GlanceModifier.fillMaxSize(), verticalAlignment = Alignment.CenterVertically) {
                 Mic(face, palette)
-                Spacer(GlanceModifier.width(12.dp))
-                Column {
-                    Text(WidgetCopy.TODO, style = WidgetType.sans(15.sp, palette.fg, FontWeight.Bold), maxLines = 1)
-                    Text(face.countLine, style = WidgetType.sans(13.sp, palette.fgMuted), maxLines = 1)
-                }
+                Spacer(GlanceModifier.width(8.dp))
+                CountLines(face, palette)
             }
         } else {
             Column(GlanceModifier.fillMaxSize()) {
                 Row(GlanceModifier.fillMaxWidth().height(WidgetSizes.TOUCH), verticalAlignment = Alignment.CenterVertically) {
-                    Text(
-                        face.header,
-                        style = WidgetType.sans(15.sp, palette.fg, FontWeight.Bold),
-                        maxLines = 1,
-                        modifier = GlanceModifier.defaultWeight(),
-                    )
+                    if (narrow) {
+                        // Two cells across: "To-do" over "4 to-dos", so neither is cut.
+                        Box(GlanceModifier.defaultWeight()) { CountLines(face, palette) }
+                    } else {
+                        Text(
+                            face.header,
+                            style = palette.sans(15f, palette.fg, FontWeight.Bold),
+                            maxLines = 1,
+                            modifier = GlanceModifier.defaultWeight(),
+                        )
+                    }
                     Mic(face, palette)
                 }
                 if (face.rows.isEmpty()) {
                     Box(GlanceModifier.fillMaxWidth().height(WidgetSizes.TOUCH), contentAlignment = Alignment.CenterStart) {
-                        Text(WidgetCopy.TODO_EMPTY, style = WidgetType.sans(14.sp, palette.fgSubtle), maxLines = 2)
+                        Text(WidgetCopy.TODO_EMPTY, style = palette.sans(14f, palette.fgSubtle), maxLines = 2)
                     }
                 } else {
                     LazyColumn(GlanceModifier.fillMaxWidth().defaultWeight()) {
                         // Stable ids keep the scroll position across updates; Glance reserves ids at or below -2^62.
                         items(face.rows, itemId = { (it.id.mostSignificantBits xor it.id.leastSignificantBits) and Long.MAX_VALUE }) { row ->
-                            TodoLine(row, palette)
+                            TodoLine(row, palette, stacked = narrow)
                         }
                     }
                 }
             }
         }
+    }
+}
+
+/** "To-do" and "4 to-dos" on two lines, where a line has no room for "To-do · 4". */
+@Composable
+private fun CountLines(face: TodoWidgetFace, palette: WidgetPalette) {
+    Column {
+        Text(WidgetCopy.TODO, style = palette.sans(15f, palette.fg, FontWeight.Bold), maxLines = 1)
+        Text(face.countLine, style = palette.sans(12f, palette.fgMuted), maxLines = 1)
     }
 }
 
@@ -154,17 +167,28 @@ private fun Mic(face: TodoWidgetFace, palette: WidgetPalette) {
     }
 }
 
-/** One open task: its words, and when it is due in mono (the signal's ink once it is overdue, as in the To-do tab). */
+/**
+ * One open task: its words, and when it is due in mono (the signal's ink once it is overdue, as in the To-do tab). Two
+ * cells across, the due time sits under the words, as the To-do tab's rows do at large text.
+ */
 @Composable
-private fun TodoLine(row: TodoWidgetRow, palette: WidgetPalette) {
+private fun TodoLine(row: TodoWidgetRow, palette: WidgetPalette, stacked: Boolean) {
     val context = LocalContext.current
     var modifier = GlanceModifier.fillMaxWidth().height(WidgetSizes.TOUCH)
     WidgetTap.Open(row.url).action(context)?.let { modifier = modifier.clickable(it) }
-    Row(modifier.semantics { contentDescription = row.spoken }, verticalAlignment = Alignment.CenterVertically) {
-        Text(row.title, style = WidgetType.sans(14.sp, palette.fg), maxLines = 1, modifier = GlanceModifier.defaultWeight())
-        row.due?.let {
-            Spacer(GlanceModifier.width(8.dp))
-            Text(it, style = WidgetType.mono(12.sp, if (row.overdue) palette.signalInk else palette.fgSubtle), maxLines = 1)
+    val dueStyle = palette.mono(if (stacked) 11f else 12f, if (row.overdue) palette.signalInk else palette.fgSubtle)
+    if (stacked) {
+        Column(modifier.semantics { contentDescription = row.spoken }, verticalAlignment = Alignment.CenterVertically) {
+            Text(row.title, style = palette.sans(14f, palette.fg), maxLines = 1)
+            row.due?.let { Text(it, style = dueStyle, maxLines = 1) }
+        }
+    } else {
+        Row(modifier.semantics { contentDescription = row.spoken }, verticalAlignment = Alignment.CenterVertically) {
+            Text(row.title, style = palette.sans(14f, palette.fg), maxLines = 1, modifier = GlanceModifier.defaultWeight())
+            row.due?.let {
+                Spacer(GlanceModifier.width(8.dp))
+                Text(it, style = dueStyle, maxLines = 1)
+            }
         }
     }
 }

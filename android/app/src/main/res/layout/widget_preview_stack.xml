@@ -8,9 +8,10 @@
     android:layout_width="match_parent"
     android:layout_height="match_parent"
     android:background="@drawable/widget_preview_background"
+    android:baselineAligned="false"
     android:orientation="horizontal"
     android:padding="12dp"
-    tools:ignore="HardcodedText,UseAppTint,ContentDescription">
+    tools:ignore="HardcodedText,UseAppTint,ContentDescription,NestedWeights,SmallSp">
 
     <LinearLayout
         android:layout_width="124dp"
@@ -21,6 +22,7 @@
             android:layout_width="match_parent"
             android:layout_height="wrap_content"
             android:gravity="center_vertical"
+            android:baselineAligned="false"
             android:orientation="horizontal">
 
             <FrameLayout
@@ -58,6 +60,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:gravity="center_vertical"
+            android:baselineAligned="false"
             android:orientation="horizontal">
 
             <TextView
@@ -81,6 +84,7 @@
             android:layout_width="match_parent"
             android:layout_height="4dp"
             android:layout_marginBottom="10dp"
+            android:baselineAligned="false"
             android:orientation="horizontal">
         <FrameLayout
             android:layout_width="0dp"
@@ -149,6 +153,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:gravity="center_vertical"
+            android:baselineAligned="false"
             android:orientation="horizontal">
 
             <ImageView
@@ -159,7 +164,7 @@
                 android:tint="#52525B" />
 
             <TextView
-                android:layout_width="38dp"
+                android:layout_width="34dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:fontFamily="monospace"
@@ -168,14 +173,10 @@
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
-            <TextView
+            <FrameLayout
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:maxLines="1"
-                android:text="Fish Oil"
-                android:textColor="#A1A1AA"
-                android:textSize="12sp" />
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -198,6 +199,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:gravity="center_vertical"
+            android:baselineAligned="false"
             android:orientation="horizontal">
 
             <ImageView
@@ -208,7 +210,7 @@
                 android:tint="#52525B" />
 
             <TextView
-                android:layout_width="38dp"
+                android:layout_width="34dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:fontFamily="monospace"
@@ -217,14 +219,10 @@
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
-            <TextView
+            <FrameLayout
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:maxLines="1"
-                android:text="Magnesium"
-                android:textColor="#A1A1AA"
-                android:textSize="12sp" />
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -247,6 +245,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:gravity="center_vertical"
+            android:baselineAligned="false"
             android:orientation="horizontal">
 
             <ImageView
@@ -257,7 +256,7 @@
                 android:tint="#FFB000" />
 
             <TextView
-                android:layout_width="38dp"
+                android:layout_width="34dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:fontFamily="monospace"
@@ -266,14 +265,10 @@
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
-            <TextView
+            <FrameLayout
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:maxLines="1"
-                android:text="Vitamin D3"
-                android:textColor="#F4F4F5"
-                android:textSize="12sp" />
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <TextView
                 android:layout_width="wrap_content"
@@ -296,6 +291,7 @@
             android:layout_height="0dp"
             android:layout_weight="1"
             android:gravity="center_vertical"
+            android:baselineAligned="false"
             android:orientation="horizontal">
 
             <ImageView
@@ -306,7 +302,7 @@
                 android:tint="#FFB000" />
 
             <TextView
-                android:layout_width="38dp"
+                android:layout_width="34dp"
                 android:layout_height="wrap_content"
                 android:layout_marginStart="8dp"
                 android:fontFamily="monospace"
@@ -315,14 +311,10 @@
                 android:textSize="11sp"
                 android:textStyle="bold" />
 
-            <TextView
+            <FrameLayout
                 android:layout_width="0dp"
-                android:layout_height="wrap_content"
-                android:layout_weight="1"
-                android:maxLines="1"
-                android:text="Finasteride"
-                android:textColor="#F4F4F5"
-                android:textSize="12sp" />
+                android:layout_height="1dp"
+                android:layout_weight="1" />
 
             <TextView
                 android:layout_width="wrap_content"

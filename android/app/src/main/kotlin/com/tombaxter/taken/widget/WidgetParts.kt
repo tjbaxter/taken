@@ -2,15 +2,16 @@ package com.tombaxter.taken.widget
 
 import android.content.Context
 import android.content.Intent
-import android.net.Uri
 import android.os.Build
 import androidx.compose.runtime.Composable
+import androidx.core.net.toUri
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.DpSize
 import androidx.compose.ui.unit.TextUnit
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import android.util.TypedValue
 import androidx.glance.ColorFilter
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
@@ -41,7 +42,7 @@ import com.tombaxter.taken.ui.theme.TakenColors
  * screens take them from `LocalTakenColors` [Own choice: SPEC-ANDROID 10.1 named `GlanceTheme`; its `ColorProviders` are
  * Material's roles]. Blush is light and the other looks dark whatever the system says, as in the app.
  */
-class WidgetPalette(val look: Look) {
+class WidgetPalette(val look: Look, context: Context) {
     private val c = TakenColors.of(look)
     val bg = ColorProvider(c.bg)
     val bgRaised = ColorProvider(c.bgRaised)
@@ -70,22 +71,41 @@ class WidgetPalette(val look: Look) {
 
     /** Round lamps in the soft looks, square in the HUD ones (the iPhone's `LampShape(roundness:)`). */
     val lampRadius: Dp = (2.5f * look.radius.lampRoundness).dp
-}
 
-/**
- * Widgets cannot use an app's own fonts ("custom fonts in apps aren't supported",
- * https://developer.android.com/develop/ui/compose/glance/build-ui), so Geist Mono becomes the system monospace and
- * Geist the system sans, at the iPhone's sizes in `sp` (SPEC-ANDROID 10.1).
- */
-object WidgetType {
-    fun mono(size: TextUnit, color: ColorProvider, weight: FontWeight = FontWeight.Normal): TextStyle =
-        TextStyle(color = color, fontSize = size, fontWeight = weight, fontFamily = FontFamily.Monospace)
+    private val metrics = context.resources.displayMetrics
+    private val fontScale = context.resources.configuration.fontScale
 
-    fun sans(size: TextUnit, color: ColorProvider, weight: FontWeight = FontWeight.Normal): TextStyle =
-        TextStyle(color = color, fontSize = size, fontWeight = weight, fontFamily = FontFamily.SansSerif)
+    /**
+     * A text size that stays the size it is drawn at, as the iPhone's widgets keep theirs (`monoFixed`, `hudFixed`,
+     * `.custom(fixedSize:)`, and SPEC-ANDROID 15.3's rule for fixed text): a widget's cells do not grow with the text, and
+     * TalkBack reads every line. Glance takes text sizes in sp only, so the size is turned back into sp through Android's own
+     * converter, which knows Android 14's non-linear font scaling (`TypedValue.deriveDimension`,
+     * https://developer.android.com/reference/android/util/TypedValue#deriveDimension(int,%20float,%20android.util.DisplayMetrics)),
+     * and by the font scale before that. [Own choice, following the iPhone]
+     */
+    fun fixed(dp: Float): TextUnit {
+        if (fontScale == 1f) return dp.sp
+        val sp = if (Build.VERSION.SDK_INT >= 34) {
+            TypedValue.deriveDimension(TypedValue.COMPLEX_UNIT_SP, dp * metrics.density, metrics)
+        } else {
+            dp / fontScale
+        }
+        return sp.sp
+    }
+
+    /**
+     * Widgets cannot use an app's own fonts ("custom fonts in apps aren't supported",
+     * https://developer.android.com/develop/ui/compose/glance/build-ui), so Geist Mono becomes the system monospace and
+     * Geist the system sans, at the iPhone's sizes (SPEC-ANDROID 10.1).
+     */
+    fun mono(size: Float, color: ColorProvider, weight: FontWeight = FontWeight.Normal): TextStyle =
+        TextStyle(color = color, fontSize = fixed(size), fontWeight = weight, fontFamily = FontFamily.Monospace)
+
+    fun sans(size: Float, color: ColorProvider, weight: FontWeight = FontWeight.Normal): TextStyle =
+        TextStyle(color = color, fontSize = fixed(size), fontWeight = weight, fontFamily = FontFamily.SansSerif)
 
     /** The HUD's small caps lines ("LOGGED 07:42"): mono, the iPhone's `hudFixed`. */
-    fun hud(size: Float, color: ColorProvider): TextStyle = mono(size.sp, color, FontWeight.Medium)
+    fun hud(size: Float, color: ColorProvider): TextStyle = mono(size, color, FontWeight.Medium)
 }
 
 /** The launcher grid's cell sizes on a typical phone, portrait (https://developer.android.com/develop/ui/views/appwidgets/layouts). */
@@ -139,7 +159,7 @@ fun Lamp(color: ColorProvider, palette: WidgetPalette) {
 
 /** The explicit intent every surface opens Taken with: MainActivity, carrying a `taken://` link (SPEC-ANDROID 10.3). */
 fun takenIntent(context: Context, url: String): Intent =
-    Intent(Intent.ACTION_VIEW, Uri.parse(url), context, MainActivity::class.java)
+    Intent(Intent.ACTION_VIEW, url.toUri(), context, MainActivity::class.java)
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
 /**

@@ -164,6 +164,17 @@ class ScreenshotTests {
         }
     }
 
+    /** Profile's offer of the Take all tile (Android 13 and later, SPEC-ANDROID 10.2), scrolled to it. */
+    @Test
+    fun theTileOffer() {
+        start()
+        for (look in listOf(ThemeID.SIGNAL, ThemeID.BLUSH)) {
+            capture("settings-tile_${look.raw}", DemoScreens.make("settings", look)) {
+                compose.onNodeWithText(com.tombaxter.taken.core.surfaces.WidgetCopy.ADD_TILE_FOOTNOTE).performScrollTo()
+            }
+        }
+    }
+
     /** The Reminder section and the explanation at 200% text: nothing is cut to a word. */
     @Test
     @Config(fontScale = 2f)

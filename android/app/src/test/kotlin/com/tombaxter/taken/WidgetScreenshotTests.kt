@@ -195,7 +195,9 @@ class WidgetScreenshotTests {
                 LinearLayout.LayoutParams(activity.px(size.width.value), activity.px(size.height.value)).apply { bottomMargin = gap },
             )
         }
-        activity.setContentView(column)
+        val frame = FrameLayout(activity)
+        frame.addView(column, FrameLayout.LayoutParams(FrameLayout.LayoutParams.WRAP_CONTENT, FrameLayout.LayoutParams.WRAP_CONTENT))
+        activity.setContentView(frame)
         shadowOf(Looper.getMainLooper()).idle()
         column.captureRoboImage("build/outputs/roborazzi/widgets-picker.png")
     }

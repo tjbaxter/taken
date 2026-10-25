@@ -7,7 +7,6 @@ import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
 import androidx.glance.Image
@@ -73,10 +72,12 @@ class StackWidget : GlanceAppWidget() {
         val surfaces = (context.applicationContext as TakenApp).container.surfaces
         // Read before the content, then followed inside it (Glance's own advice for `provideGlance`).
         val initial = surfaces.read()
+        // The phone's language for TalkBack's times, read once per session: a new language restarts the widget's session.
+        val locale = Locale.getDefault()
         provideContent {
             val inputs by surfaces.inputs.collectAsState(initial)
             val snapshot = surfaces.snapshot(inputs)
-            StackWidgetContent(StackWidgetFace(snapshot, Locale.getDefault()), Looks.look(snapshot.theme))
+            StackWidgetContent(StackWidgetFace(snapshot, locale), Looks.look(snapshot.theme))
         }
     }
 
@@ -84,7 +85,8 @@ class StackWidget : GlanceAppWidget() {
     override suspend fun providePreview(context: Context, widgetCategory: Int) {
         val surfaces = (context.applicationContext as TakenApp).container.surfaces
         val snapshot = surfaces.demoSnapshot()
-        provideContent { StackWidgetContent(StackWidgetFace(snapshot, Locale.getDefault()), Looks.look(snapshot.theme)) }
+        val face = StackWidgetFace(snapshot, Locale.getDefault())
+        provideContent { StackWidgetContent(face, Looks.look(snapshot.theme)) }
     }
 }
 
@@ -106,8 +108,8 @@ class StackWidgetReceiver : GlanceAppWidgetReceiver() {
 /** Everything the stack widget draws, at the size Glance gives it. */
 @Composable
 fun StackWidgetContent(face: StackWidgetFace, look: Look) {
-    val palette = WidgetPalette(look)
     val context = LocalContext.current
+    val palette = WidgetPalette(look, context)
     val size = LocalSize.current
     var root = GlanceModifier.widgetFrame(palette).padding(12.dp)
     face.tap.action(context)?.let { root = root.clickable(it) }
@@ -129,9 +131,9 @@ private fun Small(face: StackWidgetFace, palette: WidgetPalette) {
             CapsuleMark(palette, 13.dp)
             Spacer(GlanceModifier.width(8.dp))
             if (!face.hasStack) {
-                Text(WidgetCopy.EMPTY_TITLE, style = WidgetType.hud(10f, palette.fgMuted), maxLines = 1)
+                Text(WidgetCopy.EMPTY_TITLE, style = palette.hud(10f, palette.fgMuted), maxLines = 1)
             } else if (face.allTaken) {
-                Text(WidgetCopy.ALL_TAKEN.replace('\n', ' '), style = WidgetType.mono(16.sp, palette.signalInk, FontWeight.Bold), maxLines = 1)
+                Text(WidgetCopy.ALL_TAKEN.replace('\n', ' '), style = palette.mono(16f, palette.signalInk, FontWeight.Bold), maxLines = 1)
             } else {
                 Counter(face, palette, 22)
                 Spacer(GlanceModifier.width(8.dp))
@@ -152,9 +154,16 @@ private fun Small(face: StackWidgetFace, palette: WidgetPalette) {
 private fun Tall(face: StackWidgetFace, palette: WidgetPalette, height: Dp) {
     Column(GlanceModifier.fillMaxSize()) {
         Header(face, palette)
+        if (!face.hasStack) {
+            // The empty state fills the widget rather than leaving it sparse (WT-1).
+            Spacer(GlanceModifier.defaultWeight())
+            CounterBlock(face, palette, counterSize = 32)
+            Spacer(GlanceModifier.defaultWeight())
+            return@Column
+        }
         Spacer(GlanceModifier.height(6.dp))
         CounterBlock(face, palette, counterSize = 32)
-        Rows(face, palette, height - 24.dp - TALL_BLOCK, divider = true)
+        Rows(face, palette, height - 24.dp - TALL_BLOCK, divider = true, names = false)
     }
 }
 
@@ -171,7 +180,8 @@ private fun Medium(face: StackWidgetFace, palette: WidgetPalette, height: Dp) {
         Box(GlanceModifier.width(1.dp).fillMaxHeight().background(palette.line)) {}
         Spacer(GlanceModifier.width(14.dp))
         Box(GlanceModifier.defaultWeight().fillMaxHeight()) {
-            Rows(face, palette, height - 24.dp, divider = false)
+            // About 100 dp across: the code and the time, as the iPhone's Lock Screen rows; TalkBack reads the name.
+            Rows(face, palette, height - 24.dp, divider = false, names = false)
         }
     }
 }
@@ -185,7 +195,7 @@ private fun Large(face: StackWidgetFace, palette: WidgetPalette, height: Dp) {
         CounterBlock(face, palette, counterSize = 38)
         Spacer(GlanceModifier.height(10.dp))
         Box(GlanceModifier.fillMaxWidth().height(1.dp).background(palette.line)) {}
-        Rows(face, palette, height - 24.dp - LARGE_BLOCK - 11.dp, divider = false)
+        Rows(face, palette, height - 24.dp - LARGE_BLOCK - 11.dp, divider = false, names = true)
     }
 }
 
@@ -199,7 +209,7 @@ private fun Header(face: StackWidgetFace, palette: WidgetPalette) {
     Row(GlanceModifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
         CapsuleMark(palette, 13.dp)
         Spacer(GlanceModifier.width(6.dp))
-        Text(WidgetCopy.TAKEN, style = WidgetType.mono(10.sp, palette.fg, FontWeight.Bold), maxLines = 1)
+        Text(WidgetCopy.TAKEN, style = palette.mono(10f, palette.fg, FontWeight.Bold), maxLines = 1)
         Spacer(GlanceModifier.defaultWeight())
         if (face.locked) ProMark(palette)
     }
@@ -215,7 +225,7 @@ private fun ProMark(palette: WidgetPalette) {
     ) {
         Glyph(R.drawable.ic_widget_lock, palette.signalInk, 8.dp)
         Spacer(GlanceModifier.width(3.dp))
-        Text(WidgetCopy.PRO, style = WidgetType.mono(8.5.sp, palette.signalInk, FontWeight.Bold), maxLines = 1)
+        Text(WidgetCopy.PRO, style = palette.mono(8.5f, palette.signalInk, FontWeight.Bold), maxLines = 1)
     }
 }
 
@@ -223,8 +233,8 @@ private fun ProMark(palette: WidgetPalette) {
 @Composable
 private fun Counter(face: StackWidgetFace, palette: WidgetPalette, size: Int) {
     Row(verticalAlignment = Alignment.Bottom) {
-        Text(face.counterTaken, style = WidgetType.mono(size.sp, palette.fg, FontWeight.Medium), maxLines = 1)
-        Text(face.counterDue, style = WidgetType.mono(size.sp, palette.fgFaint, FontWeight.Medium), maxLines = 1)
+        Text(face.counterTaken, style = palette.mono(size.toFloat(), palette.fg, FontWeight.Medium), maxLines = 1)
+        Text(face.counterDue, style = palette.mono(size.toFloat(), palette.fgFaint, FontWeight.Medium), maxLines = 1)
     }
 }
 
@@ -253,12 +263,12 @@ private fun CounterBlock(face: StackWidgetFace, palette: WidgetPalette, counterS
     Column(GlanceModifier.fillMaxWidth().semantics { contentDescription = face.spoken }) {
         when {
             !face.hasStack -> {
-                Text(WidgetCopy.EMPTY_TITLE, style = WidgetType.hud(10f, palette.fgMuted), maxLines = 1)
+                Text(WidgetCopy.EMPTY_TITLE, style = palette.hud(10f, palette.fgMuted), maxLines = 1)
                 Spacer(GlanceModifier.height(4.dp))
-                Text(WidgetCopy.EMPTY_HINT, style = WidgetType.hud(9f, palette.fgFaint), maxLines = 1)
+                Text(WidgetCopy.EMPTY_HINT, style = palette.hud(9f, palette.fgFaint), maxLines = 1)
             }
             face.allTaken -> {
-                Text(WidgetCopy.ALL_TAKEN, style = WidgetType.mono(24.sp, palette.signalInk, FontWeight.Bold), maxLines = 2)
+                Text(WidgetCopy.ALL_TAKEN, style = palette.mono(24f, palette.signalInk, FontWeight.Bold), maxLines = 2)
                 Spacer(GlanceModifier.height(6.dp))
                 Bar(face, palette)
                 Spacer(GlanceModifier.height(4.dp))
@@ -294,17 +304,17 @@ private fun Bottom(face: StackWidgetFace, palette: WidgetPalette) {
             ) {
                 Lamp(palette.buttonLamp, palette)
                 Spacer(GlanceModifier.width(6.dp))
-                Text(WidgetCopy.TAKE_ALL, style = WidgetType.mono(11.sp, palette.buttonText, FontWeight.Bold), maxLines = 1)
+                Text(WidgetCopy.TAKE_ALL, style = palette.mono(11f, palette.buttonText, FontWeight.Bold), maxLines = 1)
                 bottom.countText?.let {
                     Spacer(GlanceModifier.width(6.dp))
-                    Text(it, style = WidgetType.mono(11.sp, palette.buttonTextSoft, FontWeight.Medium), maxLines = 1)
+                    Text(it, style = palette.mono(11f, palette.buttonTextSoft, FontWeight.Medium), maxLines = 1)
                 }
             }
         }
         is WidgetBottom.Status -> Row(GlanceModifier.fillMaxWidth().height(34.dp), verticalAlignment = Alignment.CenterVertically) {
             Lamp(if (bottom.lit) palette.signal else palette.fgFaint, palette)
             Spacer(GlanceModifier.width(6.dp))
-            Text(bottom.text, style = WidgetType.hud(9.5f, palette.fgMuted), maxLines = 1)
+            Text(bottom.text, style = palette.hud(9.5f, palette.fgMuted), maxLines = 1)
         }
     }
 }
@@ -314,23 +324,23 @@ private fun Bottom(face: StackWidgetFace, palette: WidgetPalette) {
  * Glance holds ten children to a column, so each row carries its own divider.
  */
 @Composable
-private fun Rows(face: StackWidgetFace, palette: WidgetPalette, height: Dp, divider: Boolean) {
+private fun Rows(face: StackWidgetFace, palette: WidgetPalette, height: Dp, divider: Boolean, names: Boolean) {
     val fit = rowsFitting(height, face.rows.size)
     if (fit.shown == 0 && face.rows.isNotEmpty()) return
     Column(GlanceModifier.fillMaxWidth()) {
         if (face.rows.isEmpty()) {
             if (height >= WidgetSizes.TOUCH) {
                 Box(GlanceModifier.fillMaxWidth().height(WidgetSizes.TOUCH), contentAlignment = Alignment.CenterStart) {
-                    Text(face.emptyRows, style = WidgetType.hud(10f, palette.fgSubtle), maxLines = 2)
+                    Text(face.emptyRows, style = palette.hud(10f, palette.fgSubtle), maxLines = 2)
                 }
             }
             return@Column
         }
         face.rows.take(fit.shown).forEachIndexed { index, row ->
-            RowLine(row, palette, topDivider = divider || index > 0)
+            RowLine(row, palette, topDivider = divider || index > 0, name = names)
         }
         face.more(fit.shown)?.let {
-            Text(it, style = WidgetType.hud(9f, palette.fgFaint), maxLines = 1, modifier = GlanceModifier.padding(top = 2.dp))
+            Text(it, style = palette.hud(9f, palette.fgFaint), maxLines = 1, modifier = GlanceModifier.padding(top = 2.dp))
         }
     }
 }
@@ -352,7 +362,7 @@ private const val MAX_ROWS = 8
 
 /** One item: its mark, code, name and time or count; a tap logs it when it may. */
 @Composable
-private fun RowLine(row: WidgetRowFace, palette: WidgetPalette, topDivider: Boolean) {
+private fun RowLine(row: WidgetRowFace, palette: WidgetPalette, topDivider: Boolean, name: Boolean) {
     val context = LocalContext.current
     var modifier = GlanceModifier.fillMaxWidth().height(WidgetSizes.TOUCH)
     row.tap.action(context)?.let { modifier = modifier.clickable(it) }
@@ -375,20 +385,24 @@ private fun RowLine(row: WidgetRowFace, palette: WidgetPalette, topDivider: Bool
             Spacer(GlanceModifier.width(8.dp))
             Text(
                 row.code,
-                style = WidgetType.mono(11.sp, if (row.done) palette.signalInk else palette.fgMuted, FontWeight.Bold),
+                style = palette.mono(11f, if (row.done) palette.signalInk else palette.fgMuted, FontWeight.Bold),
                 maxLines = 1,
                 modifier = GlanceModifier.width(34.dp),
             )
-            Text(
-                row.name,
-                style = WidgetType.sans(12.sp, if (row.done) palette.fg else palette.fgMuted),
-                maxLines = 1,
-                modifier = GlanceModifier.defaultWeight(),
-            )
+            if (name) {
+                Text(
+                    row.name,
+                    style = palette.sans(12f, if (row.done) palette.fg else palette.fgMuted),
+                    maxLines = 1,
+                    modifier = GlanceModifier.defaultWeight(),
+                )
+            } else {
+                Spacer(GlanceModifier.defaultWeight())
+            }
             Spacer(GlanceModifier.width(4.dp))
             Text(
                 row.value,
-                style = if (row.valueLit) WidgetType.mono(11.sp, palette.signalInk, FontWeight.Medium) else WidgetType.hud(9f, palette.fgFaint),
+                style = if (row.valueLit) palette.mono(11f, palette.signalInk, FontWeight.Medium) else palette.hud(9f, palette.fgFaint),
                 maxLines = 1,
             )
         }

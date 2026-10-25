@@ -11,6 +11,7 @@ import android.content.SharedPreferences
 import android.os.Build
 import android.service.quicksettings.TileService
 import androidx.annotation.RequiresApi
+import androidx.core.content.edit
 import androidx.glance.appwidget.GlanceAppWidgetManager
 import androidx.glance.appwidget.updateAll
 import com.tombaxter.taken.ProSource
@@ -219,7 +220,7 @@ class Surfaces(
     var tileAdded: Boolean
         get() = prefs.getBoolean(KEY_TILE_ADDED, false)
         set(value) {
-            prefs.edit().putBoolean(KEY_TILE_ADDED, value).apply()
+            prefs.edit { putBoolean(KEY_TILE_ADDED, value) }
             armSoon()
         }
 
@@ -240,7 +241,7 @@ class Surfaces(
         if (prefs.getString(KEY_PREVIEW_LOOK, null) == look.raw) return
         val now = System.currentTimeMillis()
         if (now - prefs.getLong(KEY_PREVIEW_TRIED, 0L) < PREVIEW_RETRY_MS) return
-        prefs.edit().putLong(KEY_PREVIEW_TRIED, now).apply()
+        prefs.edit { putLong(KEY_PREVIEW_TRIED, now) }
         scope.launch {
             withContext(Dispatchers.Default) {
                 val manager = GlanceAppWidgetManager(app)
@@ -248,7 +249,10 @@ class Surfaces(
                     runCatching { manager.setWidgetPreviews(receiver) }.getOrDefault(-1)
                 }
                 if (results.all { it == GlanceAppWidgetManager.SET_WIDGET_PREVIEWS_RESULT_SUCCESS }) {
-                    prefs.edit().putString(KEY_PREVIEW_LOOK, look.raw).putLong(KEY_PREVIEW_TRIED, 0L).apply()
+                    prefs.edit {
+                        putString(KEY_PREVIEW_LOOK, look.raw)
+                        putLong(KEY_PREVIEW_TRIED, 0L)
+                    }
                 }
             }
         }
