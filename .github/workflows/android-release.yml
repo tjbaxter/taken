@@ -223,7 +223,7 @@ jobs:
             echo "| Commit | \`$GITHUB_SHA\` |"
           } | tee -a "$GITHUB_STEP_SUMMARY"
           if [ "$bytes" -gt 10000000 ]; then
-            echo "::warning::The bundle is $mb MB, over the 10 MB a browser upload to Play Console takes"
+            echo "::warning::The bundle is $mb MB, over the 10 MB the browser used for the first hand upload takes"
           fi
 
   play:
