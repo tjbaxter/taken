@@ -8,10 +8,9 @@ import java.time.Duration
 import java.time.Instant
 import java.util.UUID
 
-// Taken Pro (PRO.md), the parts CORE needs: the cached status, the ledger, the gate and the link. The rule that decides
-// Pro is a pure function over plain values, ported from Shared/Pro.swift. Google Play Billing and the facts it gives
-// (`Entitlement` on Play) come with the Pro and Billing phase (SPEC-ANDROID 9 and 17, NEXT 2). Founding members and the
-// 1.0 legacy log have no Android meaning and are left out (SPEC-ANDROID 9.4).
+// Taken Pro (PRO.md): the cached status, the ledger, the gate and the link, ported from Shared/Pro.swift. The rule that
+// decides Pro is a pure function over plain values (Entitlement.kt), fed with what Google Play Billing says on the phone
+// (Play.kt, SPEC-ANDROID 9.4). Founding members and the 1.0 legacy log have no Android meaning and are left out.
 
 /** The three products, with the iPhone's ids (SPEC-ANDROID 9.2). */
 enum class ProPlan(val raw: String, val productId: String) {
@@ -108,6 +107,7 @@ data class PlanPeriod(val value: Int, val unit: PeriodUnit) {
         }
     }
 
+    /** Days in it, for day and week periods. */
     val days: Int?
         get() = when (unit) {
             PeriodUnit.DAY -> value
@@ -115,11 +115,29 @@ data class PlanPeriod(val value: Int, val unit: PeriodUnit) {
             PeriodUnit.MONTH, PeriodUnit.YEAR -> null
         }
 
+    /** Months in it, for month and year periods. */
+    val months: Int?
+        get() = when (unit) {
+            PeriodUnit.MONTH -> value
+            PeriodUnit.YEAR -> value * 12
+            PeriodUnit.DAY, PeriodUnit.WEEK -> null
+        }
+
     val unitWord: String get() = unit.raw
+
+    companion object {
+        /** A period is never shorter than one unit, as the iPhone's initialiser clamps it. */
+        fun of(value: Int, unit: PeriodUnit): PlanPeriod = PlanPeriod(maxOf(value, 1), unit)
+    }
 }
 
-/** A plan's recurring price as the store gives it, cached in pro.json `prices`. */
-data class PlanPrice(val displayPrice: String, val period: PlanPeriod)
+/**
+ * A plan's recurring price as Play gives it: "$19.99" and 1 year. Cached in pro.json (`ProLedger.prices`) so the trial
+ * reminder, which may be planned where Play is not asked (a widget, a receiver), names the real price.
+ */
+data class PlanPrice(val displayPrice: String, val period: PlanPeriod) {
+    companion object
+}
 
 /** The trial reminder handed to the system: for which trial end, and when it fires. */
 data class TrialReminderMark(val trialEnd: Instant, val fireAt: Instant)
@@ -147,7 +165,18 @@ data class ProLedger(
     val trialReminder: TrialReminderMark? = null,
     /** Android only: a trial's end by the purchase time it began at, known on the phone that bought it (SPEC-ANDROID 9.4). */
     val trialEnds: Map<String, Instant> = emptyMap(),
-)
+) {
+    /**
+     * The price the cached subscription renews at, if Play has given it: the plan it renews to when Play named one
+     * (`ProStatus.renewsTo`), else its own plan.
+     */
+    val renewalPrice: PlanPrice?
+        get() {
+            val plan = status?.renewsTo ?: status?.plan ?: return null
+            if (!plan.isSubscription) return null
+            return prices[plan.productId]
+        }
+}
 
 /** The ledger's small writes, as pure rules. */
 object ProLedgers {
@@ -163,6 +192,47 @@ object ProLedgers {
     /** Remember a refused log so the app can offer it when it opens. */
     fun recordPending(ledger: ProLedger?, action: ProPendingAction, at: Instant): ProLedger? =
         ledger?.copy(pending = PendingLog(action, at))
+
+    /**
+     * The refused log, if one was asked for recently (within `maxAge`, and not more than a minute ahead of `now`), and
+     * the ledger without it: a pending log is offered once, whatever its age (the iPhone's `ProStore.takePendingLog`).
+     */
+    fun takePending(ledger: ProLedger?, maxAge: Duration, now: Instant): Pair<ProLedger?, PendingLog?> {
+        val pending = ledger?.pending ?: return ledger to null
+        val age = Duration.between(pending.at, now)
+        val fresh = age > Duration.ofSeconds(-60) && age <= maxAge
+        return ledger.copy(pending = null) to (if (fresh) pending else null)
+    }
+
+    /** The one automatic paywall after the first dose has been shown. Written once. */
+    fun markIntroShown(ledger: ProLedger?, at: Instant): ProLedger? =
+        if (ledger == null || ledger.introShownAt != null) ledger else ledger.copy(introShownAt = at)
+
+    /** The one notification ask after a trial started has been on screen. Written once. */
+    fun markTrialAskShown(ledger: ProLedger?, at: Instant): ProLedger? =
+        if (ledger == null || ledger.trialAskAt != null) ledger else ledger.copy(trialAskAt = at)
+
+    /** Play's latest answer, kept for every surface. */
+    fun withStatus(ledger: ProLedger?, status: ProStatus): ProLedger? = ledger?.copy(status = status)
+
+    /** Each subscription's price as Play last gave it, merged over the earlier ones, so the trial reminder names it. */
+    fun cachePrices(ledger: ProLedger?, prices: Map<String, PlanPrice>): ProLedger? {
+        if (ledger == null || prices.isEmpty()) return ledger
+        val merged = ledger.prices + prices
+        return if (merged == ledger.prices) ledger else ledger.copy(prices = merged)
+    }
+
+    /** A trial started through the paywall: its end, by the purchase time it began at (SPEC-ANDROID 9.4). */
+    fun recordTrialEnd(ledger: ProLedger?, purchaseTime: Instant, end: Instant): ProLedger? {
+        if (ledger == null) return null
+        val key = PlayEntitlement.trialKey(purchaseTime)
+        if (ledger.trialEnds[key] == end) return ledger
+        return ledger.copy(trialEnds = ledger.trialEnds + (key to end))
+    }
+
+    /** What the trial reminder last handed to the system (`TrialReminder.nextMark`). */
+    fun withTrialReminder(ledger: ProLedger?, mark: TrialReminderMark?): ProLedger? =
+        if (ledger == null || ledger.trialReminder == mark) ledger else ledger.copy(trialReminder = mark)
 }
 
 /** Whether a dose may be logged right now. */
@@ -261,36 +331,4 @@ data class ProRoute(val then: ProPendingAction? = null) {
 /** An introductory offer's terms, as the store gives them. */
 data class IntroTerms(val mode: Mode, val period: PlanPeriod, val periodCount: Int, val displayPrice: String) {
     enum class Mode { ON_US, PAY_AS_YOU_GO, PAY_UP_FRONT }
-}
-
-/** The Pro words CORE shows: the locked bar (Shared/ProCopy.swift; the paywall's copy is NEXT). */
-object ProCopy {
-    /** "7 days", "1 day", "14 days" for 2 weeks; "1 month", "3 months". */
-    fun span(intro: IntroTerms): String {
-        val days = intro.period.days
-        if (days != null) {
-            val total = days * maxOf(intro.periodCount, 1)
-            return if (total == 1) "1 day" else "$total days"
-        }
-        val total = intro.period.value * maxOf(intro.periodCount, 1)
-        val word = intro.period.unitWord
-        return if (total == 1) "1 $word" else "$total ${word}s"
-    }
-
-    /** "7 days on us", for an introductory offer that costs nothing. Null for any other kind. */
-    fun introTag(intro: IntroTerms?): String? {
-        if (intro == null || intro.mode != IntroTerms.Mode.ON_US) return null
-        return "${span(intro)} on us"
-    }
-
-    /** The slim bar under Today's progress line in locked mode. */
-    fun lockedBar(eligible: Boolean?, intro: IntroTerms?): String {
-        val tag = introTag(intro)
-        if (eligible == true && tag != null) return "Start $tag"
-        if (eligible == false) return "Pro ended. Tap to continue"
-        return "Taken Pro. Tap to continue"
-    }
-
-    const val LOCKED_DIALOG = "Logging needs Taken Pro. Open Taken to continue."
-    const val HEADLINE = "Keep your record."
 }
