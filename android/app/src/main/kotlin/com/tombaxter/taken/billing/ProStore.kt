@@ -84,6 +84,7 @@ class ProStore(
     private var buying: CompletableDeferred<PurchaseOutcome>? = null
     private var buyingPlan: PlayPlan? = null
     private val acknowledging = HashSet<String>()
+    private var messagesDue = false
 
     init {
         gateway.setPurchasesListener { response, updated -> scope.launch { purchasesUpdated(response, updated) } }
@@ -123,7 +124,16 @@ class ProStore(
             settled = false
             armSettle()
         }
-        activity?.get()?.let { gateway.showInAppMessages(it) { scope.launch { refresh() } } }
+        // Play's own messages once per opening, once the connection is up (refresh shows them).
+        messagesDue = true
+    }
+
+    /** Play's in-app messages (a declined payment), once each time Taken opens, after Play has connected. */
+    private fun showMessagesIfDue() {
+        if (!messagesDue) return
+        val host = activity?.get() ?: return
+        messagesDue = false
+        gateway.showInAppMessages(host) { scope.launch { refresh() } }
     }
 
     override fun resumed() {
@@ -176,6 +186,7 @@ class ProStore(
             markSettled()
             return false
         }
+        showMessagesIfDue()
         val answer = gateway.queryPurchases()
         lastResponse = answer.response
         val changed = applyPurchases(answer.value, answered = answer.response == PlayResponse.OK)
