@@ -207,9 +207,9 @@ fun WeightScreen(model: AppModel, platform: Platform) {
         else if (imeVisible) imeSeen = true
         else if (imeSeen) focusManager.clearFocus()
     }
-    // On small phones or with large text: 0.35 s after focus, if the small line comes within 16 of the Weigh in bar, the
-    // page scrolls up just enough.
-    LaunchedEffect(weight.entryFocused) {
+    // On small phones or with large text: once the keyboard has settled (0.35 s after the bar last moved), if the small
+    // line comes within 16 of the Weigh in bar, the page scrolls up just enough.
+    LaunchedEffect(weight.entryFocused, barTopPx) {
         if (!weight.entryFocused) return@LaunchedEffect
         delay(350)
         val clearance = with(density) { 16.dp.roundToPx() }

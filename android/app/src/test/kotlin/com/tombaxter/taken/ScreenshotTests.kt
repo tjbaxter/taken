@@ -256,11 +256,19 @@ class ScreenshotTests {
     }
 
     private fun captureWeight(screen: String, look: ThemeID, suffix: String = "") {
-        keyboard = if (WeightDemo.draft(screen) != null) KEYBOARD else 0.dp
+        val typing = WeightDemo.draft(screen) != null
+        keyboard = if (typing) KEYBOARD else 0.dp
         capture("${screen}_${look.raw}$suffix", DemoScreens.make(screen, look)) {
             when (screen) {
                 "weight-settings" -> compose.onNodeWithTag("weight-switch").performScrollTo()
                 "weight-data" -> compose.onNodeWithTag("import-weight").performScrollTo()
+            }
+            if (typing) {
+                // The page's 0.35 s wait for the keyboard to settle, before it clears the small line of the bar.
+                compose.mainClock.advanceTimeBy(600)
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(600))
+                compose.waitForIdle()
+                compose.mainClock.advanceTimeBy(600)
             }
         }
         keyboard = 0.dp

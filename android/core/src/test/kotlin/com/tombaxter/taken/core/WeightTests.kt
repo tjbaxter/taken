@@ -213,6 +213,9 @@ class WeightTests {
         assertEquals("194.6", WeightFormat.value(194.6 * 0.45359237, WeightUnit.LB, enUS))
         assertEquals("1000.0", WeightFormat.value(1000 * 0.45359237, WeightUnit.LB, enUS), "no grouping")
         assertEquals("88.1", WeightFormat.trend(88.123, WeightUnit.KG, enGB))
+        // (Android) As ICU formats it on the iPhone: the shortest decimal, 88.35, rounded half to even, not the binary 88.3499...
+        assertEquals("88.4", WeightFormat.trend(88.35, WeightUnit.KG, enGB))
+        assertEquals("88.2", WeightFormat.trend(88.25, WeightUnit.KG, enGB))
         assertEquals("88.35 kg", WeightFormat.withUnit(88.35, WeightUnit.KG, enGB))
         assertEquals("88.35 kilograms", WeightFormat.spoken(88.35, WeightUnit.KG, enGB))
     }

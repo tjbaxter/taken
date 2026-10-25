@@ -126,7 +126,9 @@ object WeightFormat {
 
     /**
      * A number with `minFraction` to `maxFraction` decimals in the locale, never grouped: Swift's
-     * `.number.precision(.fractionLength(min...max)).grouping(.never).locale(locale)`, which rounds half to even.
+     * `.number.precision(.fractionLength(min...max)).grouping(.never).locale(locale)`. That is ICU, which rounds the
+     * shortest decimal that reads back as the double ("88.35", not the binary 88.3499...) half to even, so 88.35 shows
+     * as 88.4 at one decimal; the shortest decimal is Kotlin's `toString`, rounded the same way here.
      */
     fun decimal(value: Double, minFraction: Int, maxFraction: Int, locale: Locale = Locale.getDefault()): String {
         val format = DecimalFormat("0", DecimalFormatSymbols.getInstance(locale))
@@ -134,7 +136,8 @@ object WeightFormat {
         format.minimumFractionDigits = minFraction
         format.maximumFractionDigits = maxFraction
         format.roundingMode = RoundingMode.HALF_EVEN
-        return format.format(value)
+        if (!value.isFinite()) return format.format(value)
+        return format.format(BigDecimal(value.toString()))
     }
 
     /**
