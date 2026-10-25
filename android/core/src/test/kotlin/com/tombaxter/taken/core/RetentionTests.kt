@@ -11,6 +11,7 @@ import com.tombaxter.taken.core.stack.DaySummary
 import com.tombaxter.taken.core.stack.StackEngine
 import com.tombaxter.taken.core.stack.eraseAll
 import com.tombaxter.taken.core.stack.logDose
+import com.tombaxter.taken.core.surfaces.TakenWidgetKind
 import java.time.Instant
 import kotlin.test.Test
 import kotlin.test.assertEquals
@@ -21,7 +22,8 @@ import kotlin.test.assertTrue
 /**
  * Ported from TakenTests/RetentionTests.swift: Today's one-time rows, the evening nudge offered once, the honest repair and
  * the widget invite, each shown once and never again. London clock, the day starting at 04:00. The iPhone's Lock Screen
- * widget check is Android's home screen widget check (`widgetPlaced`), read by the app (NEXT 4).
+ * widget check is Android's home screen widget check (`widgetPlaced`, from `TakenWidgetKind.hasStackWidget`), read by the
+ * app each time it comes to the front (NEXT 4).
  */
 class RetentionTests {
 
@@ -174,6 +176,21 @@ class RetentionTests {
             "not for someone with the widget already on the home screen",
         )
         assertEquals("Log from your home screen: add the Taken widget", RetentionCopy.WIDGET_INVITE)
+    }
+
+    /**
+     * Adapts testTheLockScreenWidgetCheckReadsTheStackWidgetsLockScreenFamilies: the iPhone reads the stack widget's Lock
+     * Screen families from WidgetKit; Android reads which of Taken's widgets are on the home screen
+     * (`GlanceAppWidgetManager.getGlanceIds`), and only the stack widget answers the invite.
+     */
+    @Test
+    fun testTheHomeScreenWidgetCheckReadsTheStackWidgetOnly() {
+        assertFalse(TakenWidgetKind.hasStackWidget(emptyList()))
+        assertTrue(TakenWidgetKind.hasStackWidget(listOf(TakenWidgetKind.STACK)))
+        assertTrue(TakenWidgetKind.hasStackWidget(listOf(TakenWidgetKind.TODO, TakenWidgetKind.STACK)))
+        assertFalse(TakenWidgetKind.hasStackWidget(listOf(TakenWidgetKind.TODO)), "the To-do widget does not log doses")
+        assertEquals("TakenStack", TakenWidgetKind.STACK, "the kind the iPhone's widget extension declares")
+        assertEquals("TakenVoiceTodo", TakenWidgetKind.TODO)
     }
 
     // MARK: The honest repair

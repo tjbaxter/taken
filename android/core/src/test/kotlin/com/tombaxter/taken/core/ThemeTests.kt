@@ -81,6 +81,10 @@ class ThemeTests {
         val snapshot = WidgetSnapshot(state, at(2026, 10, 12, 21, 41), london)
         assertEquals(ThemeID.BLUSH, snapshot.theme)
         assertEquals(Looks.BLUSH, Looks.look(snapshot.theme))
+        assertEquals(
+            ThemeID.ICE, WidgetSnapshot.demo(at(2026, 10, 12, 21, 41), ThemeID.ICE, london).theme,
+            "the widget gallery preview follows the look too",
+        )
         assertEquals(ThemeID.SIGNAL, WidgetSnapshot(StackState(), at(2026, 10, 12, 9)).theme)
     }
 
