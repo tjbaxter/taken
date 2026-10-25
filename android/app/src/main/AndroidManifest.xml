@@ -1,9 +1,20 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- Taken for Android. Permissions: none of its own in this phase (SPEC-ANDROID 3.3 lists every one the later phases add).
-     The Advertising ID is removed as a guard, so no library can bring it in
+<!-- Taken for Android. Permissions (SPEC-ANDROID 3.3 lists every one): RECORD_AUDIO for voice to-dos, asked at the first
+     mic tap. The Advertising ID is removed as a guard, so no library can bring it in
      (https://support.google.com/googleplay/android-developer/answer/6048248). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Voice to-dos: heard by the on-device recognizer only, never saved (SPEC-ANDROID 11). -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- Apps targeting Android 11 and later must declare the speech recognition service they talk to
+         (https://developer.android.com/reference/android/speech/SpeechRecognizer#createSpeechRecognizer(android.content.Context)). -->
+    <queries>
+        <intent>
+            <action android:name="android.speech.RecognitionService" />
+        </intent>
+    </queries>
 
     <uses-permission
         android:name="com.google.android.gms.permission.AD_ID"
@@ -30,7 +41,7 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- taken:// links (SPEC-ANDROID 10.3). Today and Pro now; To-do and Weight come with their tabs. -->
+            <!-- taken:// links (SPEC-ANDROID 10.3): today, todo, todo/record and pro now; weight comes with its tab. -->
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
