@@ -20,6 +20,9 @@ on:
       - ".github/workflows/android.yml"
       # Draws the Android launcher icon, the splash glyph and the Play icon (the icons job).
       - "brand/icon.py"
+      # Draws the Play feature graphic from Taken's tokens and fonts (the icons job).
+      - "brand/play.py"
+      - "brand/fonts/**"
   workflow_dispatch:
 
 concurrency:
@@ -145,7 +148,7 @@ jobs:
           retention-days: 7
 
   icons:
-    name: Icons drawn from the iPhone's artwork
+    name: Icons and Play graphics drawn from Taken's artwork
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     defaults:
@@ -170,6 +173,19 @@ jobs:
           "$RUNNER_TEMP/icons/bin/pip" install --quiet --require-hashes --only-binary :all: -r "$RUNNER_TEMP/icons-requirements.txt"
       - name: The Android icons are what brand/icon.py draws
         run: '"$RUNNER_TEMP/icons/bin/python" brand/icon.py --android --check'
+      # brand/play.py draws the Play feature graphic (1024 x 500, no alpha) from Taken's tokens and fonts, and the store
+      # listing's icon.png must be icon.py's Play icon byte for byte (SPEC-ANDROID 14.2). This draws them again and fails
+      # on any difference; the fresh drawing is kept as an artifact so a change can be looked at before it is committed.
+      - name: The Play graphics are what brand/play.py draws
+        run: '"$RUNNER_TEMP/icons/bin/python" brand/play.py --check --fresh-out "$RUNNER_TEMP/play-graphics"'
+      - name: play-graphics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: play-graphics
+          path: ${{ runner.temp }}/play-graphics/*.png
+          if-no-files-found: warn
+          retention-days: 30
 
   release:
     name: Release bundle (R8, unsigned) and its checks
