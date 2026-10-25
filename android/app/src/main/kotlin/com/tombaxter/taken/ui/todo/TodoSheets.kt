@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.SolidColor
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -132,16 +133,27 @@ fun TodoEditSheet(model: AppModel, taskId: UUID, onDismiss: () -> Unit) {
                             RowDivider()
                             SwitchRow(TodoCopy.TIME, hasTime) { hasTime = it }
                             RowDivider()
-                            Row(
-                                Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 8.dp),
-                                verticalAlignment = Alignment.CenterVertically,
-                            ) {
-                                Text(TodoCopy.WHEN, style = TakenType.sans(17), color = colors.fg, modifier = Modifier.weight(1f))
+                            val values = @Composable {
                                 ValueButton(DATE_LABEL.format(moment), "${TodoCopy.WHEN}, ${DATE_LABEL.format(moment)}") { pickingDate = true }
                                 if (hasTime) {
                                     Spacer(Modifier.width(6.dp))
                                     val time = TodoText.clockTime(moment.toInstant(), clock)
                                     ValueButton(time, "${TodoCopy.TIME}, $time", mono = true) { pickingTime = true }
+                                }
+                            }
+                            if (LocalDensity.current.fontScale >= LARGE_TEXT) {
+                                // At large text the date and time go under "When", so none of them is cut.
+                                Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp)) {
+                                    Text(TodoCopy.WHEN, style = TakenType.sans(17), color = colors.fg)
+                                    Row(Modifier.padding(start = 0.dp), verticalAlignment = Alignment.CenterVertically) { values() }
+                                }
+                            } else {
+                                Row(
+                                    Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 8.dp),
+                                    verticalAlignment = Alignment.CenterVertically,
+                                ) {
+                                    Text(TodoCopy.WHEN, style = TakenType.sans(17), color = colors.fg, modifier = Modifier.weight(1f))
+                                    values()
                                 }
                             }
                         }

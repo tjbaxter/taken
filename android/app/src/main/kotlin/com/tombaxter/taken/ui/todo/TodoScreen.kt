@@ -245,25 +245,35 @@ private fun TodoRow(todo: TodoModel, task: TodoTask, onEdit: () -> Unit) {
                 verticalAlignment = Alignment.CenterVertically,
             ) {
                 TodoCheck(done = done || filling) { todo.toggle(task) }
-                Row(
-                    Modifier
-                        .weight(1f)
-                        .heightIn(min = 48.dp)
-                        .clickable(onClick = onEdit)
-                        .padding(start = 6.dp, top = 10.dp, bottom = 10.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                ) {
+                val words = Modifier
+                    .weight(1f)
+                    .heightIn(min = 48.dp)
+                    .clickable(onClick = onEdit)
+                    .padding(start = 6.dp, top = 10.dp, bottom = 10.dp)
+                val title = @Composable { modifier: Modifier, lines: Int ->
                     // Two lines at most, so the list stays a list; the whole title is in the edit sheet and in TalkBack.
                     Text(
                         task.title,
                         style = TakenType.sans(17),
                         color = if (done) colors.fgSubtle else colors.fg,
                         textDecoration = if (done || filling) TextDecoration.LineThrough else null,
-                        maxLines = 2,
+                        maxLines = lines,
                         overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f),
+                        modifier = modifier,
                     )
-                    TrailingParts(todo, task)
+                }
+                if (LocalDensity.current.fontScale >= LARGE_TEXT) {
+                    // At large text the due day and time go under the words, so neither squeezes the other.
+                    // [Own choice: the iPhone keeps one line; at 200% it leaves the title a word or two]
+                    Column(words) {
+                        title(Modifier, 3)
+                        Row { TrailingParts(todo, task, leading = 0.dp) }
+                    }
+                } else {
+                    Row(words, verticalAlignment = Alignment.CenterVertically) {
+                        title(Modifier.weight(1f), 2)
+                        TrailingParts(todo, task)
+                    }
                 }
             }
             Box(Modifier.fillMaxWidth().padding(start = 60.dp).height(1.dp).background(colors.line))
@@ -273,7 +283,7 @@ private fun TodoRow(todo: TodoModel, task: TodoTask, onEdit: () -> Unit) {
 
 /** "Tomorrow 09:00": the day in Geist, the time in Geist Mono. A done task shows when it was done. */
 @Composable
-private fun TrailingParts(todo: TodoModel, task: TodoTask) {
+private fun TrailingParts(todo: TodoModel, task: TodoTask, leading: androidx.compose.ui.unit.Dp = 10.dp) {
     val colors = Taken.colors
     val day: String?
     val time: String?
@@ -286,7 +296,7 @@ private fun TrailingParts(todo: TodoModel, task: TodoTask) {
         time = parts.time
     }
     val ink = if (todo.isOverdue(task)) colors.signalInk else colors.fgSubtle
-    Spacer(Modifier.width(10.dp))
+    Spacer(Modifier.width(leading))
     Row(verticalAlignment = Alignment.CenterVertically) {
         if (day != null) Text(day, style = TakenType.sans(14), color = ink, maxLines = 1)
         if (day != null && time != null) Spacer(Modifier.width(4.dp))
@@ -431,7 +441,8 @@ fun ListeningCard(todo: TodoModel) {
         }
         Spacer(Modifier.height(12.dp))
         val style = TakenType.sans(19, lineHeight = 25.sp)
-        val fourLines = with(LocalDensity.current) { (25.sp * 4).toDp() }
+        // Four of the text's own lines: Android 14's font scaling is non-linear, so 100 sp is not four times 25 sp.
+        val fourLines = with(LocalDensity.current) { 25.sp.toDp() * 4 }
         // The newest words stay in view: the text sits on the bottom of a four-line window and the oldest lines are
         // clipped at the top (the iPhone truncates the head).
         Box(Modifier.fillMaxWidth().heightIn(max = fourLines).clipToBounds(), contentAlignment = Alignment.BottomStart) {
@@ -634,3 +645,6 @@ fun MicrophoneRationale(todo: TodoModel) {
         modifier = Modifier.testTag("mic-rationale"),
     )
 }
+
+/** From this font scale the rows and the edit sheet stack what sits side by side at normal sizes. */
+internal const val LARGE_TEXT = 1.5f
