@@ -102,6 +102,32 @@ class StoreTests {
         assertTrue(left.contains("pro.json"), "the Taken Pro file stays")
     }
 
+    /**
+     * Erase all data removes the CSV copies Export wrote (whole copies of the log and the weigh-ins), and Taken's start
+     * removes any older than a day.
+     */
+    @Test
+    fun testEraseAllDataRemovesTheExportedCopies() = runBlocking {
+        val stores = TakenStores(context, scope, folder)
+        val exports = stores.exportsDir.apply { mkdirs() }
+        File(exports, "taken-log.csv").writeText("date,time,item\n")
+        File(exports, "taken-weight.csv").writeText("date,time,kg\n")
+        DataStorePersistence(stores, scope).eraseExtras()
+        withTimeout(5_000) {
+            while (stores.exportsDir.exists()) kotlinx.coroutines.delay(10)
+        }
+        assertFalse(stores.exportsDir.exists(), "no copy of the log outlives Erase all data")
+
+        val fresh = File(stores.exportsDir.apply { mkdirs() }, "taken-log.csv").apply { writeText("x") }
+        val old = File(stores.exportsDir, "taken-weight.csv").apply { writeText("x") }
+        val now = System.currentTimeMillis()
+        fresh.setLastModified(now - 60_000)
+        old.setLastModified(now - TakenStores.STALE_EXPORT_MS - 60_000)
+        stores.removeStaleExports(now)
+        assertTrue(fresh.exists(), "a share from a minute ago may still be read by the app it went to")
+        assertFalse(old.exists(), "one from yesterday goes")
+    }
+
     @Test
     fun testTheLedgerAndTheProfileRoundTrip() = runBlocking {
         val stores = TakenStores(context, scope, folder)

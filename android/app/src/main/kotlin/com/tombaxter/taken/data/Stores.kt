@@ -66,6 +66,12 @@ class TakenStores(
     val directory: File = folder ?: File(app.filesDir, "datastore")
     val photoFile: File = File(folder ?: app.filesDir, PHOTO_FILE)
 
+    /**
+     * `cache/exports`, where Export CSV writes taken-log.csv and taken-weight.csv just before the Sharesheet takes them
+     * (the FileProvider's `exports` path). Whole copies of the log, so they never outlive Erase all data.
+     */
+    val exportsDir: File = File(folder ?: app.cacheDir, EXPORTS_FOLDER)
+
     private fun file(name: String): File = File(directory, name)
 
     val stack: DataStore<StackState> = DataStoreFactory.create(
@@ -136,7 +142,28 @@ class TakenStores(
         }
     }
 
+    /**
+     * Erase all data: the exported CSV copies go too, so no copy of the log or the weigh-ins stays in Taken's cache. An app
+     * still holding a share's URI can read nothing more from it.
+     */
+    fun removeExports() {
+        runCatching { exportsDir.deleteRecursively() }
+    }
+
+    /**
+     * When Taken starts: exports older than a day go, so none lingers until Android happens to clear the cache. A newer one
+     * stays, since the app it was shared to may not have read it yet (an email still being written). [Own choice: a day]
+     */
+    fun removeStaleExports(now: Long = System.currentTimeMillis()) {
+        val files = exportsDir.listFiles() ?: return
+        for (file in files) {
+            if (now - file.lastModified() > STALE_EXPORT_MS) runCatching { file.delete() }
+        }
+    }
+
     companion object {
+        const val EXPORTS_FOLDER = "exports"
+        const val STALE_EXPORT_MS = 24L * 60 * 60 * 1000
         const val STACK_FILE = "taken.json"
         const val LEDGER_FILE = "pro.json"
         const val PROFILE_FILE = "profile.json"

@@ -44,7 +44,10 @@ interface Persistence {
     /** The profile photo as JPEG bytes, or null to remove it. */
     fun savePhoto(jpeg: ByteArray?)
 
-    /** Erase all data's files beyond the stack: the profile, the photo and every set-aside unreadable copy. */
+    /**
+     * Erase all data's files beyond the stack: the profile, the photo, every set-aside unreadable copy, and the CSV copies
+     * Export left in the cache.
+     */
     fun eraseExtras()
 
     /** A write is still on its way to disk: a file emission now is older than the screen. */
@@ -107,7 +110,12 @@ class DataStorePersistence(private val stores: TakenStores, private val scope: C
     override fun eraseExtras() {
         saveProfile(Profile())
         savePhoto(null)
-        scope.launch { withContext(Dispatchers.IO) { stores.removeSetAsideCopies() } }
+        scope.launch {
+            withContext(Dispatchers.IO) {
+                stores.removeSetAsideCopies()
+                stores.removeExports()
+            }
+        }
     }
 }
 

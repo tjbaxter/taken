@@ -154,6 +154,8 @@ class AppContainer(context: Context) {
     val todoNotifications: TodoNotificationScheduler = TodoNotificationScheduler { reminders.rebuild() }
 
     init {
+        // An exported CSV older than a day goes when Taken starts; Erase all data removes them all (SPEC-ANDROID 5.3).
+        scope.launch(Dispatchers.IO) { stores.removeStaleExports() }
         // Channels exist before anything is posted: "execute this code when your app starts"
         // (https://developer.android.com/develop/ui/views/notifications/build-notification).
         ReminderChannels.ensure(app)

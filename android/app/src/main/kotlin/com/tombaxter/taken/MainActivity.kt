@@ -264,7 +264,7 @@ class MainActivity : ComponentActivity(), Platform {
         lifecycleScope.launch {
             val uri = withContext(Dispatchers.IO) {
                 try {
-                    val folder = File(cacheDir, "exports").apply { mkdirs() }
+                    val folder = (application as TakenApp).container.stores.exportsDir.apply { mkdirs() }
                     val file = File(folder, fileName)
                     file.writeText(make())
                     FileProvider.getUriForFile(this@MainActivity, "$packageName.files", file)

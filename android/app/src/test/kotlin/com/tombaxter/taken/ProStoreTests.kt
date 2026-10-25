@@ -319,7 +319,9 @@ class ProStoreTests {
         val s = setup(play, retry = retry)
         open(s)
         assertEquals(1, retry.scheduled, "kept before the first try, so a process that goes mid-try loses nothing")
-        advanceUntilIdle()
+        // The store runs in backgroundScope, whose delays only advanceTimeBy moves on: 2 s, then 4 s.
+        advanceTimeBy(2_001)
+        advanceTimeBy(4_001)
         assertEquals(3, play.acknowledged.size, "three tries here")
         assertFalse(play.held.single().acknowledged)
         assertEquals(0, retry.cancelled, "still waiting")
