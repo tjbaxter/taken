@@ -1,5 +1,5 @@
 # Taken keeps no reflection-based serialization (the JSON codecs are hand written over kotlinx-serialization's tree), so
-# R8's defaults and the libraries' own consumer rules are enough.
+# R8's defaults and the libraries' own consumer rules are enough, but for the widgets' callbacks below.
 
 # The widgets' callbacks (SPEC-ANDROID 10.1): Glance runs an ActionCallback by its class name and makes it with
 # `getDeclaredConstructor().newInstance()` (glance-appwidget 1.2.0 RunCallbackAction). Glance's own consumer rule keeps the
