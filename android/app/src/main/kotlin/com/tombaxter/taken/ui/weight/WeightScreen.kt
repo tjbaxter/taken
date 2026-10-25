@@ -286,9 +286,9 @@ private fun save(model: AppModel, locale: Locale, closeKeyboard: () -> Unit) {
     model.saveWeighIn(kg, locale)
 }
 
-/** The person's locale for numbers and units. */
+/** The person's locale for numbers and units, read so a language change recomposes the page. */
 @Composable
-internal fun weightLocale(): Locale = LocalConfiguration.current.locales[0] ?: Locale.getDefault()
+internal fun weightLocale(): Locale = LocalConfiguration.current.locales.get(0)
 
 /** Android's "Remove animations" (animator duration scale 0), and debug captures, which hold still. */
 @Composable

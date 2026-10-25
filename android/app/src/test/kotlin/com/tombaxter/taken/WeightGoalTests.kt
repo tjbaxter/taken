@@ -94,7 +94,7 @@ class WeightGoalTests {
         assertTrue(last in 88.05..88.3, "$last")
         val left = assertIs<GoalReadout.ToGo>(picture.readout).kg
         assertTrue(WeightGoalCopy.roundedUp(left) in 1.1..1.3, "$left")
-        assertEquals("1.1 kg to 87.0", WeightGoalCopy.text(WeightGoalCopy.slot(picture.readout!!, 87.0, WeightUnit.KG, Locale.UK)))
+        assertEquals("1.1 kg to 87.0", WeightGoalCopy.text(WeightGoalCopy.slot(assertNotNull(picture.readout), 87.0, WeightUnit.KG, Locale.UK)))
         assertEquals(180.0, goal.weight.state.heightCm)
 
         val moment = DemoScreens.make("weight-goal-moment")
