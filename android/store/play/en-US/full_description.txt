@@ -1,0 +1,58 @@
+It's late, and you can't remember: did I take it today? Taken keeps the record of your daily pills and supplements. Tap a row when you take one, and look later to know, down to the minute.
+
+One tap
+• Tap a row on Today and it's logged, with the time beside it.
+• Take all logs every item still pending at once.
+• A second tap never un-logs a dose, and Undo is right there.
+• To change an item, tap the pencil, then the row. Touch and hold a row for Undo last dose and Set time.
+
+The answer, any time
+• Not sure an hour later? The answer is on screen the moment Taken opens.
+• Forgot to log? Set the real time, or fill in an earlier day in History.
+• Set your wake-up time, and a late-night dose still counts for the day you were living.
+
+Every schedule
+• Daily, every other day, weekly, twice or three times a day, or the days you pick, set for each item as you add it.
+• A weekly shot sits on its day. Logged a few days late, it still counts for its week.
+• Items not due today wait under Not today, with the day they are next due.
+• Add your stack from quick-pick chips, or type the first letters and pick a suggestion.
+
+Log it without opening Taken
+• Home screen widget: tap a row to log it, or tap Take all.
+• Quick Settings tile: swipe down and tap Take all, even before you unlock.
+
+A reminder that stays quiet
+• One optional evening nudge, around the time you choose.
+• It only appears if something is still pending. All done? Silence.
+• Take all straight from the notification.
+
+Your record
+• History shows five weeks of days at a glance, with your streak and 30-day completion.
+• Export every dose to CSV whenever you want it.
+
+Four looks
+• Signal, Blush, Phosphor or Ice. Pick one in Profile and your widgets follow.
+
+Your log stays yours
+• No account, no ads, no tracking, no analytics. Taken has no servers and never sends your log anywhere.
+• Everything you add stays on your phone, and in Android's own end-to-end encrypted backup if you use it.
+• Purchases go through Google Play.
+
+Voice to-dos
+• Tap the mic and say what you need to do. Taken saves it as you said it, one line per sentence, on one list. Nothing to choose.
+• Tap the circle when a to-do is done.
+• Speech becomes text on your phone, never sent anywhere, and the audio is never saved. Voice needs Android 12 or later and on-device speech for your language; you can always type instead.
+
+Taken Pro
+• Add your stack and log your first dose before you choose a plan.
+• After your first dose, logging needs Taken Pro: taps on Today, Take all, Set time, past days, adding items, the widget, the tile and the nudge. Your first voice note needs no plan; after it, adding to-dos is part of Pro.
+• Without Pro, your log, History and CSV export stay open.
+• Choose a yearly plan, a monthly plan, or one payment for good. Google Play shows each price in your currency before you buy.
+• New subscribers can start the yearly plan with 7 days on us, and Taken reminds you 3 days before the trial ends. When the 7 days are up, Google Play charges the yearly price, unless you cancel before the trial ends.
+• Subscriptions renew automatically until you cancel. Cancel anytime in Google Play under Subscriptions; Pro stays on until the end of the period you paid for.
+• Already have Pro on this Google account? Taken finds it each time it opens.
+
+Terms of Use: https://tjbaxter.github.io/taken/terms.html
+Privacy Policy: https://tjbaxter.github.io/taken/privacy.html
+
+A personal log for your own record. Taken is not a medical device and does not diagnose, treat, cure, or prevent any medical condition. Always consult a healthcare professional for medical advice, diagnosis, or treatment.
