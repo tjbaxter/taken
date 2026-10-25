@@ -105,6 +105,7 @@ import androidx.compose.ui.semantics.role
 import androidx.compose.ui.semantics.selected
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.SpanStyle
 import androidx.compose.ui.text.TextStyle
@@ -805,7 +806,10 @@ private fun SmallLine(model: AppModel, locale: Locale, modifier: Modifier) {
         contentKey = { it.kind },
         transitionSpec = { fadeIn(tween(200)) togetherWith fadeOut(tween(200)) },
         label = "weight-line",
-        modifier = modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = spoken }.testTag("weight-line"),
+        modifier = modifier.fillMaxWidth().clearAndSetSemantics {
+            contentDescription = spoken
+            testTag = "weight-line"
+        },
     ) { shown ->
         LineContent(model, locale, shown)
     }
@@ -1029,9 +1033,9 @@ private fun AllWeighInsRow(model: AppModel, count: Int) {
                 contentDescription = "${WeightCopy.ALL_WEIGH_INS}, $count"
                 role = Role.Button
                 onClick(label = "edit or delete a weigh-in") { model.sheet = Sheet.WeighIns; true }
+                testTag = "all-weigh-ins"
             }
-            .padding(horizontal = 16.dp)
-            .testTag("all-weigh-ins"),
+            .padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         Text(WeightCopy.ALL_WEIGH_INS, style = TakenType.sans(17), color = colors.fg, modifier = Modifier.weight(1f))
