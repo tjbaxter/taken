@@ -1,6 +1,7 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- The to-do capture widget (SPEC-ANDROID 10.1): the mic that opens Taken listening, and the open list. Placed at 2x2,
-     resizable from 2x1 up. Redrawn after every change to the to-dos, at the rollover and when a due time passes. -->
+     resizable from 2x1 up. Redrawn after every change to the to-dos, at the rollover and when a due time passes. Its
+     preview image (Android 9 to 11) is the preview layout as WidgetScreenshotTests draws it (widget-preview-todo.png). -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_todo_description"
     android:initialLayout="@layout/glance_default_loading_layout"
@@ -8,6 +9,7 @@
     android:minHeight="110dp"
     android:minResizeWidth="110dp"
     android:minResizeHeight="50dp"
+    android:previewImage="@drawable/widget_preview_todo_image"
     android:previewLayout="@layout/widget_preview_todo"
     android:resizeMode="horizontal|vertical"
     android:targetCellWidth="2"

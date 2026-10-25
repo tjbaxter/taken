@@ -4,7 +4,10 @@
      for (WL-2, https://developer.android.com/docs/quality-guidelines/widget-quality), with the cell sizes from
      https://developer.android.com/develop/ui/views/appwidgets/layouts. No periodic update (updatePeriodMillis 0): Taken
      redraws it after every write, at the day's rollover, when an item's hour is up and when cached Pro runs out. Previews:
-     generated on Android 15 and later (GlanceAppWidgetManager.setWidgetPreviews), the preview layout on 12 to 14. -->
+     generated on Android 15 and later (GlanceAppWidgetManager.setWidgetPreviews), the preview layout on 12 to 14, and on 9
+     to 11 the preview image, which is the preview layout as WidgetScreenshotTests draws it (widget-preview-stack.png in
+     android-screenshots): Google recommends "specifying both the previewLayout and previewImage attributes"
+     (https://developer.android.com/develop/ui/views/appwidgets/previews). Change the layout, draw the image again. -->
 <appwidget-provider xmlns:android="http://schemas.android.com/apk/res/android"
     android:description="@string/widget_stack_description"
     android:initialLayout="@layout/glance_default_loading_layout"
@@ -12,6 +15,7 @@
     android:minHeight="110dp"
     android:minResizeWidth="110dp"
     android:minResizeHeight="50dp"
+    android:previewImage="@drawable/widget_preview_stack_image"
     android:previewLayout="@layout/widget_preview_stack"
     android:resizeMode="horizontal|vertical"
     android:targetCellWidth="4"

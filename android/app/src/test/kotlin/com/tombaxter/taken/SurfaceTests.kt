@@ -260,7 +260,8 @@ class SurfaceTests {
         for (info in listOf(R.xml.widget_stack_info, R.xml.widget_todo_info)) {
             val provider = attributes(app.resources.getXml(info), "appwidget-provider").single()
             assertEquals("0", provider["updatePeriodMillis"], "Taken redraws them itself")
-            assertNotNull(provider["previewLayout"])
+            assertNotNull(provider["previewLayout"], "Android 12 to 14")
+            assertNotNull(provider["previewImage"], "Android 9 to 11, and the fallback")
             assertNotNull(provider["description"])
         }
         assertEquals(WidgetCopy.STACK_NAME, app.getString(R.string.widget_stack_name))
