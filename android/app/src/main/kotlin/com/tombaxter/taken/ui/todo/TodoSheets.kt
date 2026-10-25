@@ -6,6 +6,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -76,7 +78,7 @@ import java.util.UUID
  * undo bar; Cancel and Save (Save waits for words). The picker starts on the time said, the day said at 09:00, or
  * tomorrow at 09:00; what is saved is a time, or the calendar date picked (`TodoEditRules`). Kept across a rotation.
  */
-@OptIn(ExperimentalMaterial3Api::class)
+@OptIn(ExperimentalMaterial3Api::class, ExperimentalLayoutApi::class)
 @Composable
 fun TodoEditSheet(model: AppModel, taskId: UUID, onDismiss: () -> Unit) {
     val todo = model.todo
@@ -136,20 +138,20 @@ fun TodoEditSheet(model: AppModel, taskId: UUID, onDismiss: () -> Unit) {
                             val values = @Composable {
                                 ValueButton(DATE_LABEL.format(moment), "${TodoCopy.WHEN}, ${DATE_LABEL.format(moment)}") { pickingDate = true }
                                 if (hasTime) {
-                                    Spacer(Modifier.width(6.dp))
                                     val time = TodoText.clockTime(moment.toInstant(), clock)
                                     ValueButton(time, "${TodoCopy.TIME}, $time", mono = true) { pickingTime = true }
                                 }
                             }
                             if (LocalDensity.current.fontScale >= LARGE_TEXT) {
-                                // At large text the date and time go under "When", so none of them is cut.
+                                // At large text the date and time go under "When", and wrap, so none of them is cut.
                                 Column(Modifier.fillMaxWidth().padding(start = 16.dp, end = 8.dp, top = 10.dp, bottom = 6.dp)) {
                                     Text(TodoCopy.WHEN, style = TakenType.sans(17), color = colors.fg)
-                                    Row(Modifier.padding(start = 0.dp), verticalAlignment = Alignment.CenterVertically) { values() }
+                                    FlowRow(horizontalArrangement = Arrangement.spacedBy(6.dp)) { values() }
                                 }
                             } else {
                                 Row(
                                     Modifier.fillMaxWidth().heightIn(min = 56.dp).padding(start = 16.dp, end = 8.dp),
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp),
                                     verticalAlignment = Alignment.CenterVertically,
                                 ) {
                                     Text(TodoCopy.WHEN, style = TakenType.sans(17), color = colors.fg, modifier = Modifier.weight(1f))

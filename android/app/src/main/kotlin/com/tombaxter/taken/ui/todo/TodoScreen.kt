@@ -44,9 +44,11 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -468,15 +470,26 @@ fun ListeningCard(todo: TodoModel) {
         }
         Spacer(Modifier.height(12.dp))
         val style = TakenType.sans(19, lineHeight = 25.sp)
-        // Four of the text's own lines: Android 14's font scaling is non-linear, so 100 sp is not four times 25 sp.
-        val fourLines = with(LocalDensity.current) { 25.sp.toDp() * 4 }
-        // The newest words stay in view: the text sits on the bottom of a four-line window and the oldest lines are
-        // clipped at the top (the iPhone truncates the head).
-        Box(Modifier.fillMaxWidth().heightIn(max = fourLines).clipToBounds(), contentAlignment = Alignment.BottomStart) {
+        val density = LocalDensity.current
+        // The newest words stay in view: the text sits on the bottom of a window exactly as tall as its last four lines,
+        // measured from its own layout, and the older lines are clipped at the top (the iPhone truncates the head). Until
+        // the first layout, four lines of 25 sp.
+        var window by remember { mutableStateOf<androidx.compose.ui.unit.Dp?>(null) }
+        val sized = window?.let { Modifier.height(it) } ?: Modifier.heightIn(max = with(density) { 25.sp.toDp() * 4 })
+        Box(Modifier.fillMaxWidth().then(sized).clipToBounds(), contentAlignment = Alignment.BottomStart) {
             Text(
                 if (text.isEmpty()) TodoCopy.SAY_IT else TodoCapture.tail(text),
                 style = style,
                 color = if (text.isEmpty()) colors.fgFaint else colors.fg,
+                onTextLayout = { layout ->
+                    val lines = layout.lineCount
+                    val shown = if (lines > SHOWN_LINES) {
+                        layout.getLineBottom(lines - 1) - layout.getLineTop(lines - SHOWN_LINES)
+                    } else {
+                        layout.size.height.toFloat()
+                    }
+                    window = with(density) { shown.toDp() }
+                },
                 modifier = Modifier.fillMaxWidth().wrapContentHeight(align = Alignment.Bottom, unbounded = true),
             )
         }
@@ -675,3 +688,6 @@ fun MicrophoneRationale(todo: TodoModel) {
 
 /** From this font scale the rows and the edit sheet stack what sits side by side at normal sizes. */
 internal const val LARGE_TEXT = 1.5f
+
+/** The listening card shows the last four lines of what is heard (the iPhone's `lineLimit(4)`). */
+private const val SHOWN_LINES = 4
