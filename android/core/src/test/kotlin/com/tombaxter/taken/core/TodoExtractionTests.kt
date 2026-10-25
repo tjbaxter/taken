@@ -64,7 +64,7 @@ class TodoExtractionTests {
     fun testCannedAnswersInOtherShapesDecode() {
         assertEquals(listOf(RawTodo(title = "Buy milk")), TodoValidation.decode("""[{"title":"Buy milk"}]"""))
         assertEquals("2026-10-14", TodoValidation.decode("""{"tasks":[{"title":"Call Sam","due":"2026-10-14"}]}""")?.firstOrNull()?.dueISO8601)
-        assertEquals(emptyList(), TodoValidation.decode("""{"tasks":[]}"""))
+        assertEquals(emptyList<RawTodo>(), TodoValidation.decode("""{"tasks":[]}"""))
         assertNull(TodoValidation.decode("not json"))
     }
 

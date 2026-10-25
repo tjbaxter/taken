@@ -65,7 +65,7 @@ class NoteSorterTests {
         val calls: Calls = Calls(),
         val delayFor: (TodoChunk) -> Duration = { 10.milliseconds },
         val failure: (TodoChunk) -> Exception? = { null },
-        val answers: (TodoChunk) -> List<RawTodo> = CALLS,
+        val answers: (TodoChunk) -> List<RawTodo> = NoteSorterTests.CALLS,
     ) : ChunkSorting {
         override suspend fun prepare() = Unit
 

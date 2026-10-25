@@ -210,7 +210,7 @@ class NoteSorter(
      * the stop. Returns every part in the order said, each with its answer, or timed out. Runs to its end even from a
      * cancelled caller, as the iPhone's does: the note must be saved.
      */
-    suspend fun finish(note text: String): List<SortedChunk> = withContext(NonCancellable + confined) {
+    suspend fun finish(text: String): List<SortedChunk> = withContext(NonCancellable + confined) {
         val whole = SpokenNote(text)
         var begun = parts.size - queue.size
         var all = TodoChunker.chunks(whole, final = true, sent = begun)
@@ -309,7 +309,7 @@ class NoteSorter(
         val cutoff = Cutoff()
         asking = part to cutoff
         val answer = try {
-            firstResult(scope, limit(part), Answer.TimedOut, cutoff) {
+            firstResult<Answer>(scope, limit(part), Answer.TimedOut, cutoff) {
                 try {
                     Answer.Tasks(sorter.answer(part, prompt))
                 } catch (e: ChunkSortError.ContextExceeded) {

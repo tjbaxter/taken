@@ -82,10 +82,19 @@ data class TodoState(
 
     // MARK: Changing
 
-    /** Adds a note's tasks, in the order they were said, to the one list. Returns what was added. */
-    fun add(drafts: List<TodoDraft>, noteId: UUID = UUID.randomUUID(), at: Instant): List<TodoTask> {
+    /**
+     * Adds a note's tasks, in the order they were said, to the one list. Returns what was added. `ids` gives each task's
+     * id by its index (Android: the app makes the ids before the write, so a write replayed onto a file that moved on
+     * stores the ids the screen holds; a fresh id each by default).
+     */
+    fun add(
+        drafts: List<TodoDraft>,
+        noteId: UUID = UUID.randomUUID(),
+        at: Instant,
+        ids: (Int) -> UUID = { UUID.randomUUID() },
+    ): List<TodoTask> {
         val added = drafts.mapIndexed { index, draft ->
-            TodoTask(title = draft.title, due = draft.due, createdAt = at, noteId = noteId, order = index)
+            TodoTask(id = ids(index), title = draft.title, due = draft.due, createdAt = at, noteId = noteId, order = index)
         }
         tasks = tasks + added
         if (added.isNotEmpty() && firstNoteAt == null) firstNoteAt = at
@@ -120,7 +129,13 @@ data class TodoState(
      * sorted ones; the lines when the drafts are just those lines; what is there when it was changed; nothing when the
      * note was deleted or erased. (Taken/Todo/TodoNoteSave.swift)
      */
-    fun replaceNote(noteId: UUID, saved: List<TodoTask>, drafts: List<TodoDraft>, at: Instant): List<TodoTask> {
+    fun replaceNote(
+        noteId: UUID,
+        saved: List<TodoTask>,
+        drafts: List<TodoDraft>,
+        at: Instant,
+        ids: (Int) -> UUID = { UUID.randomUUID() },
+    ): List<TodoTask> {
         val current = tasks.filter { it.noteId == noteId }.sortedBy { it.order }
         if (current.isEmpty()) return emptyList()
         val untouched = current.size == saved.size && saved.all { line ->
@@ -132,7 +147,7 @@ data class TodoState(
         val first = current[0]
         val ids = current.map { it.id }.toSet()
         val added = drafts.mapIndexed { offset, draft ->
-            TodoTask(title = draft.title, due = draft.due, createdAt = first.createdAt, noteId = noteId, order = offset)
+            TodoTask(id = ids(offset), title = draft.title, due = draft.due, createdAt = first.createdAt, noteId = noteId, order = offset)
         }
         tasks = tasks.filter { it.id !in ids } + added
         prune(at)

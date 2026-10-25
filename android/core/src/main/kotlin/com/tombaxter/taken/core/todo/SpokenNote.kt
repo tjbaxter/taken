@@ -420,9 +420,9 @@ class SpokenNote(text: String) {
         val last = piece.indexOfLast{ SpokenNote.isWordCharacter(it) }
         if (first < 0 || last < 0) return@joinToString piece
         val core = piece.substring(first, last + 1)
-        val coreTokens = coreTokens(core)
-        if (coreTokens.size != 1 || counts[coreTokens[0]] != null) return@joinToString piece
-        val said = words.firstOrNull { word -> word.tokens.size == 1 && word.tokens[0] in variants(coreTokens[0]) }
+        val pieceTokens = coreTokens(core)
+        if (pieceTokens.size != 1 || counts[pieceTokens[0]] != null) return@joinToString piece
+        val said = words.firstOrNull { word -> word.tokens.size == 1 && word.tokens[0] in variants(pieceTokens[0]) }
             ?: return@joinToString piece
         piece.substring(0, first) + said.surface + piece.substring(last + 1)
     }
@@ -816,7 +816,7 @@ object SpokenDayTime {
     /** A word written as a clock time, hours and minutes: "9:30", "4:00", "19.30", never a price ("£9.50"). */
     fun isClockTime(word: SpokenNote.Word): Boolean {
         if (!clockPattern.matches(word.surface)) return false
-        return !word.raw.any { it in "£$€¥" }
+        return !word.raw.any { it in "£\$€¥" }
     }
 
     /** A day: today, tonight, tomorrow, a weekday, a month, "next week", "end of day", a date ("the 23rd"). */
