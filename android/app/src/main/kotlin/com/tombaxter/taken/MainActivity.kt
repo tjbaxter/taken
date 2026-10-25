@@ -60,6 +60,28 @@ class MainActivity : ComponentActivity(), Platform {
         }
     }
 
+    /**
+     * Import weight CSV: Android's document picker for a CSV, TSV or plain text file, no storage permission
+     * (https://developer.android.com/training/data-storage/shared/documents-files). The bytes are read off the main thread,
+     * and the result goes to the model, so a picker that outlives a rotation still lands.
+     */
+    private val weightPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                try {
+                    contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } catch (e: IOException) {
+                    null
+                } catch (e: SecurityException) {
+                    null
+                }
+            }
+            val text = bytes?.let { withContext(Dispatchers.Default) { com.tombaxter.taken.core.weight.WeightImport.text(it) } }
+            viewModel.model?.importWeights(text)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
@@ -153,12 +175,25 @@ class MainActivity : ComponentActivity(), Platform {
      * The log is built and written off the main thread, where disk work never belongs
      * (https://developer.android.com/topic/performance/vitals/anr); the Sharesheet opens back on it.
      */
-    override fun shareCsv(make: () -> String) {
+    override fun shareCsv(make: () -> String) = share(com.tombaxter.taken.core.stack.CsvExport.FILE_NAME, make)
+
+    /** taken-weight.csv, the same way. */
+    override fun shareWeightCsv(make: () -> String) = share(com.tombaxter.taken.core.weight.WeightCSV.FILE_NAME, make)
+
+    override fun importWeightCsv() {
+        try {
+            weightPicker.launch(arrayOf("text/csv", "text/comma-separated-values", "text/tab-separated-values", "text/plain"))
+        } catch (e: ActivityNotFoundException) {
+            viewModel.model?.importWeights(null)
+        }
+    }
+
+    private fun share(fileName: String, make: () -> String) {
         lifecycleScope.launch {
             val uri = withContext(Dispatchers.IO) {
                 try {
                     val folder = File(cacheDir, "exports").apply { mkdirs() }
-                    val file = File(folder, com.tombaxter.taken.core.stack.CsvExport.FILE_NAME)
+                    val file = File(folder, fileName)
                     file.writeText(make())
                     FileProvider.getUriForFile(this@MainActivity, "$packageName.files", file)
                 } catch (e: IOException) {

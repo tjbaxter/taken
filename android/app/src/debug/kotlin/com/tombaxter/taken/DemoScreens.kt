@@ -20,6 +20,12 @@ import com.tombaxter.taken.core.profile.Profile
 import com.tombaxter.taken.core.retention.TodayPrompt
 import com.tombaxter.taken.core.theme.ThemeID
 import com.tombaxter.taken.data.MemoryPersistence
+import com.tombaxter.taken.data.MemoryWeightPersistence
+import com.tombaxter.taken.core.weight.WeighIn
+import com.tombaxter.taken.core.weight.WeightGoal
+import com.tombaxter.taken.core.weight.WeightState
+import com.tombaxter.taken.core.weight.WeightUnit
+import com.tombaxter.taken.core.weight.day
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -59,7 +65,7 @@ object DemoScreens {
     fun make(screen: String, look: ThemeID = ThemeID.SIGNAL, stack: DemoStack = DemoStack.STANDARD): AppModel {
         val pending = screen == "today-pending"
         val now = if (pending) morning() else now(stack)
-        val allTaken = screen == "today-done"
+        val allTaken = screen == "today-done" || WeightDemo.allTaken(screen)
         var state = when (screen) {
             "empty", "add", "add-search" -> StackState(settings = StackSettings(reminderEnabled = true))
             else -> DemoData.state(now, allTaken = allTaken, yesterdayPartial = screen == "today-repair", zone = zone, stack = stack)
@@ -71,6 +77,8 @@ object DemoScreens {
             state = state.copy(doses = state.doses.filter { clock.day(it) != today })
         }
         if (screen == "today-nudge-offer") state = state.copy(settings = state.settings.copy(reminderEnabled = false))
+        // The Weight screens' chart gets its weekly dose ticks, and the offer its weekly shot.
+        if (WeightDemo.addsWeeklyShot(screen)) state = DemoData.withWeeklyShot(state, now, zone)
         state = state.copy(settings = state.settings.copy(theme = look))
         if (screen == "paywall-intro") {
             // The first run: a stack just added and its first dose, the moment the intro paywall follows.
@@ -87,6 +95,7 @@ object DemoScreens {
             )?.let { TodayPrompt.TrialEnds(it) }
             "today-nudge-offer" -> TodayPrompt.NudgeOffer(state.settings.reminderMinutes)
             "today-repair" -> TodayPrompt.Repair(com.tombaxter.taken.core.day.DayClock(state.settings.dayStartHour, zone).day(now).adding(-1))
+            "today-weight-offer" -> TodayPrompt.WeightOffer
             else -> null
         }
         val model = AppModel(
@@ -100,9 +109,14 @@ object DemoScreens {
             zone = { zone },
             locale = { Locale.US },
             isDemo = true,
-            launchTab = if (screen == "log" || screen == "day") AppTab.HISTORY else AppTab.TODAY,
+            launchTab = when {
+                screen == "log" || screen == "day" -> AppTab.HISTORY
+                WeightDemo.opensOnWeight(screen) -> AppTab.WEIGHT
+                else -> AppTab.TODAY
+            },
             launchEditing = screen == "today-edit",
             demoPrompt = prompt,
+            weightModel = WeightDemo.model(screen, now),
         )
         when (screen) {
             "add" -> {
@@ -120,6 +134,9 @@ object DemoScreens {
             "set-time" -> model.state.items.firstOrNull { it.name == "Magnesium" }?.let { model.sheet = Sheet.SetTime(it.id) }
             "day" -> model.sheet = Sheet.Day(DemoData.sheetDay(now, zone))
             "settings" -> model.openProfile()
+            "weight-list" -> model.sheet = Sheet.WeighIns
+            "weight-settings", "weight-data" -> model.openProfile()
+            "weight-goal-sheet", "weight-goal-low" -> model.sheet = Sheet.WeightGoal
         }
         if (screen.startsWith("settings-pro")) model.openProfile()
         if (screen.startsWith("paywall")) model.presentPaywall(if (screen == "paywall-intro") PaywallOrigin.INTRO else PaywallOrigin.BAR)
@@ -150,7 +167,7 @@ class DemoPro(
             fun sub(reason: ProReason, plan: ProPlan, renews: Boolean = true, end: Instant = horizon) =
                 ProStatus(isPro = true, reason = reason, checkedAt = now, expiresAt = end, willRenew = renews, plan = plan)
             return when (screen) {
-                "locked", "paywall", "paywall-intro", "settings-pro-locked" -> DemoPro(null)
+                "locked", "paywall", "paywall-intro", "settings-pro-locked", "weight-locked" -> DemoPro(null)
                 "paywall-trial-used" -> DemoPro(null, introEligible = false, offers = DemoPlay.offers(trial = false))
                 "paywall-no-yearly" -> DemoPro(null, introEligible = null, offers = DemoPlay.offers(trial = true) - ProPlan.YEARLY)
                 "paywall-loading" -> DemoPro(null, introEligible = null, offers = emptyMap(), offersPhase = OffersPhase.LOADING)
@@ -190,4 +207,115 @@ object DemoPlay {
     }
 
     fun offers(trial: Boolean): Map<ProPlan, PlanOffer> = PlayCatalog.plans(products(trial), Locale.US).mapValues { it.value.offer }
+}
+
+/**
+ * The Weight tab's demo screens (debug only), ported from Shared/WeightData.swift `WeightDemo` and WeightModel.demo:
+ * screen one as it opens (`weight`), typing (`weight-entry`, `weight-entry-range`), never weighed in (`weight-empty`),
+ * weighed in today (`weight-weighed`), locked (`weight-locked`), in pounds (`weight-lb`); screen two (`weight-first`,
+ * `weight-trend`); All weigh-ins (`weight-list`); Profile at the Weight switch and the CSV rows (`weight-settings`,
+ * `weight-data`); the goal's (`weight-goal`, `weight-goal-saved`, `weight-goal-moment`, `weight-goal-reached`,
+ * `weight-goal-reached-moment`, `weight-goal-sheet`, `weight-goal-low`); and `today-weight-offer`.
+ */
+object WeightDemo {
+    val pageScreens = listOf(
+        "weight", "weight-entry", "weight-entry-range", "weight-empty", "weight-first", "weight-weighed", "weight-trend",
+        "weight-locked", "weight-lb", "weight-list", "weight-settings", "weight-data",
+    )
+    val goalScreens = listOf(
+        "weight-goal", "weight-goal-saved", "weight-goal-moment", "weight-goal-reached", "weight-goal-reached-moment",
+        "weight-goal-sheet", "weight-goal-low",
+    )
+
+    /** The screens that open on the Weight tab (Profile's two open over it). */
+    fun opensOnWeight(screen: String?): Boolean = screen != null && (screen in pageScreens || screen in goalScreens)
+
+    /** The goal screens: Tom-like history from 97.8 kg, the goal 87.0 and 180 cm (`DemoData.goalWeighIns`). */
+    fun hasGoal(screen: String?): Boolean = screen in goalScreens
+
+    /** The goal's history six weeks on, down to about 86.8 and holding. */
+    fun goalReached(screen: String?): Boolean = screen == "weight-goal-reached" || screen == "weight-goal-reached-moment"
+
+    /** What the goal field holds on `weight-goal-low`. */
+    fun typedGoal(screen: String?): String? = if (screen == "weight-goal-low") "55.0" else null
+
+    /** What the entry screens type. */
+    fun draft(screen: String?): String? = when (screen) {
+        "weight-entry" -> "88.1"
+        "weight-entry-range" -> "883"
+        else -> null
+    }
+
+    /** The screens shown scrolled to screen two. */
+    fun opensOnTrend(screen: String?): Boolean = screen in listOf("weight-first", "weight-trend", "weight-goal", "weight-goal-reached")
+
+    /** The history includes a weigh-in today; elsewhere it ends yesterday, so the line reads "yesterday". */
+    fun includesToday(screen: String?): Boolean = screen in listOf("weight-weighed", "weight-list", "weight-settings", "weight-data")
+
+    /** Pounds (`weight-lb`); every other capture is in kilograms, so they read the same everywhere. */
+    fun unit(screen: String?): WeightUnit = if (screen == "weight-lb") WeightUnit.LB else WeightUnit.KG
+
+    /** The tab is on for every Weight screen and off everywhere else, so the other captures still show the default app. */
+    fun showsTab(screen: String?): Boolean = opensOnWeight(screen)
+
+    /** Weigh-ins everywhere the tab is on but `weight-empty`. */
+    fun hasWeighIns(screen: String?): Boolean = opensOnWeight(screen) && screen != "weight-empty"
+
+    /** A weekly shot in the stack, for the chart's dose ticks and the offer's medicine. */
+    fun addsWeeklyShot(screen: String?): Boolean = hasWeighIns(screen) || screen == "today-weight-offer"
+
+    /** Today with everything taken, as the offer needs. */
+    fun allTaken(screen: String?): Boolean = screen == "today-weight-offer"
+
+    /**
+     * The Weight tab's model for a screen: in memory, the tab on for the Weight screens with a flat-to-gently-falling
+     * line of weigh-ins (ending yesterday unless the screen is about today), in kilograms (pounds on `weight-lb`); off and
+     * empty for every other screen. The goal screens get Tom-like history, the goal and the height, and the in-memory
+     * state their line needs (a save on this visit, a point just lit).
+     */
+    fun model(screen: String, now: Instant): WeightModel {
+        val zone = DemoScreens.zone
+        val clock = com.tombaxter.taken.core.day.DayClock(DemoData.settings.dayStartHour, zone)
+        val state = WeightState()
+        if (showsTab(screen)) {
+            state.showsTab = true
+            state.unit = unit(screen)
+        }
+        if (hasGoal(screen)) {
+            state.weighIns = DemoData.goalWeighIns(
+                now, extraWeeks = if (goalReached(screen)) 6 else 0, momentKg = if (screen == "weight-goal-moment") 87.1 else null, zone = zone,
+            )
+            state.weighIns.minOfOrNull { clock.day(it) }?.let { first ->
+                state.goal = WeightGoal(87.0, first)
+                state.heightCm = 180.0
+            }
+        } else if (screen == "weight-first") {
+            // The first weigh-in, this morning: screen two with one dot.
+            val at = clock.date(clock.day(now), 7, 6)
+            state.weighIns = listOf(WeighIn(kg = 88.35, weighedAt = at, utcOffset = com.tombaxter.taken.core.day.DayClock.offset(zone, at)))
+        } else if (hasWeighIns(screen)) {
+            state.weighIns = DemoData.weighIns(now, includeToday = includesToday(screen), zone = zone)
+        }
+        state.firstWeighInAt = state.weighIns.minOfOrNull { it.weighedAt }
+        val model = WeightModel(MemoryWeightPersistence(state), state, clockNow = { now }, locale = { Locale.US }, isDemo = true)
+        model.demoTypedGoal = typedGoal(screen)
+        model.demoOpensOnTrend = opensOnTrend(screen)
+        draft(screen)?.let {
+            model.draft = it
+            model.entryRequested = true
+        }
+        val moments = model.moments(clock)
+        when (screen) {
+            "weight-goal-moment" -> {
+                model.justReached = moments.firstOrNull { it.kind == com.tombaxter.taken.core.weight.WeightMoment.Kind.Percent(10) }
+                model.justSaved = model.state.last?.id
+            }
+            "weight-goal-reached-moment" -> {
+                model.justReached = moments.firstOrNull { it.isGoal }
+                model.justSaved = model.state.last?.id
+            }
+            "weight-goal-saved" -> model.justSaved = model.state.last?.id
+        }
+        return model
+    }
 }

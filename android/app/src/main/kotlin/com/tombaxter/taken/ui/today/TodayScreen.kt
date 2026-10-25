@@ -68,6 +68,7 @@ import com.tombaxter.taken.Sheet
 import com.tombaxter.taken.core.format.Fmt
 import com.tombaxter.taken.core.retention.RetentionCopy
 import com.tombaxter.taken.core.retention.TodayPrompt
+import com.tombaxter.taken.core.weight.WeightCopy
 import com.tombaxter.taken.core.stack.DaySummary
 import com.tombaxter.taken.core.stack.ItemDay
 import com.tombaxter.taken.core.stack.ProgressCopy
@@ -424,7 +425,43 @@ private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt, openUrl: (Strin
             Spacer(Modifier.width(10.dp))
             Text(prompt.text, style = TakenType.sans(15, FontWeight.Medium), color = colors.fg)
         }
-        // The widget invite and the weight offer come with their phases (NEXT 4 and 6).
+        // The Weight tab offered once (SPEC 3.12): the nudge offer's shape, with Not now and Add tab. Add tab adds the tab
+        // after History without switching to it.
+        TodayPrompt.WeightOffer -> Column(
+            Modifier.fillMaxWidth().background(colors.bgRaised, shape).border(1.dp, colors.line, shape)
+                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 2.dp)
+                .testTag("weight-offer"),
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Symbols.MonitorWeight, contentDescription = null, tint = colors.signalInk, modifier = Modifier.size(18.dp).padding(top = 1.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(WeightCopy.OFFER, style = TakenType.sans(15, FontWeight.Medium), color = colors.fg)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(Taken.shapes.cell))
+                        .clickable(role = Role.Button) { model.answerWeightOffer(addTab = false) }.padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(WeightCopy.NOT_NOW, style = TakenType.sans(15, FontWeight.Medium), color = colors.fgMuted) }
+                Box(
+                    Modifier.heightIn(min = 48.dp)
+                        .clickable(role = Role.Button, onClickLabel = WeightCopy.ADD_TAB_HINT.removeSuffix(".").lowercase()) {
+                            model.answerWeightOffer(addTab = true)
+                        }
+                        .semantics { contentDescription = WeightCopy.ADD_TAB }
+                        .padding(horizontal = 4.dp)
+                        .testTag("weight-offer-add"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier.height(34.dp).background(colors.signalWash, CircleShape).border(1.dp, colors.signalEdge, CircleShape)
+                            .padding(horizontal = 14.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(WeightCopy.ADD_TAB, style = TakenType.sans(15, FontWeight.SemiBold), color = colors.signalInk) }
+                }
+            }
+        }
+        // The widget invite comes with its phase (NEXT 4).
         else -> Unit
     }
 }

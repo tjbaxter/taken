@@ -224,7 +224,7 @@ esac
 
 # --- No debug or demo code (SPEC-ANDROID 4: src/debug never reaches a release) ----------------------------------------
 debug_ok=1
-for mark in DemoScreens today-nudge-offer -demo-stack 'Alex Morgan'; do
+for mark in DemoScreens WeightDemo today-nudge-offer today-weight-offer -demo-stack 'Alex Morgan'; do
   grep -a -q -e "$mark" "$dex" && { fail "debug or demo code in the release dex ('$mark')"; debug_ok=0; }
 done
 for activity in androidx.compose.ui.tooling.PreviewActivity androidx.activity.ComponentActivity; do

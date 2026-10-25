@@ -53,6 +53,8 @@ import com.tombaxter.taken.core.stack.setDoseTime
 import com.tombaxter.taken.core.stack.takeAllPending
 import com.tombaxter.taken.core.stack.updateItem
 import com.tombaxter.taken.core.theme.ThemeID
+import com.tombaxter.taken.core.weight.WeighIn
+import com.tombaxter.taken.core.weight.WeightOffer
 import com.tombaxter.taken.data.Persistence
 import java.time.Instant
 import java.time.ZoneId
@@ -65,8 +67,11 @@ import kotlinx.coroutines.MainScope
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 
-/** The tabs (SPEC-ANDROID 6.2). To-do and Weight join with their phases (NEXT 5 and 6). */
-enum class AppTab { TODAY, HISTORY }
+/**
+ * The tabs (SPEC-ANDROID 6.2). To-do joins with its phase (NEXT 5). Weight is last and shows only while the person has
+ * turned it on (SPEC 3.12, [AppModel.visibleTabs]).
+ */
+enum class AppTab { TODAY, HISTORY, WEIGHT }
 
 /** One sheet at a time, presented from the root, so one place can close it. */
 sealed interface Sheet {
@@ -74,6 +79,12 @@ sealed interface Sheet {
     data class Day(val day: DayKey) : Sheet
     data class SetTime(val itemId: UUID) : Sheet
     data class EditItem(val itemId: UUID) : Sheet
+
+    /** All weigh-ins, with its editor page (`WeightModel.editing`). */
+    data object WeighIns : Sheet
+
+    /** Set goal or Change goal, from the Weight tab's More options menu. */
+    data object WeightGoal : Sheet
 }
 
 /** Navigation 3's back stack: the tabs, then Profile, then an item opened from Profile's Stack list. */
@@ -89,6 +100,18 @@ sealed interface UndoStep {
     data class Remove(val ids: Set<UUID>) : UndoStep
     /** Put doses back exactly as they were: a removed dose, or a dose before its time was changed. */
     data class Restore(val doses: List<Dose>) : UndoStep
+
+    /** A weigh-in just saved on the Weight tab: Undo removes it, and the point it lit. */
+    data class RemoveWeighIn(val id: UUID) : UndoStep
+
+    /** A weigh-in as it was before it was deleted or edited. */
+    data class RestoreWeighIn(val weighIn: WeighIn) : UndoStep
+
+    /** Bring the Weight tab back after Hide Weight tab. */
+    data object ShowWeightTab : UndoStep
+
+    /** The goal as it was before Clear goal, start included. */
+    data class RestoreWeightGoal(val goal: com.tombaxter.taken.core.weight.WeightGoal) : UndoStep
 }
 
 /** The toast: a message, a time in Geist Mono after it, Undo, and the sentence TalkBack says for it. */
@@ -142,8 +165,13 @@ class AppModel(
     launchEditing: Boolean = false,
     demoPrompt: TodayPrompt? = null,
     /** Where the model's timed work runs (the intro paywall's 1.5 s, the wait for Play): the view model's scope. */
-    private val scope: CoroutineScope = MainScope(),
+    internal val scope: CoroutineScope = MainScope(),
+    /** The Weight tab's model (weights.json); tests and screens without one get an empty file in memory. */
+    weightModel: WeightModel? = null,
 ) {
+    /** The Weight tab (SPEC 3.12, SPEC-ANDROID 12): weights.json, off until the person turns the tab on. */
+    val weight: WeightModel = weightModel ?: WeightModel(clockNow = clockNow, locale = locale, isDemo = isDemo)
+
     var state: StackState by mutableStateOf(initialState)
         private set
     var ledger: ProLedger? by mutableStateOf(initialLedger)
@@ -176,8 +204,14 @@ class AppModel(
         get() = frontTab
         set(value) {
             if (value != AppTab.TODAY && editingStack) editingStack = false
+            // Leaving the Weight tab ends its visit: the line's sentence and the draft go (the iPhone's onDisappear).
+            if (frontTab == AppTab.WEIGHT && value != AppTab.WEIGHT) weight.endVisit()
             frontTab = value
         }
+
+    /** The tabs on the bar: Weight, last, only while it is on. */
+    val visibleTabs: List<AppTab>
+        get() = AppTab.entries.filter { it != AppTab.WEIGHT || weight.showsTab }
 
     private var shownSheet: Sheet? by mutableStateOf(null)
 
@@ -265,6 +299,7 @@ class AppModel(
         recomputeStats()
         pro.listen { proDidChange() }
         pro.adoptLedger(initialLedger)
+        weight.onWriteFailed = { show(Toast(nextToastId(), com.tombaxter.taken.core.weight.WeightCopy.COULD_NOT_SAVE)) }
     }
 
     // MARK: Derived
@@ -328,7 +363,9 @@ class AppModel(
             if (isDemo) return demoPrompt
             return TodayPrompts.pick(
                 settings = settings, hasStack = hasStack, today = today, repairDay = repairDay, locked = isLocked,
-                widgetPlaced = true, trialNotice = trialNotice, weightOffer = false, nudgeAvailable = NUDGE_AVAILABLE,
+                widgetPlaced = true, trialNotice = trialNotice,
+                // The Weight tab's one-time offer comes last, after every other row (SPEC 3.12).
+                weightOffer = WeightOffer.shows(weight.state, state, today, clock), nudgeAvailable = NUDGE_AVAILABLE,
             )
         }
 
@@ -384,6 +421,8 @@ class AppModel(
     /** Taken went to the background (`ON_STOP`): the stack's edit mode ends, so the next open is a tap that logs again. */
     fun didEnterBackground() {
         if (editingStack) editingStack = false
+        // The Weight tab's visit ends when Taken leaves the foreground, as on the iPhone.
+        weight.endVisit()
     }
 
     /** The file changed under the screen (a later surface wrote it). Adopted only when no write of ours is on its way. */
@@ -461,9 +500,11 @@ class AppModel(
         val route = ProRoute.parse(url)
         if (route == null) {
             sheet = null
-            if (url.removePrefix("taken://").substringBefore('?').substringBefore('/') == "today") {
+            val host = url.removePrefix("taken://").substringBefore('?').substringBefore('/')
+            if (host == "today" || host == "weight") {
                 while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
-                tab = AppTab.TODAY
+                // taken://weight: the Weight tab, or Today while it is off.
+                if (host == "weight") openWeightTab() else tab = AppTab.TODAY
             }
             return
         }
@@ -530,7 +571,11 @@ class AppModel(
         }
     }
 
-    fun presentPaywall(origin: PaywallOrigin, pending: (() -> Unit)? = null) {
+    /**
+     * `keepSheet`: the paywall comes over the sheet in use (All weigh-ins asking to edit a weigh-in), as the iPhone
+     * presents it over the sheet's level, so the sheet is still there once it closes.
+     */
+    fun presentPaywall(origin: PaywallOrigin, pending: (() -> Unit)? = null, keepSheet: Boolean = false) {
         if (paywall != null) return
         // Any paywall counts as the one after the first dose, so it never comes up on its own a second time. Plans looked
         // at from Profile before anything was logged do not: the first dose still brings it up once.
@@ -538,7 +583,7 @@ class AppModel(
             val at = clockNow()
             if (!introShown) updateLedger { ProLedgers.markIntroShown(it, at) }
         }
-        if (origin == PaywallOrigin.ACTION || origin == PaywallOrigin.LINK) sheet = null
+        if ((origin == PaywallOrigin.ACTION || origin == PaywallOrigin.LINK) && !keepSheet) sheet = null
         afterPaywall = null
         paywall = PaywallRequest(origin, pending)
         // Prices, periods and the trial are read from Play each time the paywall opens (SPEC-ANDROID 9.3).
@@ -691,6 +736,8 @@ class AppModel(
         when (val step = toast.undo ?: return) {
             is UndoStep.Remove -> write { it.removeDoses(step.ids) }
             is UndoStep.Restore -> write { s -> step.doses.forEach { s.restore(it) } }
+            is UndoStep.RemoveWeighIn, is UndoStep.RestoreWeighIn, UndoStep.ShowWeightTab, is UndoStep.RestoreWeightGoal ->
+                undoWeight(step)
         }
         feel(Haptic.SOFT)
         dismissToast(toast)
@@ -809,6 +856,19 @@ class AppModel(
         }
     }
 
+    /**
+     * Add tab or Not now on Today's weight offer (SPEC 3.12). Either answer is final, and Add tab turns the tab on without
+     * switching to it.
+     */
+    fun answerWeightOffer(addTab: Boolean) {
+        if (isDemo) demoPrompt = null
+        weight.answerOffer(addTab)
+        if (addTab) {
+            feel(Haptic.TICK)
+            announce(com.tombaxter.taken.core.weight.WeightCopy.TAB_ADDED)
+        }
+    }
+
     /** The repair line's close: hidden for the day it was about. It never says the streak broke. */
     fun closeRepair(day: DayKey) {
         if (isDemo) {
@@ -863,6 +923,7 @@ class AppModel(
      */
     fun eraseAll() {
         write { it.eraseAll() }
+        weight.eraseAll()
         persistence.eraseExtras()
         profile = Profile()
         photo = null
@@ -872,7 +933,7 @@ class AppModel(
 
     // MARK: Toast and feedback
 
-    private fun nextToastId(): Long {
+    internal fun nextToastId(): Long {
         toastCounter += 1
         return toastCounter
     }
@@ -886,11 +947,11 @@ class AppModel(
         if (which == null || toast?.id == which.id) toast = null
     }
 
-    private fun feel(haptic: Haptic) {
+    internal fun feel(haptic: Haptic) {
         if (hapticsOn) onEffect(Effect.Feel(haptic))
     }
 
-    private fun announce(text: String) {
+    internal fun announce(text: String) {
         onEffect(Effect.Announce(text))
     }
 

@@ -43,6 +43,7 @@ class AppContainer(context: Context) {
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val stores = TakenStores(context)
     val persistence = DataStorePersistence(stores, scope)
+    val weightPersistence = com.tombaxter.taken.data.DataStoreWeightPersistence(stores, scope)
     val pro: ProSource = BuildWiring.pro(context, persistence, scope)
 
     init {
@@ -70,6 +71,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 container.persistence.updateLedger { it ?: fresh }
             }
             val profile = stores.profile.data.first()
+            val weights = stores.weights.data.first()
             val photo = withContext(Dispatchers.IO) { com.tombaxter.taken.data.PhotoFile.read(stores.photoFile) }
             val loaded = AppModel(
                 persistence = container.persistence,
@@ -80,10 +82,16 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 pro = container.pro,
                 clockNow = { Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS) },
                 scope = viewModelScope,
+                weightModel = WeightModel(
+                    persistence = container.weightPersistence,
+                    initialState = weights,
+                    clockNow = { Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS) },
+                ),
             )
             model = loaded
             launch { stores.stack.data.collect { loaded.adopt(it) } }
             launch { stores.ledger.data.collect { file -> file.ledger?.let(loaded::adoptLedger) } }
+            launch { stores.weights.data.collect { loaded.weight.adopt(it) } }
         }
     }
 

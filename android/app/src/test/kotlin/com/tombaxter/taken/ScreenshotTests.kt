@@ -54,12 +54,15 @@ class ScreenshotTests {
     /** The review frames get a phone's system bars; the store frames do not (real app only, no device chrome). */
     private var systemBars = true
 
+    /** The keyboard's height for the typing frames: Robolectric draws no keyboard, so its space shows as the inset. */
+    private var keyboard by mutableStateOf(0.dp)
+
     private fun start() {
         compose.setContent {
             val model = current ?: return@setContent
             // A new model is a new screen: nothing carries over from the last capture.
             key(model) {
-                if (systemBars) WithSystemBars { TakenRoot(model, Platform.none) } else TakenRoot(model, Platform.none)
+                if (systemBars) WithSystemBars(ime = keyboard) { TakenRoot(model, Platform.none) } else TakenRoot(model, Platform.none)
             }
         }
     }
@@ -219,6 +222,73 @@ class ScreenshotTests {
         }
     }
 
+    /**
+     * The Weight tab (SPEC-ANDROID 12): in every look, the page as it opens, typing with the keyboard's space below the
+     * Weigh in bar (the keyboard itself is the system's and is not drawn on the JVM), screen two with the goal and its lit
+     * points (one point and its label, and all three), and Today's one-time offer; the rest in Signal, a few in Blush.
+     */
+    @Test
+    fun weightScreens() {
+        start()
+        for (look in looks) {
+            for (screen in WEIGHT_EVERY_LOOK) captureWeight(screen, look)
+        }
+        for (screen in WeightDemo.pageScreens + WeightDemo.goalScreens) {
+            if (screen in WEIGHT_EVERY_LOOK) continue
+            captureWeight(screen, ThemeID.SIGNAL)
+        }
+        for (screen in listOf("weight-empty", "weight-goal-moment", "weight-list", "weight-goal-sheet")) captureWeight(screen, ThemeID.BLUSH)
+        // The More options menu, the long press on today's number, and a press on the chart.
+        capture("weight-menu_signal", DemoScreens.make("weight")) { compose.onNodeWithTag("weight-more").performClick() }
+        capture("weight-longpress_signal", DemoScreens.make("weight-weighed")) {
+            compose.onNodeWithTag("weight-number").performTouchInput { longClick() }
+        }
+        current = DemoScreens.make("weight-goal")
+        compose.waitForIdle()
+        compose.onNodeWithTag("weight-chart").performTouchInput { down(center) }
+        compose.waitForIdle()
+        save("weight-scrub_signal")
+        compose.onNodeWithTag("weight-chart").performTouchInput { up() }
+        compose.waitForIdle()
+        for (range in listOf("week", "30d")) {
+            capture("weight-trend-$range" + "_signal", DemoScreens.make("weight-trend")) { compose.onNodeWithTag("range-$range").performClick() }
+        }
+    }
+
+    private fun captureWeight(screen: String, look: ThemeID, suffix: String = "") {
+        keyboard = if (WeightDemo.draft(screen) != null) KEYBOARD else 0.dp
+        capture("${screen}_${look.raw}$suffix", DemoScreens.make(screen, look)) {
+            when (screen) {
+                "weight-settings" -> compose.onNodeWithTag("weight-switch").performScrollTo()
+                "weight-data" -> compose.onNodeWithTag("import-weight").performScrollTo()
+            }
+        }
+        keyboard = 0.dp
+    }
+
+    @Test
+    @Config(fontScale = 2f)
+    fun weightAtLargerText() {
+        start()
+        for (screen in listOf("weight", "weight-entry", "weight-trend", "weight-goal", "weight-list", "weight-goal-sheet", "today-weight-offer")) {
+            captureWeight(screen, ThemeID.SIGNAL, "_font200")
+        }
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun weightOnASmallPhone() {
+        start()
+        for (screen in listOf("weight", "weight-entry", "weight-goal")) captureWeight(screen, ThemeID.SIGNAL, "_small")
+    }
+
+    @Test
+    @Config(qualifiers = TABLET)
+    fun weightOnATablet() {
+        start()
+        for (screen in listOf("weight", "weight-goal")) capture("${screen}_signal_tablet", DemoScreens.make(screen))
+    }
+
     /** The Play store's phone frames: 9:16 at 1215 x 2160, no system bars (SPEC-ANDROID 14.2). */
     @Test
     @Config(qualifiers = STORE)
@@ -242,6 +312,12 @@ class ScreenshotTests {
          * frame shows a pending row above Take all. [Own choice on the size]
          */
         const val STORE = "w405dp-h720dp-xxhdpi"
+
+        /** The Weight frames Tom sees in all four looks. */
+        val WEIGHT_EVERY_LOOK = listOf("weight", "weight-entry", "weight-goal", "weight-goal-reached", "today-weight-offer")
+
+        /** About a phone keyboard's height with its suggestion strip [Own choice for the frames]. */
+        val KEYBOARD = 300.dp
     }
 }
 
@@ -252,11 +328,13 @@ class ScreenshotTests {
  * Robolectric draws none. Edge-to-edge padding then shows as it does on a device. [Own choice: 24 dp]
  */
 @Composable
-fun WithSystemBars(statusBar: Dp = 24.dp, navigationBar: Dp = 24.dp, content: @Composable () -> Unit) {
+fun WithSystemBars(statusBar: Dp = 24.dp, navigationBar: Dp = 24.dp, ime: Dp = 0.dp, content: @Composable () -> Unit) {
     val insets = with(LocalDensity.current) {
         WindowInsetsCompat.Builder()
             .setInsets(WindowInsetsCompat.Type.statusBars(), Insets.of(0, statusBar.roundToPx(), 0, 0))
             .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, navigationBar.roundToPx()))
+            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, if (ime > 0.dp) (ime + navigationBar).roundToPx() else 0))
+            .setVisible(WindowInsetsCompat.Type.ime(), ime > 0.dp)
             .build()
     }
     DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(insets)) { content() }
