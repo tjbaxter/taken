@@ -115,7 +115,7 @@ fun TodoWidgetContent(face: TodoWidgetFace, look: Look) {
                 Row(GlanceModifier.fillMaxWidth().height(WidgetSizes.TOUCH), verticalAlignment = Alignment.CenterVertically) {
                     if (narrow) {
                         // Two cells across: "To-do" over "4 to-dos", so neither is cut.
-                        Box(GlanceModifier.defaultWeight()) { CountLines(face, palette) }
+                        Box(GlanceModifier.defaultWeight()) { CountLines(face, palette, zero = false) }
                     } else {
                         Text(
                             face.header,
@@ -143,12 +143,15 @@ fun TodoWidgetContent(face: TodoWidgetFace, look: Look) {
     }
 }
 
-/** "To-do" and "4 to-dos" on two lines, where a line has no room for "To-do · 4". */
+/**
+ * "To-do" and "4 to-dos" on two lines, where a line has no room for "To-do · 4". Over the list, nothing open reads
+ * "To-do" alone, as the iPhone's header does, since "Tap to see your list" sits under it.
+ */
 @Composable
-private fun CountLines(face: TodoWidgetFace, palette: WidgetPalette) {
+private fun CountLines(face: TodoWidgetFace, palette: WidgetPalette, zero: Boolean = true) {
     Column {
         Text(WidgetCopy.TODO, style = palette.sans(15f, palette.fg, FontWeight.Bold), maxLines = 1)
-        Text(face.countLine, style = palette.sans(12f, palette.fgMuted), maxLines = 1)
+        if (zero || face.openCount > 0) Text(face.countLine, style = palette.sans(12f, palette.fgMuted), maxLines = 1)
     }
 }
 
