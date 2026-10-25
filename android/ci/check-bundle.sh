@@ -3,11 +3,13 @@
 # FAIL. One copy for both callers, so they cannot drift apart: android.yml checks the unsigned bundle of every push, and
 # android-release.yml checks the signed bundle it hands to Google Play.
 #
-#   ci/check-bundle.sh BUNDLE.aab [--version-code N] [--signed-by SHA256]
+#   ci/check-bundle.sh BUNDLE.aab [--version-code N] [--signed-by SHA256] [--facts FILE]
 #
 #   --version-code N    the versionCode the bundle must carry (android-release.yml's)
 #   --signed-by SHA256  the upload certificate's SHA-256 fingerprint: the bundle must be signed by exactly that one
 #                       certificate. Without it the bundle is reported as unsigned or signed, and not judged.
+#   --facts FILE        also writes what was read (version_code, version_name, bytes, signer_sha256) as key=value
+#                       lines, for the release job's outputs and summary.
 #
 # Run from android/ after :app:bundleRelease. Needs a JDK (keytool, jarsigner), the SDK's build-tools (aapt2), readelf,
 # unzip and python3, all on GitHub's ubuntu-24.04 image. Reads the bundle itself, not Gradle's intermediates: the
@@ -20,10 +22,12 @@ set -euo pipefail
 aab=""
 want_code=""
 want_signer=""
+facts=""
 while [ $# -gt 0 ]; do
   case "$1" in
     --version-code) want_code="$2"; shift 2 ;;
     --signed-by) want_signer="$(tr '[:lower:]' '[:upper:]' <<<"$2")"; shift 2 ;;
+    --facts) facts="$2"; shift 2 ;;
     -*) echo "unknown option $1" >&2; exit 2 ;;
     *) aab="$1"; shift ;;
   esac
@@ -228,6 +232,7 @@ done
 # with the app signing key (https://support.google.com/googleplay/android-developer/answer/9842756). jarsigner proves the
 # signature is valid; keytool names the certificates behind it (https://docs.oracle.com/en/java/javase/21/docs/specs/man/keytool.html).
 verify="$(jarsigner -verify "$aab" 2>&1 || true)"
+fingerprints=""
 if [ -n "$want_signer" ]; then
   grep -q '^jar verified\.' <<<"$verify" && ok "signature verified by jarsigner" || fail "jarsigner could not verify the signature"
   grep -q -i 'unsigned entries' <<<"$verify" && fail "the bundle has unsigned entries"
@@ -242,6 +247,15 @@ if [ -n "$want_signer" ]; then
   fi
 else
   if grep -q '^jar is unsigned' <<<"$verify"; then ok "unsigned (only android-release.yml signs)"; else echo "NOTE signed, signer not checked here"; fi
+fi
+
+if [ -n "$facts" ]; then
+  {
+    echo "version_code=$version_code"
+    echo "version_name=$version_name"
+    echo "bytes=$bytes"
+    echo "signer_sha256=${fingerprints:-}"
+  } > "$facts"
 fi
 
 exit "$status"
