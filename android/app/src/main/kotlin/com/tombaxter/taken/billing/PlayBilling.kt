@@ -269,12 +269,14 @@ fun ProductDetails.toPlay(): PlayProduct = PlayProduct(
             tags = offer.offerTags,
         )
     },
-    oneTimeOffers = oneTimeOffers().map { option ->
+    // An option without an offer token cannot be bought (the purchase flow needs it), so it is not offered.
+    oneTimeOffers = oneTimeOffers().mapNotNull { option ->
+        val token = option.offerToken ?: return@mapNotNull null
         PlayOneTimeOffer(
             formattedPrice = option.formattedPrice,
             priceMicros = option.priceAmountMicros,
             currencyCode = option.priceCurrencyCode,
-            offerToken = option.offerToken,
+            offerToken = token,
             purchaseOptionId = option.purchaseOptionId,
             offerId = option.offerId,
         )
