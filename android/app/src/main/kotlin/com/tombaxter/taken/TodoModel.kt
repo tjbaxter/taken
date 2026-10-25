@@ -182,6 +182,9 @@ class TodoModel(
 
     /** Busy retries for a start that waits on Android's microphone prompt. */
     private var waitingRetries = 0
+
+    /** Android's microphone prompt is up: its answer starts listening or shows the blocker. */
+    private var awaitingMicrophone = false
     private var foreground = true
 
     // MARK: Reading
@@ -333,36 +336,37 @@ class TodoModel(
             showDemoRecording(lastMinute = false)
             return
         }
-        phase = TodoCapture.Phase.STARTING
         blocker = null
         clearNotice()
-        transcript = ""
-        level = 0.0
         val host = host
         if (!host.microphoneGranted) {
             // In context, at the first mic tap (https://developer.android.com/training/permissions/requesting): a
-            // rationale only when Android says one is due, with a way to say no.
-            if (host.microphoneRationaleDue) {
-                phase = TodoCapture.Phase.IDLE
-                askingMicrophone = true
-            } else {
-                waitingRetries = busyRetries
-                host.requestMicrophone()
-            }
+            // rationale only when Android says one is due, with a way to say no. The mic stays as it is while Android's
+            // prompt is up, so an answer lost to a restart never leaves it waiting: the next tap simply asks again.
+            if (host.microphoneRationaleDue) askingMicrophone = true else askMicrophone(busyRetries)
             return
         }
+        phase = TodoCapture.Phase.STARTING
+        transcript = ""
+        level = 0.0
         begin(busyRetries)
     }
 
-    /** Android's microphone prompt was answered. */
+    private fun askMicrophone(busyRetries: Int) {
+        waitingRetries = busyRetries
+        awaitingMicrophone = true
+        host.requestMicrophone()
+    }
+
+    /** Android's microphone prompt was answered: granted, listening starts; denied, the blocker card. */
     fun microphoneAnswered(granted: Boolean) {
-        if (phase != TodoCapture.Phase.STARTING || capture != null) return
+        if (!awaitingMicrophone) return
+        awaitingMicrophone = false
         if (granted) {
             val retries = waitingRetries
-            scope.launch { begin(retries) }
+            scope.launch { startListening(retries) }
         } else {
             blocker = Blocker.MICROPHONE
-            phase = TodoCapture.Phase.IDLE
         }
     }
 
@@ -370,9 +374,7 @@ class TodoModel(
     fun answerMicrophoneRationale(proceed: Boolean) {
         askingMicrophone = false
         if (!proceed || phase != TodoCapture.Phase.IDLE) return
-        phase = TodoCapture.Phase.STARTING
-        waitingRetries = 0
-        host.requestMicrophone()
+        askMicrophone(0)
     }
 
     private suspend fun begin(busyRetries: Int) {

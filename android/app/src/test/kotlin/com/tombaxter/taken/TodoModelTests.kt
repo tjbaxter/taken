@@ -385,7 +385,7 @@ class TodoModelTests {
         val rig = rig(isDemo = false, host = host, sorter = { FallbackSorter() })
         rig.model.micTapped()
         waitFor("the prompt") { host.asked == 1 }
-        assertEquals(TodoCapture.Phase.STARTING, rig.model.phase, "waiting on Android's prompt")
+        assertEquals(TodoCapture.Phase.IDLE, rig.model.phase, "Android's prompt is up; nothing starts before the answer")
         assertTrue(host.captures.isEmpty(), "nothing listens before the answer")
         assertFalse(rig.model.askingMicrophone, "no rationale unless Android says one is due")
 
@@ -417,10 +417,25 @@ class TodoModelTests {
         waitFor("the rationale again") { rig.model.askingMicrophone }
         rig.model.answerMicrophoneRationale(proceed = true)
         assertEquals(1, host.asked, "Continue shows Android's prompt")
-        assertEquals(TodoCapture.Phase.STARTING, rig.model.phase)
         rig.model.microphoneAnswered(false)
         assertEquals(TodoModel.Blocker.MICROPHONE, rig.model.blocker, "denied: the card with Open Settings and Type it instead")
         assertEquals(TodoCapture.Phase.IDLE, rig.model.phase)
+    }
+
+    /** An answer lost to a restart never leaves the mic waiting: the next tap asks again, and a stray answer is ignored. */
+    @Test
+    fun testAMicrophoneAnswerThatNeverComesLeavesTheMicReady() = test {
+        val host = FakeHost(granted = false)
+        val rig = rig(isDemo = false, host = host)
+        rig.model.micTapped()
+        waitFor("the prompt") { host.asked == 1 }
+        rig.model.micTapped()
+        waitFor("the prompt again") { host.asked == 2 }
+        assertEquals(TodoCapture.Phase.IDLE, rig.model.phase)
+        rig.model.microphoneAnswered(false)
+        rig.model.microphoneAnswered(true)
+        assertEquals(TodoModel.Blocker.MICROPHONE, rig.model.blocker, "one answer per prompt")
+        assertTrue(host.captures.isEmpty())
     }
 
     @Test
