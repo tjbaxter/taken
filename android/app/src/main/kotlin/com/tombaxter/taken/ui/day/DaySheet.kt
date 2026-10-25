@@ -21,8 +21,6 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.BasicText
-import androidx.compose.foundation.text.TextAutoSize
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material3.Icon
 import androidx.compose.material3.Text
@@ -43,7 +41,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.unit.sp
 import com.tombaxter.taken.AppModel
 import com.tombaxter.taken.core.day.DayClock
 import com.tombaxter.taken.core.day.DayKey
@@ -182,14 +179,14 @@ private fun DayItemRow(
         Column(Modifier.weight(1f)) {
             Text(row.item.name, style = TakenType.sans(16, FontWeight.Medium), color = colors.fg, maxLines = 1, overflow = TextOverflow.Ellipsis)
             Spacer(Modifier.height(3.dp))
-            // Shrinks before it truncates, as the iPhone's minimumScaleFactor(0.8) does, so "taken" or "missed" stays in
-            // view beside the time pills on a narrow phone.
-            BasicText(
-                text = Fmt.dayItemStatus(row, isToday),
-                style = TakenType.sans(14).copy(color = if (row.isDue && row.isDone) colors.signalInk else colors.fgSubtle),
-                maxLines = 1,
+            // Two lines when the time pills leave too little room, so "taken" or "missed" always stays in view. Shrinking
+            // first, as the iPhone's minimumScaleFactor(0.8) does, still cut it at 320 dp beside two pills.
+            Text(
+                Fmt.dayItemStatus(row, isToday),
+                style = TakenType.sans(14),
+                color = if (row.isDue && row.isDone) colors.signalInk else colors.fgSubtle,
+                maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
-                autoSize = TextAutoSize.StepBased(minFontSize = 11.sp, maxFontSize = 14.sp, stepSize = 0.25.sp),
             )
         }
         Spacer(Modifier.width(8.dp))

@@ -3,6 +3,7 @@ package com.tombaxter.taken
 import androidx.activity.ComponentActivity
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.runtime.snapshots.Snapshot
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.platform.testTag
@@ -118,9 +119,15 @@ class RowGestureTests {
 
         compose.mainClock.autoAdvance = false
         model.tap(model.today.items.first { it.item.name == "Magnesium" })
-        compose.mainClock.advanceTimeByFrame()
-        val first = assertNotNull(checkScale(), "All taken shows on the tap that finishes the day")
-        assertTrue(first < 0.6f, "the check springs in from 0.55, never shown full size first: $first")
+        // The tap came from outside a frame: hand the change to the recomposer, as a frame would.
+        Snapshot.sendApplyNotifications()
+        // Frame by frame: the first frame that shows All taken draws the check at 0.55, then it springs to full size.
+        val scales = (1..6).mapNotNull {
+            compose.mainClock.advanceTimeByFrame()
+            checkScale()
+        }
+        assertTrue(scales.isNotEmpty(), "All taken shows on the tap that finishes the day")
+        assertTrue(scales.first() < 0.6f, "the check springs in from 0.55, never drawn full size first: $scales")
         compose.mainClock.advanceTimeBy(2_000)
         assertEquals(1f, assertNotNull(checkScale()), 0.01f, "and settles at full size")
     }

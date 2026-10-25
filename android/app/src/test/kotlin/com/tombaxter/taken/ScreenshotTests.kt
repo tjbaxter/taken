@@ -1,5 +1,6 @@
 package com.tombaxter.taken
 
+import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -30,8 +31,10 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
+import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
+import java.time.Duration
 
 /**
  * The screens Tom sees (SPEC-ANDROID 15.3): drawn on the JVM by Robolectric's native graphics and saved by Roborazzi, no
@@ -116,6 +119,9 @@ class ScreenshotTests {
             compose.mainClock.advanceTimeBy(100)
             save("today-row-moment_${look.raw}")
             compose.mainClock.autoAdvance = true
+            compose.waitForIdle()
+            // The touch ripple is Android's RippleDrawable, animated on the looper's clock, not Compose's: let it finish.
+            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
             compose.waitForIdle()
             save("today-logged_${look.raw}")
         }
