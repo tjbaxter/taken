@@ -1,12 +1,22 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Taken for Android. Permissions (SPEC-ANDROID 3.3 lists every one): RECORD_AUDIO for voice to-dos, asked at the first
-     mic tap. The Advertising ID is removed as a guard, so no library can bring it in
+     mic tap; POST_NOTIFICATIONS for the reminders, asked in context; RECEIVE_BOOT_COMPLETED to put the reminders' alarms
+     back after a restart, never asked. No exact-alarm permission: the reminders use inexact alarms (SPEC-ANDROID 10.4).
+     The Advertising ID is removed as a guard, so no library can bring it in
      (https://support.google.com/googleplay/android-developer/answer/6048248). -->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
     <!-- Voice to-dos: heard by the on-device recognizer only, never saved (SPEC-ANDROID 11). -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
+
+    <!-- The evening nudge, the trial reminder and the to-dos' due times (SPEC-ANDROID 10.4). Android 13 and later ask the
+         person, in context (https://developer.android.com/develop/ui/views/notifications/notification-permission). -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <!-- Alarms are cancelled when the phone shuts down; the reminders are rebuilt once it has started
+         (https://developer.android.com/develop/background-work/services/alarms/schedule). -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
     <!-- Apps targeting Android 11 and later must declare the speech recognition service they talk to
          (https://developer.android.com/reference/android/speech/SpeechRecognizer#createSpeechRecognizer(android.content.Context)). -->
@@ -49,6 +59,31 @@
                 <data android:scheme="taken" />
             </intent-filter>
         </activity>
+
+        <!-- The reminders (SPEC-ANDROID 10.4). The alarm and TAKE ALL receivers are not exported: only Taken's own
+             PendingIntents reach them. -->
+        <receiver
+            android:name=".notify.ReminderAlarmReceiver"
+            android:exported="false" />
+        <receiver
+            android:name=".notify.NudgeActionReceiver"
+            android:exported="false" />
+        <!-- Off until an alarm is armed, as Google's alarm guide does with its boot receiver; Taken enables it while any
+             reminder is armed and disables it when none is. Exported because the system sends these: "If this receiver
+             listens for broadcasts sent from the system ... set android:exported to "true""
+             (https://developer.android.com/develop/background-work/background-tasks/broadcasts). Anything else that sends
+             one only starts a rebuild, which changes nothing that is already right. -->
+        <receiver
+            android:name=".notify.RescheduleReceiver"
+            android:enabled="false"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+                <action android:name="android.intent.action.TIME_SET" />
+                <action android:name="android.intent.action.TIMEZONE_CHANGED" />
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
 
         <!-- Profile > Data > Export CSV shares taken-log.csv through the Android Sharesheet
              (https://developer.android.com/training/sharing/send). -->
