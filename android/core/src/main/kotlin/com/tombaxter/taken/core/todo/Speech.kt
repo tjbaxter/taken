@@ -69,6 +69,31 @@ object TranscriptJoin {
         if (b.isEmpty()) return a
         return "$a $b"
     }
+
+    /** A finished segment shorter than this is never taken for a repeat: a person may well say three words twice. */
+    const val REPEAT_WORDS = 4
+
+    /**
+     * [Own choice, SPEC-ANDROID 11] Android 13's segmented sessions report a segment's results through
+     * `onSegmentResults`; the docs do not say whether the partial results that follow cover only the next segment or the
+     * whole session (https://developer.android.com/reference/android/speech/RecognitionListener#onSegmentResults(android.os.Bundle)).
+     * A result that starts with every word of the session's finished segments (at least [REPEAT_WORDS] of them, case
+     * and punctuation aside) is taken to repeat them, and only the words after them are new; anything else is new as
+     * it is. Nothing said is ever dropped: a result that is only the repeat gives "".
+     */
+    fun afterRepeat(result: String, finished: String): String {
+        val wanted = RecognizerTranscript.words(finished)
+        if (wanted.size < REPEAT_WORDS) return result
+        val raw = Words.split(result)
+        var matched = 0
+        for ((index, token) in raw.withIndex()) {
+            val word = RecognizerTranscript.words(token).firstOrNull() ?: continue
+            if (word != wanted[matched]) return result
+            matched += 1
+            if (matched == wanted.size) return raw.drop(index + 1).joinToString(" ")
+        }
+        return result
+    }
 }
 
 /**

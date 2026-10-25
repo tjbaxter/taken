@@ -18,6 +18,7 @@ import androidx.annotation.RequiresApi
 import androidx.core.content.ContextCompat
 import com.tombaxter.taken.core.todo.RecognizerTranscript
 import com.tombaxter.taken.core.todo.SpeechLanguage
+import com.tombaxter.taken.core.todo.TranscriptJoin
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withTimeoutOrNull
@@ -66,6 +67,9 @@ class OnDeviceSpeechCapture(context: Context) : VoiceCapture {
     private var sessionStartedAt = 0L
     private var restarts = 0
     private var finishing = false
+
+    /** The words of this session's finished segments (Android 13 and later), so a result that repeats them is caught. */
+    private var segments = ""
 
     override suspend fun start(languageTag: String, vocabulary: List<String>, listener: VoiceCapture.Listener): VoiceCapture.Start {
         val available = try {
@@ -138,6 +142,7 @@ class OnDeviceSpeechCapture(context: Context) : VoiceCapture {
         val request = request ?: return
         sessionOpen = true
         sessionStartedAt = SystemClock.elapsedRealtime()
+        segments = ""
         recognizer.startListening(request)
     }
 
@@ -164,12 +169,16 @@ class OnDeviceSpeechCapture(context: Context) : VoiceCapture {
         }
     }
 
-    private fun heard(results: Bundle?) {
+    private fun heard(results: Bundle?, segment: Boolean = false) {
         // With formatting on, "Each result list will contain two hypotheses in the order of 1) formatted text 2) raw
         // text": the first is the one shown and saved.
-        val text = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
+        val raw = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)?.firstOrNull() ?: return
+        // A recognizer that reports a segmented session's results from the session's start would repeat its finished
+        // segments: only the words after them are new (TranscriptJoin.afterRepeat, SPEC-ANDROID 11).
+        val text = TranscriptJoin.afterRepeat(raw, segments)
         if (text.isBlank()) return
         transcript.apply(text)
+        if (segment) segments = TranscriptJoin.join(segments, text)
         emit()
     }
 
@@ -270,7 +279,7 @@ class OnDeviceSpeechCapture(context: Context) : VoiceCapture {
 
         /** Android 13 and later, a segmented session: one finished segment. Its words stay; the next ones follow. */
         override fun onSegmentResults(segmentResults: Bundle) {
-            heard(segmentResults)
+            heard(segmentResults, segment = true)
             transcript.commit()
         }
 

@@ -98,6 +98,17 @@ class RecognizerTranscriptTests {
     // Android only: the phone's language against checkRecognitionSupport's lists (Android 13 and later).
 
     @Test
+    fun testASegmentedSessionsRepeatOfItsFinishedWordsIsDroppedOnce() {
+        val finished = "Call the dentist about Friday."
+        assertEquals("and buy milk", TranscriptJoin.afterRepeat("call the dentist about Friday and buy milk", finished), "a session-long result")
+        assertEquals("", TranscriptJoin.afterRepeat("Call the dentist about Friday.", finished), "only the repeat: nothing new yet")
+        assertEquals("buy milk", TranscriptJoin.afterRepeat("buy milk", finished), "a segment's own result is new as it is")
+        assertEquals("call the dentist", TranscriptJoin.afterRepeat("call the dentist", finished), "shorter than the finished words")
+        assertEquals("buy milk and eggs", TranscriptJoin.afterRepeat("buy milk and eggs", "buy milk."), "three words said twice stay")
+        assertEquals("call the vet about Friday", TranscriptJoin.afterRepeat("call the vet about Friday", finished), "a different word is new")
+    }
+
+    @Test
     fun testThePhonesLanguageIsMatchedExactlyThenByLanguage() {
         val installed = listOf("en-US")
         val pending = listOf("fr-FR")
