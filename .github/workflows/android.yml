@@ -43,6 +43,11 @@ jobs:
     timeout-minutes: 20
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The Google Play listing text in store/play (fastlane supply's layout): Play's limits, the Health Content and
+      # Services disclaimer, the Subscriptions policy's terms and the house copy rules (SPEC-ANDROID 14.2). Python's
+      # standard library only, so it runs first and needs neither Java nor Gradle.
+      - name: Play listing text
+        run: python3 scripts/check-play-metadata.py
       - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
         with:
           distribution: temurin
