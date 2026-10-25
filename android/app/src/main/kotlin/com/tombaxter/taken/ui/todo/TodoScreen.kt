@@ -45,6 +45,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -89,6 +90,7 @@ import com.tombaxter.taken.ui.shell.TabHeader
 import com.tombaxter.taken.ui.theme.Taken
 import com.tombaxter.taken.ui.theme.TakenType
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /**
  * The To-do tab (SPEC 3.10, SPEC-ANDROID 11; the iPhone's Taken/Todo/TodoRootView.swift): one list, the open tasks due
@@ -112,17 +114,21 @@ fun TodoScreen(model: AppModel, platform: Platform) {
         }
     }
     // A quick capture (`taken://todo/record`) starts once To-do is in front with nothing over it, so Listening and the
-    // stop button are on screen when the mic opens: the iPhone's 450 ms, then up to 12 x 150 ms.
+    // stop button are on screen when the mic opens: the iPhone's 450 ms, then up to 12 x 150 ms. The wait runs in the
+    // screen's scope, not the effect's: taking the request changes the key, which would cancel the effect.
     val pending = todo.pendingRecording
+    val screen = rememberCoroutineScope()
     LaunchedEffect(pending) {
         if (pending == null || !todo.takePendingRecording()) return@LaunchedEffect
-        delay(450)
-        var waited = 0
-        while (!model.showsTodoTabUncovered && waited < 12) {
-            delay(150)
-            waited += 1
+        screen.launch {
+            delay(450)
+            var waited = 0
+            while (!model.showsTodoTabUncovered && waited < 12) {
+                delay(150)
+                waited += 1
+            }
+            if (model.showsTodoTabUncovered) todo.startFromRequest()
         }
-        if (model.showsTodoTabUncovered) todo.startFromRequest()
     }
     // A note just saved, or a tapped due-time notification: its task comes into view, then the request is cleared.
     val target = todo.scrollTarget

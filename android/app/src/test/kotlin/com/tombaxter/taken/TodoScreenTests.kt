@@ -113,6 +113,22 @@ class TodoScreenTests {
         compose.onNodeWithTag("listening-card").assertExists()
     }
 
+    /** `taken://todo/record` over Profile and a sheet: To-do comes to the front and starts listening once uncovered. */
+    @Test
+    fun aRecordLinkListensOnceToDoIsUncovered() {
+        val model = DemoScreens.make("today")
+        show(model)
+        model.openProfile()
+        model.sheet = Sheet.Add
+        compose.waitForIdle()
+        model.handle("taken://todo/record")
+        compose.waitUntil(5_000) { model.todo.phase == TodoCapture.Phase.LISTENING }
+        assertEquals(AppTab.TODO, model.tab)
+        assertNull(model.sheet)
+        assertNull(model.todo.pendingRecording, "taken once")
+        compose.onNodeWithTag("listening-card").assertExists()
+    }
+
     @Test
     fun theBlockerOffersTypingAndTheTypeSheetSavesAsSaid() {
         val model = DemoScreens.make("todo-blocker")
