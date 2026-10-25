@@ -1,7 +1,9 @@
 import SwiftUI
 
-/// One item on Today: the name and a small frequency line on the left, and on the right the ring that logs (empty while
-/// pending, the look's signal with a check and the time once taken). The name opens the item sheet; only the ring logs.
+/// One item on Today, all of it one button: the name and a small frequency line on the left, and on the right the ring
+/// (empty while pending, the look's signal with a check and the time once taken). A tap anywhere on the row logs while
+/// pending and shows the times once taken; it never un-takes. In edit mode (Edit beside the Stack title) a chevron
+/// stands where the ring was and a tap opens the item sheet instead (REDESIGN.md, "Tap the row to log").
 struct ItemRowView: View {
     let row: ItemDay
     let now: Date
@@ -12,15 +14,29 @@ struct ItemRowView: View {
     /// The Not today group: the whole line under the name ("Every other day · Next: Thursday", "Weekly · Thu · Not
     /// logged", "Weekly · Counts for Thursday"). Nil on a Stack row.
     var note: String?
-    /// Locked mode: a tap on the ring opens Taken Pro instead of logging.
+    /// Locked mode: a tap opens Taken Pro instead of logging.
     var locked: Bool = false
+    /// Edit mode: a chevron instead of the time and the ring, and a tap opens the item sheet.
+    var editing: Bool = false
+    /// How many doses a tap on this row has logged (`AppModel.rowLogs`): each time it goes up, the logging moment plays
+    /// once.
+    var logs: Int = 0
     let onTake: () -> Void
     let onOpen: () -> Void
 
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.theme) private var theme
+    /// The logging moment: how many a tap has asked for, how many have played, the signal's wash over the row, and the
+    /// ring lifted above its size. `.task` runs again each time Today comes back to the front, so only a moment not yet
+    /// played plays.
+    @State private var moments = 0
+    @State private var played = 0
+    @State private var washed = false
+    @State private var lifted = false
 
     init(row: ItemDay, now: Date, clock: DayClock, expanded: Bool, nextLabel: String? = nil, note: String? = nil,
-         locked: Bool = false, onTake: @escaping () -> Void, onOpen: @escaping () -> Void) {
+         locked: Bool = false, editing: Bool = false, logs: Int = 0, onTake: @escaping () -> Void,
+         onOpen: @escaping () -> Void) {
         self.row = row
         self.now = now
         self.clock = clock
@@ -28,6 +44,8 @@ struct ItemRowView: View {
         self.nextLabel = nextLabel
         self.note = note
         self.locked = locked
+        self.editing = editing
+        self.logs = logs
         self.onTake = onTake
         self.onOpen = onOpen
     }
@@ -38,9 +56,11 @@ struct ItemRowView: View {
     private var quiet: Bool { nextLabel != nil && row.doses.isEmpty }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 4) {
-                Button(action: onOpen) {
+        // One Button, so a scroll that starts on the row cancels the touch before it logs, as UIScrollView does for
+        // every control inside it.
+        Button(action: editing ? onOpen : onTake) {
+            VStack(alignment: .leading, spacing: 0) {
+                HStack(spacing: 4) {
                     VStack(alignment: .leading, spacing: 3) {
                         Text(row.item.name)
                             .font(.sans(17, .sansMedium, relativeTo: .body))
@@ -55,41 +75,66 @@ struct ItemRowView: View {
                     .padding(.leading, 16)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, minHeight: 60, alignment: .leading)
-                    .contentShape(Rectangle())
+                    trailing
+                        .padding(.trailing, 16)
+                        .padding(.leading, 8)
+                        .frame(minWidth: 72, minHeight: 60, alignment: .trailing)
                 }
-                .buttonStyle(RowPressStyle())
-                Button(action: onTake) {
-                    HStack(spacing: 10) {
-                        if let last = row.lastDose {
-                            Text(Fmt.doseClock(last, viewing: today, clock))
-                                .font(.mono(15, .monoMedium, relativeTo: .body))
-                                .foregroundStyle(theme.signalInk)
-                                .fixedSize()
-                        }
-                        DoseRing(total: row.isDue ? row.dosesPerDay : 1, taken: row.takenCount, quiet: quiet,
-                                 locked: locked && (row.isPending || quiet))
-                    }
-                    .padding(.trailing, 16)
-                    .padding(.leading, 8)
-                    .frame(minWidth: 72, minHeight: 60, alignment: .trailing)
-                    .contentShape(Rectangle())
+                if expanded && !editing {
+                    detail
+                        .padding(.leading, 16)
+                        .padding(.trailing, 16)
+                        .padding(.bottom, 14)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                 }
-                .buttonStyle(RingPressStyle())
             }
-            if expanded {
-                detail
-                    .padding(.leading, 16)
-                    .padding(.trailing, 16)
-                    .padding(.bottom, 14)
-                    .transition(.opacity.combined(with: .move(edge: .top)))
-            }
+            .background(theme.signalWash.opacity(washed ? 1 : 0))
+            // The gap between the name and the ring counts as the row too.
+            .contentShape(Rectangle())
         }
+        .buttonStyle(ItemRowPressStyle())
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(accessibilityLabel)
         .accessibilityHint(accessibilityHint)
         .accessibilityAddTraits(.isButton)
-        .accessibilityAction { onTake() }
+        .accessibilityAction {
+            if editing { onOpen() } else { onTake() }
+        }
         .accessibilityAction(named: "Edit item") { onOpen() }
+        .onChange(of: logs) { old, new in
+            if new > old { moments += 1 }
+        }
+        .task(id: moments) { await playMoment() }
+    }
+
+    /// The time and the ring, or in edit mode a chevron where the ring sits. They cross-fade as edit mode comes and
+    /// goes.
+    @ViewBuilder
+    private var trailing: some View {
+        if editing {
+            Image(systemName: "chevron.right")
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundStyle(theme.fgSubtle)
+                .frame(width: 30, height: 30)
+                .transition(.opacity)
+        } else {
+            RingSlot(row: row, today: today, clock: clock, quiet: quiet, locked: locked, lifted: lifted)
+                .transition(.opacity)
+        }
+    }
+
+    /// A tap just logged a dose here: the row washes in the look's signal and fades, and the ring lifts and settles on
+    /// DoseRing's spring, with the haptic AppModel plays. Reduce Motion keeps the wash, a fade, and drops the lift.
+    private func playMoment() async {
+        guard moments > played else { return }
+        played = moments
+        withAnimation(.easeOut(duration: 0.1)) {
+            washed = true
+            if !reduceMotion { lifted = true }
+        }
+        try? await Task.sleep(for: .milliseconds(100))
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.55)) { lifted = false }
+        withAnimation(.easeOut(duration: 0.6)) { washed = false }
     }
 
     /// "Daily", "2x daily · 1 of 2", "Every other day · Next: Thursday", "Weekly · Thu · Not logged".
@@ -117,14 +162,17 @@ struct ItemRowView: View {
     }
 
     private var accessibilityHint: String {
-        Self.accessibilityHint(row: row, quiet: quiet, locked: locked)
+        Self.accessibilityHint(row: row, quiet: quiet, locked: locked, editing: editing)
     }
 
     private var accessibilityLabel: String {
         Self.accessibilityLabel(row: row, today: today, clock: clock, nextLabel: nextLabel)
     }
 
-    nonisolated static func accessibilityHint(row: ItemDay, quiet: Bool, locked: Bool) -> String {
+    /// What a double tap does: the same as a tap anywhere on the row.
+    nonisolated static func accessibilityHint(row: ItemDay, quiet: Bool, locked: Bool,
+                                              editing: Bool = false) -> String {
+        if editing { return "Double tap to edit." }
         guard row.isPending || quiet else { return "Double tap for the times. Actions has Edit item." }
         return locked ? "Logging needs Taken Pro. Double tap to see plans." : "Double tap to mark taken."
     }
@@ -225,11 +273,62 @@ struct DoseRing: View {
     }
 }
 
-/// The ring's press: it gives a little, like a button you can feel.
-private struct RingPressStyle: ButtonStyle {
+/// The time and the ring on the right of a row. The ring gives a little while the row is held, like a button you can
+/// feel, and lifts when a tap logs. Reduce Motion keeps it still: the row's inset highlight shows the press.
+private struct RingSlot: View {
+    let row: ItemDay
+    let today: DayKey
+    let clock: DayClock
+    let quiet: Bool
+    let locked: Bool
+    let lifted: Bool
+
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.rowPressed) private var pressed
+    @Environment(\.theme) private var theme
+
+    init(row: ItemDay, today: DayKey, clock: DayClock, quiet: Bool, locked: Bool, lifted: Bool) {
+        self.row = row
+        self.today = today
+        self.clock = clock
+        self.quiet = quiet
+        self.locked = locked
+        self.lifted = lifted
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            if let last = row.lastDose {
+                Text(Fmt.doseClock(last, viewing: today, clock))
+                    .font(.mono(15, .monoMedium, relativeTo: .body))
+                    .foregroundStyle(theme.signalInk)
+                    .fixedSize()
+            }
+            DoseRing(total: row.isDue ? row.dosesPerDay : 1, taken: row.takenCount, quiet: quiet,
+                     locked: locked && (row.isPending || quiet))
+                .scaleEffect(pressed && !reduceMotion ? 0.9 : (lifted ? 1.12 : 1))
+                .animation(.snappy(duration: 0.16), value: pressed)
+        }
+    }
+}
+
+/// The row's press: the flat inset highlight every row has, and the ring gives a little (`RingSlot`, not with Reduce
+/// Motion).
+private struct ItemRowPressStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
-        configuration.label
-            .scaleEffect(configuration.isPressed ? 0.9 : 1)
-            .animation(.snappy(duration: 0.16), value: configuration.isPressed)
+        RowPressStyle().makeBody(configuration: configuration)
+            .environment(\.rowPressed, configuration.isPressed)
+    }
+}
+
+private struct RowPressedKey: EnvironmentKey {
+    static let defaultValue = false
+}
+
+private extension EnvironmentValues {
+    /// A Today row is held down (`ItemRowPressStyle`).
+    var rowPressed: Bool {
+        get { self[RowPressedKey.self] }
+        set { self[RowPressedKey.self] = newValue }
     }
 }
