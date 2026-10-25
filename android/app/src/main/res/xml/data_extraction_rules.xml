@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 12 and later (SPEC-ANDROID 5.4). Only Taken's own files go; set-aside unreadable copies and caches stay. A
+     phone that cannot encrypt the backup end to end backs up nothing. -->
+<data-extraction-rules>
+    <cloud-backup disableIfNoEncryptionCapabilities="true">
+        <include domain="file" path="datastore/taken.json" />
+        <include domain="file" path="datastore/pro.json" />
+        <include domain="file" path="datastore/todos.json" />
+        <include domain="file" path="datastore/weights.json" />
+        <include domain="file" path="datastore/profile.json" />
+        <include domain="file" path="profile-photo.jpg" />
+    </cloud-backup>
+    <device-transfer>
+        <include domain="file" path="datastore/taken.json" />
+        <include domain="file" path="datastore/pro.json" />
+        <include domain="file" path="datastore/todos.json" />
+        <include domain="file" path="datastore/weights.json" />
+        <include domain="file" path="datastore/profile.json" />
+        <include domain="file" path="profile-photo.jpg" />
+    </device-transfer>
+</data-extraction-rules>

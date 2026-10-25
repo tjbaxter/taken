@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Taken mark: a split capsule at 45 degrees, one half lit in Signal's amber, one half outlined. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+    <group
+        android:pivotX="54"
+        android:pivotY="54"
+        android:rotation="-45">
+        <path
+            android:fillColor="#FFB000"
+            android:pathData="M53,42.5 L39.5,42.5 A11.5,11.5 0 0,0 39.5,65.5 L53,65.5 Z" />
+        <path
+            android:fillColor="#00000000"
+            android:pathData="M56.5,44 L68.5,44 A10,10 0 0,1 68.5,64 L56.5,64 Z"
+            android:strokeWidth="3"
+            android:strokeColor="#A1A1AA" />
+    </group>
+</vector>

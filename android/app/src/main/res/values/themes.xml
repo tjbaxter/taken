@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- The window before Compose draws: Signal's dark canvas, so a cold launch never flashes white. Everything else is
+         Compose, themed from Taken's look tokens (ui/theme/TakenTheme.kt). -->
+    <style name="Theme.Taken" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/launch_canvas</item>
+    </style>
+</resources>

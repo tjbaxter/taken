@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Taken for Android. Permissions: none of its own in this phase (SPEC-ANDROID 3.3 lists every one the later phases add).
+     The Advertising ID is removed as a guard, so no library can bring it in
+     (https://support.google.com/googleplay/android-developer/answer/6048248). -->
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <uses-permission
+        android:name="com.google.android.gms.permission.AD_ID"
+        tools:node="remove" />
+
+    <!-- Auto Backup (SPEC-ANDROID 5.4): the JSON files and the photo go to the person's own Drive, end-to-end encrypted
+         from Android 9, and never unencrypted (https://developer.android.com/identity/data/autobackup). -->
+    <application
+        android:name=".TakenApp"
+        android:allowBackup="true"
+        android:dataExtractionRules="@xml/data_extraction_rules"
+        android:fullBackupContent="@xml/backup_rules"
+        android:icon="@mipmap/ic_launcher"
+        android:label="@string/app_name"
+        android:supportsRtl="true"
+        android:theme="@style/Theme.Taken">
+
+        <activity
+            android:name=".MainActivity"
+            android:exported="true"
+            android:launchMode="singleTask"
+            android:windowSoftInputMode="adjustResize">
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+            <!-- taken:// links (SPEC-ANDROID 10.3). Today and Pro now; To-do and Weight come with their tabs. -->
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="taken" />
+            </intent-filter>
+        </activity>
+
+        <!-- Profile > Data > Export CSV shares taken-log.csv through the Android Sharesheet
+             (https://developer.android.com/training/sharing/send). -->
+        <provider
+            android:name="androidx.core.content.FileProvider"
+            android:authorities="${applicationId}.files"
+            android:exported="false"
+            android:grantUriPermissions="true">
+            <meta-data
+                android:name="android.support.FILE_PROVIDER_PATHS"
+                android:resource="@xml/file_paths" />
+        </provider>
+    </application>
+</manifest>

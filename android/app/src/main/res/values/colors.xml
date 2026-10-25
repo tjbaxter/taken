@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Signal's canvas: the launch background every look fades in from (Shared/Theme.swift launchCanvas). -->
+    <color name="launch_canvas">#08090A</color>
+</resources>
