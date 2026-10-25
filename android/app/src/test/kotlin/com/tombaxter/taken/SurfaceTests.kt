@@ -146,6 +146,40 @@ class SurfaceTests {
         assertFalse(container.surfaces.locked(inputs, now, ProSource.untilBilling))
     }
 
+    /** Runs the main looper until `done` holds: DataStore reads on its own thread and hands back to the main one. */
+    private fun awaitMain(what: String, done: () -> Boolean) {
+        val end = System.currentTimeMillis() + 10_000
+        while (true) {
+            shadowOf(android.os.Looper.getMainLooper()).idle()
+            if (done()) return
+            check(System.currentTimeMillis() < end) { "never: $what" }
+            Thread.sleep(10)
+        }
+    }
+
+    /**
+     * The Take all tile on Android's own service (Robolectric's TileService): it draws a count and never a name, and a tap
+     * logs every pending dose with no unlock, as the iPhone's Control Center control does.
+     */
+    @Test
+    fun testTheTileSaysACountAndItsTapTakesAll() {
+        seed()
+        val service = org.robolectric.Robolectric.buildService(com.tombaxter.taken.tile.TakeAllTileService::class.java).create().get()
+        service.onStartListening()
+        awaitMain("the tile drawn") { service.qsTile.label?.toString() == WidgetCopy.TILE_LABEL }
+        assertEquals(android.service.quicksettings.Tile.STATE_ACTIVE, service.qsTile.state)
+        assertEquals("2 left", service.qsTile.subtitle?.toString())
+        assertEquals("Take all, 2 left", service.qsTile.contentDescription?.toString())
+        assertTrue(container.surfaces.tileAdded, "a tile that listens is in quick settings")
+
+        service.onClick()
+        awaitMain("the tap logged") { doses().size == 2 }
+        assertEquals(listOf(now, now), doses().map { it.takenAt })
+        awaitMain("the tile drawn again") { service.qsTile.state == android.service.quicksettings.Tile.STATE_INACTIVE }
+        assertEquals("1 left", service.qsTile.subtitle?.toString(), "Fish Oil's second dose waits for its hour")
+        service.onStopListening()
+    }
+
     // MARK: What the widgets carry
 
     @Test
