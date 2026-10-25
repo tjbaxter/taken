@@ -124,11 +124,11 @@ class TodoScreenTests {
         compose.onNodeWithTag("sheet-confirm").assertIsNotEnabled()
         compose.onNodeWithTag("todo-type-field").performTextInput("Call the bank. Buy stamps.")
         compose.onNodeWithTag("sheet-confirm").assertIsEnabled().performClick()
-        compose.waitUntil(5_000) {
-            model.todo.phase == TodoCapture.Phase.IDLE && model.todo.openTasks.any { it.title == "Buy stamps" }
-        }
+        compose.waitForIdle()
         assertNull(model.sheet)
-        assertTrue(model.todo.openTasks.any { it.title == "Call the bank" }, "one line per sentence")
+        // Saved at once as said, one line per sentence (TodoModelTests follows the rest of the save on its own thread).
+        val lines = model.todo.state.tasks.map { it.title }
+        assertTrue("Call the bank" in lines && "Buy stamps" in lines, "$lines")
     }
 
     @Test

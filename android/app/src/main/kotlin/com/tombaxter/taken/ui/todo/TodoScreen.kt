@@ -36,13 +36,16 @@ import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.Icon
 import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxDefaults
+import androidx.compose.material3.SwipeToDismissBoxState
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
-import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
@@ -189,12 +192,20 @@ private fun TodoRow(todo: TodoModel, task: TodoTask, onEdit: () -> Unit) {
     // A task that just came in washes in the signal (in 0.1 s, out over 0.4 s), as on the iPhone.
     val wash by animateColorAsState(if (washed) colors.signalWash else Color.Transparent, tween(if (washed) 100 else 400), label = "wash")
     val keepOffered = todo.keepOffer?.ids?.contains(task.id) == true
-    val swipe = rememberSwipeToDismissBoxState()
+    // A plain `remember`, not the saveable state `rememberSwipeToDismissBoxState` keeps: the list saves a row's saveable
+    // state by its key, so a task put back with Undo would come back already swiped away and be deleted again. The
+    // dismiss callback is one object per row, since SwipeToDismissBox restarts its effect when the callback changes.
+    val threshold = SwipeToDismissBoxDefaults.positionalThreshold
+    val swipe = remember { SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, threshold) }
+    val current by rememberUpdatedState(task)
+    val dismiss: (SwipeToDismissBoxValue) -> Unit = remember(todo) {
+        { value -> if (value == SwipeToDismissBoxValue.EndToStart) todo.delete(current) }
+    }
     SwipeToDismissBox(
         state = swipe,
         backgroundContent = { DeleteBehind() },
         enableDismissFromStartToEnd = false,
-        onDismiss = { value -> if (value == SwipeToDismissBoxValue.EndToStart) todo.delete(task) },
+        onDismiss = dismiss,
         modifier = Modifier.clearAndSetSemantics {
             testTag = "todo-row-${task.title}"
             contentDescription = todo.spoken(task)
@@ -388,11 +399,11 @@ fun ListeningCard(todo: TodoModel) {
             .background(colors.bgRaised, shape)
             .border(1.dp, colors.line, shape)
             .clearAndSetSemantics {
+                testTag = "listening-card"
                 contentDescription = label
                 stateDescription = value
             }
-            .padding(16.dp)
-            .testTag("listening-card"),
+            .padding(16.dp),
     ) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(7.dp).alpha(if (sorting) 0.4f else 1f).background(colors.signal, CircleShape))
