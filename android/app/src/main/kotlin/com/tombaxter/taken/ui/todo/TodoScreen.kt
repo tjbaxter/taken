@@ -95,7 +95,7 @@ import kotlinx.coroutines.launch
 /**
  * The To-do tab (SPEC 3.10, SPEC-ANDROID 11; the iPhone's Taken/Todo/TodoRootView.swift): one list, the open tasks due
  * first, then Done today; a tap on the circle finishes a task, a tap on the words opens it, a swipe to the start deletes
- * it with Undo. The dock holds the undo bar, one line (the listening card, the blocker, Keep as one or a notice), the big
+ * it with Undo and a swipe to the end finishes it. The dock holds the undo bar, one line (the listening card, the blocker, Keep as one or a notice), the big
  * mic and "Tap to finish". Voice capture stays tap, speak, end: no choice on the way, no waveform.
  */
 @Composable
@@ -204,13 +204,25 @@ private fun TodoRow(todo: TodoModel, task: TodoTask, onEdit: () -> Unit) {
     val threshold = SwipeToDismissBoxDefaults.positionalThreshold
     val swipe = remember { SwipeToDismissBoxState(SwipeToDismissBoxValue.Settled, threshold) }
     val current by rememberUpdatedState(task)
+    val rowScope = rememberCoroutineScope()
+    // To the start deletes (the iPhone's swipe, with Undo); to the end finishes or reopens and the row springs back, as
+    // Android's own swipe-to-dismiss guide does for a to-do list
+    // (https://developer.android.com/develop/ui/compose/touch-input/user-interactions/swipe-to-dismiss).
     val dismiss: (SwipeToDismissBoxValue) -> Unit = remember(todo) {
-        { value -> if (value == SwipeToDismissBoxValue.EndToStart) todo.delete(current) }
+        { value ->
+            when (value) {
+                SwipeToDismissBoxValue.EndToStart -> todo.delete(current)
+                SwipeToDismissBoxValue.StartToEnd -> {
+                    todo.toggle(current)
+                    rowScope.launch { swipe.reset() }
+                }
+                SwipeToDismissBoxValue.Settled -> Unit
+            }
+        }
     }
     SwipeToDismissBox(
         state = swipe,
-        backgroundContent = { DeleteBehind() },
-        enableDismissFromStartToEnd = false,
+        backgroundContent = { SwipeBehind(swipe.dismissDirection, done) },
         onDismiss = dismiss,
         modifier = Modifier.clearAndSetSemantics {
             testTag = "todo-row-${task.title}"
@@ -304,18 +316,33 @@ private fun TrailingParts(todo: TodoModel, task: TodoTask, leading: androidx.com
     }
 }
 
-/** What a swipe to the start shows behind the row: Delete, in the look's danger. */
+/**
+ * What a swipe shows behind the row: to the start, Delete in the look's danger; to the end, Done (or Not done) in the
+ * look's signal.
+ */
 @Composable
-private fun DeleteBehind() {
+private fun SwipeBehind(direction: SwipeToDismissBoxValue, done: Boolean) {
     val colors = Taken.colors
-    Row(
-        Modifier.fillMaxSize().background(colors.danger).padding(horizontal = 20.dp),
-        horizontalArrangement = Arrangement.End,
-        verticalAlignment = Alignment.CenterVertically,
-    ) {
-        Icon(Symbols.Delete, contentDescription = null, tint = colors.bg, modifier = Modifier.size(20.dp))
-        Spacer(Modifier.width(6.dp))
-        Text("Delete", style = TakenType.sans(15, FontWeight.SemiBold), color = colors.bg)
+    when (direction) {
+        SwipeToDismissBoxValue.EndToStart -> Row(
+            Modifier.fillMaxSize().background(colors.danger).padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.End,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Symbols.Delete, contentDescription = null, tint = colors.bg, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text("Delete", style = TakenType.sans(15, FontWeight.SemiBold), color = colors.bg)
+        }
+        SwipeToDismissBoxValue.StartToEnd -> Row(
+            Modifier.fillMaxSize().background(colors.signal).padding(horizontal = 20.dp),
+            horizontalArrangement = Arrangement.Start,
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Icon(Symbols.Check, contentDescription = null, tint = colors.onSignal, modifier = Modifier.size(20.dp))
+            Spacer(Modifier.width(6.dp))
+            Text(if (done) "Not done" else "Done", style = TakenType.sans(15, FontWeight.SemiBold), color = colors.onSignal)
+        }
+        SwipeToDismissBoxValue.Settled -> Unit
     }
 }
 

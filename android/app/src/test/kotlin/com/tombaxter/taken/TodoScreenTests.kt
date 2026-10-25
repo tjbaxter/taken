@@ -14,6 +14,7 @@ import androidx.compose.ui.test.performTextClearance
 import androidx.compose.ui.test.performTextInput
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipeLeft
+import androidx.compose.ui.test.swipeRight
 import com.tombaxter.taken.core.todo.TodoCapture
 import com.tombaxter.taken.core.todo.TodoCopy
 import com.tombaxter.taken.ui.shell.Platform
@@ -101,6 +102,18 @@ class TodoScreenTests {
         compose.onNodeWithTag("todo-undo").performClick()
         compose.waitForIdle()
         assertNotNull(model.todo.state.tasks.firstOrNull { it.title == "Send Mum the photos" }, "Undo puts it back")
+    }
+
+    @Test
+    fun aSwipeToTheEndFinishesATaskAndTheRowSpringsBack() {
+        val model = DemoScreens.make("todo")
+        show(model)
+        val photos = model.todo.state.tasks.first { it.title == "Send Mum the photos" }
+        compose.onNodeWithTag("todo-row-Send Mum the photos").performTouchInput { swipeRight() }
+        compose.waitForIdle()
+        assertTrue(photos.id in model.todo.completing || model.todo.state.task(photos.id)?.isDone == true, "finished")
+        assertNull(model.todo.deleted, "never deleted")
+        assertNotNull(model.todo.state.task(photos.id))
     }
 
     @Test
