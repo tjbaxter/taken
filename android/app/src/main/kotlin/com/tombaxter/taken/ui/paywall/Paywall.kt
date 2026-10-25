@@ -12,6 +12,7 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.BoxWithConstraints
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -110,6 +111,12 @@ fun PaywallHost(model: AppModel, platform: Platform) {
 
 private enum class Busy { BUYING, RESTORING }
 
+/** From 150% text the plan cards stack their price under the name, and the button scrolls with the plans. */
+private const val LARGE_TEXT = 1.5f
+
+/** Below this height (a small phone, a phone in landscape) the button scrolls with the plans. */
+private val SHORT_SCREEN = 680.dp
+
 private data class Note(val text: String, val lit: Boolean)
 
 @Composable
@@ -194,8 +201,9 @@ fun Paywall(model: AppModel, platform: Platform, initiallyUnlocked: Boolean = fa
     val ctaEnabled = !unlocked && busy == null && (offer != null || answered)
     val terms = if (offer == null) ProCopy.termsWithoutPrices(selected) else ProCopy.terms(offer, eligible)
     val timeline = ProCopy.trialTimeline(offers[ProPlan.YEARLY], eligible, model.now, model.clock.zone, remindable = !platform.notificationsOff)
-    // At very large text the button and terms scroll with the rest, so nothing is cut off (SPEC-ANDROID 6.2).
-    val largeText = LocalDensity.current.fontScale >= 1.5f
+    // At very large text, or on a short screen, the button and terms scroll after the plans, so the plans are never
+    // hidden behind a pinned button and nothing is cut off (SPEC-ANDROID 6.2). [Own choice for the thresholds]
+    val largeText = LocalDensity.current.fontScale >= LARGE_TEXT
 
     val content: @Composable () -> Unit = {
         Header(unlocked)
@@ -243,27 +251,29 @@ fun Paywall(model: AppModel, platform: Platform, initiallyUnlocked: Boolean = fa
         )
     }
 
-    Column(
+    BoxWithConstraints(
         Modifier
             .fillMaxSize()
             .background(colors.bg)
             .windowInsetsPadding(WindowInsets.safeDrawing)
             .testTag("paywall"),
-        horizontalAlignment = Alignment.CenterHorizontally,
     ) {
-        TopBar(unlocked) { model.closePaywall() }
-        if (largeText) {
-            Column(Modifier.widthIn(max = 560.dp).fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
-                Column(Modifier.padding(horizontal = 20.dp)) { content() }
-                Spacer(Modifier.height(16.dp))
-                dock()
+        val inline = largeText || maxHeight < SHORT_SCREEN
+        Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally) {
+            TopBar(unlocked) { model.closePaywall() }
+            if (inline) {
+                Column(Modifier.widthIn(max = 560.dp).fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {
+                    Column(Modifier.padding(horizontal = 20.dp)) { content() }
+                    Spacer(Modifier.height(16.dp))
+                    dock()
+                }
+            } else {
+                Column(
+                    Modifier.widthIn(max = 560.dp).fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)
+                        .padding(bottom = 14.dp),
+                ) { content() }
+                Box(Modifier.widthIn(max = 560.dp).fillMaxWidth()) { dock() }
             }
-        } else {
-            Column(
-                Modifier.widthIn(max = 560.dp).fillMaxWidth().weight(1f).verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)
-                    .padding(bottom = 14.dp),
-            ) { content() }
-            Box(Modifier.widthIn(max = 560.dp).fillMaxWidth()) { dock() }
         }
     }
 }
@@ -345,6 +355,7 @@ private fun PlanCard(
     val colors = Taken.colors
     val shape = RoundedCornerShape(Taken.shapes.card)
     val label = cardLabel(plan, offer, tag, missing)
+    val stacked = LocalDensity.current.fontScale >= LARGE_TEXT
     Row(
         Modifier
             .fillMaxWidth()
@@ -367,22 +378,29 @@ private fun PlanCard(
                     Spacer(Modifier.height(4.dp))
                     Text(tag, style = TakenType.sans(13, FontWeight.SemiBold), color = colors.signalInk)
                 }
+                if (stacked) {
+                    // Large text: the price under the name, never squeezed beside it.
+                    Spacer(Modifier.height(6.dp))
+                    PriceBlock(offer, selected, answered, alignEnd = false)
+                }
             }
-            Spacer(Modifier.width(8.dp))
-            PriceBlock(offer, selected, answered)
+            if (!stacked) {
+                Spacer(Modifier.width(8.dp))
+                PriceBlock(offer, selected, answered, alignEnd = true)
+            }
         }
     }
 }
 
 @Composable
-private fun PriceBlock(offer: PlanOffer?, selected: Boolean, answered: Boolean) {
+private fun PriceBlock(offer: PlanOffer?, selected: Boolean, answered: Boolean, alignEnd: Boolean) {
     val colors = Taken.colors
     if (offer == null) {
         Text(if (answered) "--" else "···", style = TakenType.mono(16), color = colors.fgFaint)
         return
     }
     val (amount, unit) = ProCopy.price(offer)
-    Column(horizontalAlignment = Alignment.End) {
+    Column(horizontalAlignment = if (alignEnd) Alignment.End else Alignment.Start) {
         // The billed amount is the most prominent price on the card.
         Row(verticalAlignment = Alignment.Bottom) {
             Text(amount, style = TakenType.mono(20), color = colors.fg, maxLines = 1)

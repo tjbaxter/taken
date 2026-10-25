@@ -110,7 +110,7 @@ class ScreenshotTests {
 
     /** Profile's Taken Pro section in view. */
     private fun scrollToPro(screen: String) {
-        if (screen.startsWith("settings-pro")) compose.onNodeWithTag("pro-status").performScrollTo()
+        if (screen.startsWith("settings-pro")) compose.onNodeWithText(com.tombaxter.taken.core.pro.ProCopy.RESTORE_AUTOMATIC).performScrollTo()
     }
 
     /** What the paywall's button does: Play's PENDING answer, and Pro coming on (the button lit, before it closes). */
