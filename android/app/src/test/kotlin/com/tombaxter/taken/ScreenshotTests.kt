@@ -1,18 +1,14 @@
 package com.tombaxter.taken
 
 import androidx.activity.ComponentActivity
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
-import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performTouchInput
-import androidx.compose.ui.unit.Density
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import com.tombaxter.taken.core.theme.ThemeID
@@ -41,21 +37,16 @@ class ScreenshotTests {
     val compose = createAndroidComposeRule<ComponentActivity>()
 
     private var current by mutableStateOf<AppModel?>(null)
-    private var fontScale by mutableFloatStateOf(1f)
 
     private fun start() {
         compose.setContent {
             val model = current ?: return@setContent
-            val density = LocalDensity.current
-            CompositionLocalProvider(LocalDensity provides Density(density.density, density.fontScale * fontScale)) {
-                // A new model is a new screen: nothing carries over from the last capture.
-                key(model) { TakenRoot(model, Platform.none) }
-            }
+            // A new model is a new screen: nothing carries over from the last capture.
+            key(model) { TakenRoot(model, Platform.none) }
         }
     }
 
-    private fun capture(name: String, model: AppModel, scale: Float = 1f, interact: () -> Unit = {}) {
-        fontScale = scale
+    private fun capture(name: String, model: AppModel, interact: () -> Unit = {}) {
         current = model
         compose.waitForIdle()
         interact()
@@ -88,12 +79,16 @@ class ScreenshotTests {
         }
     }
 
-    /** 200% text, Android 14's largest (https://developer.android.com/about/versions/14/features). */
+    /**
+     * 200% text, Android 14's largest (https://developer.android.com/about/versions/14/features), set as the device's
+     * font scale (https://robolectric.org/device-configuration/) so the sheets, which are their own windows, scale too.
+     */
     @Test
+    @Config(fontScale = 2f)
     fun largerText() {
         start()
-        for (screen in listOf("today", "today-edit", "item", "log", "add")) {
-            capture("${screen}_signal_font200", DemoScreens.make(screen), scale = 2f)
+        for (screen in listOf("today", "today-edit", "item", "log", "add", "settings")) {
+            capture("${screen}_signal_font200", DemoScreens.make(screen))
         }
     }
 

@@ -42,6 +42,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: Core unit tests (the ported XCTest cases)
         run: ./gradlew :core:test --stacktrace
+      - name: Test counts
+        if: always()
+        run: |
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+          for path in glob.glob("core/build/test-results/**/*.xml", recursive=True):
+              suite = ET.parse(path).getroot()
+              for key in totals:
+                  totals[key] += int(suite.get(key, 0))
+          print(f"core: {totals['tests']} tests, {totals['failures']} failures, {totals['errors']} errors, {totals['skipped']} skipped")
+          PY
       - name: Test report
         if: failure()
         uses: actions/upload-artifact@v7
@@ -63,6 +75,18 @@ jobs:
       - uses: gradle/actions/setup-gradle@v6
       - name: App unit tests (Robolectric), lint and the debug APK
         run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
+      - name: Test counts
+        if: always()
+        run: |
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+          for path in glob.glob("app/build/test-results/**/*.xml", recursive=True):
+              suite = ET.parse(path).getroot()
+              for key in totals:
+                  totals[key] += int(suite.get(key, 0))
+          print(f"app: {totals['tests']} tests, {totals['failures']} failures, {totals['errors']} errors, {totals['skipped']} skipped")
+          PY
       - name: Test and lint reports
         if: failure()
         uses: actions/upload-artifact@v7
@@ -123,13 +147,26 @@ jobs:
           set -euo pipefail
           aab="app/build/outputs/bundle/release/app-release.aab"
           test -f "$aab" && echo "OK   bundle built: $(du -h "$aab" | cut -f1)"
-          # 16 KB page sizes: a bundle with no native libraries already supports them
-          # (https://developer.android.com/guide/practices/page-sizes).
-          if unzip -l "$aab" | grep -E '^ .* base/lib/' >/dev/null; then
-            echo "FAIL native libraries in the bundle"; unzip -l "$aab" | grep 'base/lib/'; exit 1
+          # 16 KB page sizes. Taken's own code is Kotlin only, but AndroidX ships two small native libraries
+          # (Compose's graphics path and DataStore's shared counter). Google's check: every LOAD segment of every
+          # .so is aligned to 2**14 (16 KB) or more (https://developer.android.com/guide/practices/page-sizes,
+          # "Check for 16 KB ELF alignment"); readelf reads any architecture's ELF headers.
+          libs="$(mktemp -d)"
+          unzip -q -o "$aab" 'base/lib/*' -d "$libs" 2>/dev/null || true
+          count=0; bad=0
+          while IFS= read -r so; do
+            count=$((count + 1))
+            while IFS= read -r align; do
+              if [ $((align)) -lt 16384 ]; then echo "FAIL ${so#"$libs"/} has a LOAD segment aligned to $align"; bad=1; fi
+            done < <(readelf -lW "$so" | awk '$1 == "LOAD" { print $NF }')
+          done < <(find "$libs" -name '*.so' | sort)
+          [ "$bad" = 0 ] || exit 1
+          echo "OK   16 KB page sizes: $count native libraries, every LOAD segment aligned to 16 KB or more"
+          # The demo screens live in the debug source set: none of their strings may reach the release dex.
+          if unzip -p "$aab" 'base/dex/*.dex' | grep -a -q -e 'DemoScreens' -e 'today-nudge-offer'; then
+            echo "FAIL debug-only demo code in release"; exit 1
           fi
-          echo "OK   no lib/ folder: 16 KB page size compliant"
-          if unzip -l "$aab" | grep -q 'DemoScreens'; then echo "FAIL debug-only demo code in release"; exit 1; fi
+          echo "OK   no demo code in release"
           manifest="$(find app/build/intermediates -path '*release*' -name AndroidManifest.xml | grep -i merged | head -n 1)"
           test -n "$manifest" || { echo "FAIL merged release manifest not found"; exit 1; }
           echo "Merged manifest: $manifest"

@@ -44,6 +44,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.foundation.text.TextAutoSize
+import androidx.compose.foundation.text.BasicText
 import com.tombaxter.taken.ui.theme.Taken
 import com.tombaxter.taken.ui.theme.TakenType
 
@@ -287,11 +290,19 @@ fun AvatarImage(initials: String?, photo: androidx.compose.ui.graphics.ImageBitm
                 bitmap = photo, contentDescription = null, modifier = Modifier.size(size),
                 contentScale = androidx.compose.ui.layout.ContentScale.Crop,
             )
-            initials != null -> Text(
-                initials,
-                style = TakenType.sans((size.value * 0.38f).toInt().coerceAtLeast(10), FontWeight.SemiBold),
-                color = colors.fg,
-            )
+            initials != null -> {
+                // As on the iPhone: the initials grow with the text size and shrink to fit the circle, down to 0.6 of
+                // that size (minimumScaleFactor 0.6), so 200% text never cuts them off.
+                val points = size.value * 0.38f
+                BasicText(
+                    initials,
+                    modifier = Modifier.padding(size * 0.12f),
+                    style = TakenType.sans(points.toInt().coerceAtLeast(10), FontWeight.SemiBold).copy(color = colors.fg),
+                    maxLines = 1,
+                    softWrap = false,
+                    autoSize = TextAutoSize.StepBased(minFontSize = (points * 0.6f).sp, maxFontSize = points.sp),
+                )
+            }
             else -> Icon(Symbols.PersonFill, contentDescription = null, tint = colors.fgSubtle, modifier = Modifier.size(size * 0.5f))
         }
     }
