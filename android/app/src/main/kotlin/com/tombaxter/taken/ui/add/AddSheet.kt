@@ -450,7 +450,7 @@ private fun Chip(name: String, isOn: Boolean, owned: Boolean, value: String, onC
         }
         Text(
             name.uppercase(),
-            style = TakenType.monoCaps(12),
+            style = TakenType.monoCapsFixed(12),
             color = when {
                 owned -> colors.fgFaint
                 isOn -> colors.signalInk
@@ -481,6 +481,6 @@ private fun CustomChip(typing: Boolean, onClick: () -> Unit) {
             .testTag("custom-chip"),
         contentAlignment = Alignment.Center,
     ) {
-        Text(if (typing) "− CUSTOM" else "+ CUSTOM", style = TakenType.monoCaps(12), color = if (typing) colors.signalInk else colors.fgMuted)
+        Text(if (typing) "− CUSTOM" else "+ CUSTOM", style = TakenType.monoCapsFixed(12), color = if (typing) colors.signalInk else colors.fgMuted)
     }
 }

@@ -154,7 +154,7 @@ private fun DayCell(cell: HistoryCell, modifier: Modifier, onClick: () -> Unit) 
     ) {
         Text(
             "${cell.day.dayOfMonth}",
-            style = TakenType.mono(9),
+            style = TakenType.monoFixed(9),
             color = numberColor,
             modifier = Modifier.padding(start = 5.dp, top = 3.dp).clearAndSetSemantics { },
         )

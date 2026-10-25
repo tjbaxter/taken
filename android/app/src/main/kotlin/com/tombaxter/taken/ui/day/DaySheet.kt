@@ -207,7 +207,7 @@ private fun DayItemRow(
                             .padding(horizontal = 10.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
-                        Text(Fmt.doseClock(dose, day, clock), style = TakenType.mono(14), color = colors.signalInk)
+                        Text(Fmt.doseClock(dose, day, clock), style = TakenType.monoFixed(14), color = colors.signalInk)
                         Spacer(Modifier.width(6.dp))
                         Icon(Symbols.Close, contentDescription = null, tint = colors.fgSubtle, modifier = Modifier.size(12.dp))
                     }
@@ -229,7 +229,7 @@ private fun DayItemRow(
                     ) {
                         Icon(Symbols.Add, contentDescription = null, tint = colors.fg, modifier = Modifier.size(14.dp))
                         Spacer(Modifier.width(4.dp))
-                        Text(logLabel, style = TakenType.mono(14), color = colors.fg)
+                        Text(logLabel, style = TakenType.monoFixed(14), color = colors.fg)
                     }
                 }
             }

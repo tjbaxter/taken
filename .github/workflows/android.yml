@@ -156,9 +156,11 @@ jobs:
           count=0; bad=0
           while IFS= read -r so; do
             count=$((count + 1))
-            while IFS= read -r align; do
+            aligns="$(readelf -lW "$so" | awk '$1 == "LOAD" { print $NF }')"
+            if [ -z "$aligns" ]; then echo "FAIL ${so#"$libs"/}: readelf found no LOAD segments"; bad=1; fi
+            for align in $aligns; do
               if [ $((align)) -lt 16384 ]; then echo "FAIL ${so#"$libs"/} has a LOAD segment aligned to $align"; bad=1; fi
-            done < <(readelf -lW "$so" | awk '$1 == "LOAD" { print $NF }')
+            done
           done < <(find "$libs" -name '*.so' | sort)
           [ "$bad" = 0 ] || exit 1
           echo "OK   16 KB page sizes: $count native libraries, every LOAD segment aligned to 16 KB or more"

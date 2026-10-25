@@ -1,11 +1,14 @@
 package com.tombaxter.taken.ui.theme
 
 import androidx.compose.material3.Typography
+import androidx.compose.runtime.Composable
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.TextUnit
+import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.em
 import androidx.compose.ui.unit.sp
 import com.tombaxter.taken.R
@@ -36,6 +39,21 @@ object TakenType {
     /** The Add sheet's chips: mono caps, letter-spaced 8% of the size. */
     fun monoCaps(size: Int, weight: FontWeight = FontWeight.Medium): TextStyle =
         TextStyle(fontFamily = mono, fontWeight = weight, fontSize = size.sp, letterSpacing = 0.08.em)
+
+    /**
+     * Mono that keeps its size at every font scale, the iPhone's `monoFixed`: only where the text sits in a fixed shape
+     * (the History grid's day numbers, the Add chips, the day sheet's time pills), as on the iPhone.
+     */
+    @Composable
+    fun monoFixed(size: Int, weight: FontWeight = FontWeight.Medium): TextStyle = fixed(mono(size, weight), size)
+
+    /** [monoCaps] at a fixed size, the Add chips' `monoFixed(12)` with 8% tracking. */
+    @Composable
+    fun monoCapsFixed(size: Int, weight: FontWeight = FontWeight.Medium): TextStyle = fixed(monoCaps(size, weight), size)
+
+    @Composable
+    private fun fixed(style: TextStyle, size: Int): TextStyle =
+        style.copy(fontSize = with(LocalDensity.current) { size.dp.toSp() })
 
     /** Every Material component's text in Geist, never Material's default font. */
     val typography: Typography = Typography().let { base ->

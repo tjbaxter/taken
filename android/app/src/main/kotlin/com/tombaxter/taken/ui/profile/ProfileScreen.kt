@@ -31,6 +31,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.SwipeToDismissBox
 import androidx.compose.material3.SwipeToDismissBoxValue
 import androidx.compose.material3.Text
+import androidx.compose.material3.ripple
 import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
@@ -179,11 +180,13 @@ fun ProfileScreen(model: AppModel, platform: Platform) {
 private fun Header(model: AppModel, platform: Platform, name: String, onName: (String) -> Unit, onSubmit: () -> Unit) {
     val colors = Taken.colors
     Column(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+        // The avatar clips itself to its circle; this box does not, so the camera badge sits whole on the rim.
         Box(
             Modifier
                 .size(96.dp)
-                .clip(CircleShape)
-                .clickable(role = Role.Button) { platform.pickPhoto() }
+                .clickable(interactionSource = null, indication = ripple(bounded = false, radius = 48.dp), role = Role.Button) {
+                    platform.pickPhoto()
+                }
                 .semantics { contentDescription = if (model.photo == null) "Add a profile photo" else "Change your profile photo" },
             contentAlignment = Alignment.Center,
         ) {
