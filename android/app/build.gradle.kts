@@ -68,6 +68,8 @@ android {
 // graphics want room for the screenshots.
 tasks.withType<Test>().configureEach {
     maxHeapSize = "4g"
+    // Roborazzi's recommendation for faithful screenshots (https://github.com/takahirom/roborazzi#robolectricpixelcopyrendermode).
+    systemProperty("robolectric.pixelCopyRenderMode", "hardware")
     jvmArgs(
         "--add-opens=java.base/java.lang=ALL-UNNAMED",
         "--add-opens=java.base/java.util=ALL-UNNAMED",
