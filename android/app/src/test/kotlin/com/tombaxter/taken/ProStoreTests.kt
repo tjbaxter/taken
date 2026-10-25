@@ -1,6 +1,7 @@
 package com.tombaxter.taken
 
 import android.app.Activity
+import com.tombaxter.taken.billing.AcknowledgeRetry
 import com.tombaxter.taken.billing.ProStore
 import com.tombaxter.taken.core.pro.PlayEntitlement
 import com.tombaxter.taken.core.pro.PlayPurchase
@@ -18,6 +19,7 @@ import com.tombaxter.taken.data.MemoryPersistence
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.async
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.test.TestScope
 import kotlinx.coroutines.test.advanceTimeBy
 import kotlinx.coroutines.test.advanceUntilIdle
@@ -53,9 +55,15 @@ class ProStoreTests {
         var changes = 0
     }
 
-    private fun TestScope.setup(play: FakeBilling = FakeBilling(), ledger: ProLedger? = ProLedger(firstSeenAt = now)): Setup {
+    private fun TestScope.setup(
+        play: FakeBilling = FakeBilling(),
+        ledger: ProLedger? = ProLedger(firstSeenAt = now),
+        retry: AcknowledgeRetry = AcknowledgeRetry.none,
+    ): Setup {
         val file = MemoryPersistence(ledger = ledger)
-        val store = ProStore(play, file::updateLedger, backgroundScope, clock = { now }, locale = { java.util.Locale.US })
+        val store = ProStore(
+            play, file::updateLedger, backgroundScope, clock = { now }, locale = { java.util.Locale.US }, acknowledgeRetry = retry,
+        )
         val setup = Setup(store, play, file)
         store.listen { setup.changes += 1 }
         store.adoptLedger(ledger)
@@ -285,6 +293,77 @@ class ProStoreTests {
         assertTrue(play.held.single().acknowledged)
         advanceUntilIdle()
         assertEquals(3, play.acknowledged.size, "three tries at most")
+    }
+
+    /** WorkManager's side, as the tests see it: how often a durable try was kept and withdrawn. */
+    private class RecordingRetry : AcknowledgeRetry {
+        var scheduled = 0
+        var cancelled = 0
+        override fun schedule() {
+            scheduled += 1
+        }
+        override fun cancel() {
+            cancelled += 1
+        }
+    }
+
+    /**
+     * Play refunds a purchase not acknowledged within three days (https://developer.android.com/google/play/billing/integrate).
+     * Every try fails here: a durable try stays waiting outside Taken's process, and acknowledges once Play answers.
+     */
+    @Test
+    fun testAnAcknowledgementThatFailsIsKeptForLater() = runTest {
+        val play = FakeBilling(held = listOf(FakeBilling.purchase(ProPlan.LIFETIME.productId, now, acknowledged = false, token = "t")))
+        play.acknowledgeAnswers.addAll(List(3) { PlayResponse.SERVICE_UNAVAILABLE })
+        val retry = RecordingRetry()
+        val s = setup(play, retry = retry)
+        open(s)
+        assertEquals(1, retry.scheduled, "kept before the first try, so a process that goes mid-try loses nothing")
+        advanceUntilIdle()
+        assertEquals(3, play.acknowledged.size, "three tries here")
+        assertFalse(play.held.single().acknowledged)
+        assertEquals(0, retry.cancelled, "still waiting")
+        assertTrue(retry.scheduled >= 1)
+
+        // WorkManager's try, later, with no screen open: Play answers now.
+        assertTrue(s.store.acknowledgeOutstanding())
+        assertTrue(play.held.single().acknowledged)
+        assertTrue(s.store.acknowledgeOutstanding(), "nothing left to acknowledge")
+        play.connectAnswer = PlayResponse.SERVICE_UNAVAILABLE
+        assertFalse(s.store.acknowledgeOutstanding(), "Play unreachable: WorkManager tries again")
+    }
+
+    @Test
+    fun testAnAcknowledgementThatWorksWithdrawsTheWaitingTry() = runTest {
+        val play = FakeBilling(held = listOf(FakeBilling.purchase(ProPlan.YEARLY.productId, now, acknowledged = false, token = "t")))
+        val retry = RecordingRetry()
+        val s = setup(play, retry = retry)
+        open(s)
+        advanceUntilIdle()
+        assertTrue(play.held.single().acknowledged)
+        assertEquals(1, retry.scheduled)
+        assertEquals(1, retry.cancelled, "acknowledged at once: nothing waits")
+    }
+
+    /**
+     * A purchase whose wait was cancelled (the view model went with Play's sheet still up) leaves no plan behind: a later
+     * update for the same product records no trial it never bought here.
+     */
+    @Test
+    fun testACancelledPurchaseLeavesNoTrialBehind() = runTest {
+        val s = setup()
+        open(s)
+        val buying = backgroundScope.launch { s.store.purchase(ProPlan.YEARLY) }
+        runCurrent()
+        assertEquals(ProPlan.YEARLY.productId to "yearly-trial", s.play.launches.single())
+        buying.cancel()
+        runCurrent()
+        val later = FakeBilling.purchase(ProPlan.YEARLY.productId, now, acknowledged = false)
+        s.play.held = listOf(later)
+        s.play.deliver(PlayResponse.OK, listOf(later))
+        runCurrent()
+        assertTrue(s.file.ledger?.trialEnds.isNullOrEmpty(), "no trial recorded outside a purchase flow")
+        assertEquals(ProReason.YEARLY, s.store.status?.reason)
     }
 
     @Test

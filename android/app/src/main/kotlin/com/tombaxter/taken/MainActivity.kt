@@ -12,6 +12,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.provider.Settings
+import android.speech.SpeechRecognizer
 import android.view.accessibility.AccessibilityManager
 import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
@@ -278,6 +279,17 @@ class MainActivity : ComponentActivity(), Platform {
         get() = if (notificationsAllowed) trialChannelOff else !notificationsAskable
 
     // MARK: VoiceHost
+
+    /** Android 12 and later with on-device recognition: the only recognizer Taken uses (SPEC-ANDROID 11). No permission needed. */
+    override val voiceAvailable: Boolean
+        get() {
+            if (Build.VERSION.SDK_INT < 31) return false
+            return try {
+                SpeechRecognizer.isOnDeviceRecognitionAvailable(this)
+            } catch (e: RuntimeException) {
+                false
+            }
+        }
 
     override val microphoneGranted: Boolean
         get() = ContextCompat.checkSelfPermission(this, Manifest.permission.RECORD_AUDIO) == PackageManager.PERMISSION_GRANTED

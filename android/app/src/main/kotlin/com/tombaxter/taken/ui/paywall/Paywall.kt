@@ -74,6 +74,8 @@ import androidx.core.view.WindowCompat
 import com.tombaxter.taken.AppModel
 import com.tombaxter.taken.Haptic
 import com.tombaxter.taken.OffersPhase
+import com.tombaxter.taken.PaywallBusy
+import com.tombaxter.taken.PaywallResult
 import com.tombaxter.taken.PurchaseOutcome
 import com.tombaxter.taken.RestoreOutcome
 import com.tombaxter.taken.core.pro.PlanOffer
@@ -124,8 +126,6 @@ fun PaywallHost(model: AppModel, platform: Platform) {
     }
 }
 
-private enum class Busy { BUYING, RESTORING }
-
 /** From 150% text the plan cards stack their price under the name, and the button scrolls with the plans. */
 private const val LARGE_TEXT = 1.5f
 
@@ -140,7 +140,9 @@ fun Paywall(model: AppModel, platform: Platform, initiallyUnlocked: Boolean = fa
     val pro = model.pro
     val scope = rememberCoroutineScope()
     var selected by rememberSaveable { mutableStateOf(ProPlan.YEARLY) }
-    var busy by remember { mutableStateOf<Busy?>(null) }
+    // A purchase or a restore runs in the model's scope (the view model's), so a rotation, a fold or a theme change while
+    // Play's purchase sheet is up never cancels it; a paywall drawn again reads where it is and what it came to.
+    val busy = model.paywallBusy
     var note by remember { mutableStateOf<Note?>(null) }
     var unlocked by remember { mutableStateOf(initiallyUnlocked) }
     val offers = pro.offers
@@ -174,41 +176,41 @@ fun Paywall(model: AppModel, platform: Platform, initiallyUnlocked: Boolean = fa
 
     fun buy() {
         if (busy != null || unlocked) return
-        val plan = selected
-        busy = Busy.BUYING
         note = null
-        scope.launch {
-            val outcome = pro.purchase(plan)
-            busy = null
-            when (outcome) {
+        model.buy(selected)
+    }
+
+    fun restore() {
+        if (busy != null || unlocked) return
+        note = null
+        model.restorePurchases()
+    }
+
+    // What the purchase or the restore came to, shown once by whichever paywall is on screen.
+    val result = model.paywallResult
+    LaunchedEffect(result) {
+        when (result) {
+            null -> return@LaunchedEffect
+            is PaywallResult.Bought -> when (val outcome = result.outcome) {
                 is PurchaseOutcome.Unlocked -> celebrate(outcome.trialStarted)
                 PurchaseOutcome.Pending -> note = Note(ProCopy.WAITING, lit = true)
                 PurchaseOutcome.Cancelled -> Unit
                 is PurchaseOutcome.Failed -> note = Note(outcome.text, lit = false)
             }
-        }
-    }
-
-    fun restore() {
-        if (busy != null || unlocked) return
-        busy = Busy.RESTORING
-        note = null
-        scope.launch {
-            val outcome = pro.restore()
-            busy = null
-            when (outcome) {
+            is PaywallResult.Restored -> when (val outcome = result.outcome) {
                 RestoreOutcome.Restored -> celebrate(trialStarted = false)
                 RestoreOutcome.Nothing -> note = Note(ProCopy.NOTHING_TO_RESTORE, lit = false)
                 is RestoreOutcome.Failed -> note = Note(outcome.text, lit = false)
             }
         }
+        model.consumePaywallResult(result)
     }
 
     val offer = offers[selected]
     val ctaTitle = when {
         unlocked -> "Taken Pro is on"
-        busy == Busy.BUYING -> "Confirming"
-        busy == Busy.RESTORING -> "Restoring"
+        busy == PaywallBusy.BUYING -> "Confirming"
+        busy == PaywallBusy.RESTORING -> "Restoring"
         // A plan Play did not return is never left on a spinner: the button asks again.
         offer == null -> if (answered) "Try again" else "Loading plans"
         else -> ProCopy.cta(offer, eligible)

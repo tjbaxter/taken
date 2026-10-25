@@ -54,6 +54,15 @@ interface VoiceCapture {
  * app's settings page, and a capture. [com.tombaxter.taken.MainActivity] is the real one; tests and captures fake it.
  */
 interface VoiceHost {
+    /**
+     * Voice to-dos can work on this phone at all: Android 12 (API 31) or later with on-device recognition
+     * (`SpeechRecognizer.isOnDeviceRecognitionAvailable`, which needs no permission). Read before the microphone is asked
+     * for, so a phone where Taken can never listen is never asked: Play asks apps to request only permissions "necessary to
+     * implement current features or services in your app" (https://support.google.com/googleplay/android-developer/answer/9888170).
+     * The language check on Android 13 and later still happens at the start, after the permission.
+     */
+    val voiceAvailable: Boolean get() = true
+
     /** RECORD_AUDIO is granted. */
     val microphoneGranted: Boolean
 
@@ -75,6 +84,7 @@ interface VoiceHost {
     companion object {
         /** No microphone at all (tests, captures): every start says so. */
         val none: VoiceHost = object : VoiceHost {
+            override val voiceAvailable = false
             override val microphoneGranted = false
             override val microphoneRationaleDue = false
             override fun requestMicrophone() = Unit

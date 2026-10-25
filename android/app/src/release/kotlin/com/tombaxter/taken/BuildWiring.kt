@@ -3,6 +3,7 @@ package com.tombaxter.taken
 import android.content.Context
 import com.tombaxter.taken.billing.PlayBilling
 import com.tombaxter.taken.billing.ProStore
+import com.tombaxter.taken.billing.WorkAcknowledgeRetry
 import com.tombaxter.taken.data.Persistence
 import kotlinx.coroutines.CoroutineScope
 
@@ -12,5 +13,10 @@ import kotlinx.coroutines.CoroutineScope
  */
 object BuildWiring {
     fun pro(context: Context, persistence: Persistence, scope: CoroutineScope): ProSource =
-        ProStore(gateway = PlayBilling(context), writeLedger = persistence::updateLedger, scope = scope)
+        ProStore(
+            gateway = PlayBilling(context),
+            writeLedger = persistence::updateLedger,
+            scope = scope,
+            acknowledgeRetry = WorkAcknowledgeRetry(context),
+        )
 }

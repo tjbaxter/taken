@@ -74,10 +74,10 @@ fun ProSection(model: AppModel, platform: Platform) {
             }
             if (showsManage) {
                 RowDivider()
-                LinkRow("Manage subscription") { platform.openUrl(model.manageSubscriptionUrl) }
+                LinkRow("Manage subscription", icon = Symbols.OpenInNew) { platform.openUrl(model.manageSubscriptionUrl) }
             }
             RowDivider()
-            LinkRow("Privacy Policy") { platform.openUrl(ProCopy.PRIVACY_URL) }
+            LinkRow("Privacy Policy", icon = Symbols.OpenInNew) { platform.openUrl(ProCopy.PRIVACY_URL) }
         }
     }
     Footnote(ProCopy.RESTORE_AUTOMATIC)

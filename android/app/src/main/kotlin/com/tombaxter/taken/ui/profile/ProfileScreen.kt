@@ -147,7 +147,7 @@ fun ProfileScreen(model: AppModel, platform: Platform) {
                 // row (SPEC-ANDROID 10.2).
                 if (model.tileOffered) {
                     Section(WidgetCopy.TILE_SECTION)
-                    Card(Modifier.testTag("add-tile")) { LinkRow(WidgetCopy.ADD_TILE) { model.addTile() } }
+                    Card(Modifier.testTag("add-tile")) { LinkRow(WidgetCopy.ADD_TILE, lit = true) { model.addTile() } }
                     Footnote(WidgetCopy.ADD_TILE_FOOTNOTE)
                 }
                 Section("Your day")
@@ -170,7 +170,7 @@ fun ProfileScreen(model: AppModel, platform: Platform) {
                 Section("Data")
                 Card {
                     Column {
-                        LinkRow("Export CSV") { platform.shareCsv(model.csvExport()) }
+                        LinkRow("Export CSV", icon = Symbols.Share) { platform.shareCsv(model.csvExport()) }
                         WeightDataRows(model, platform)
                         RowDivider()
                         LinkRow("Erase all data", danger = true) { confirmErase = true }
@@ -185,7 +185,7 @@ fun ProfileScreen(model: AppModel, platform: Platform) {
                         RowDivider()
                         SettingRow("Version") { Text(platform.versionName, style = TakenType.mono(15), color = colors.fgSubtle) }
                         RowDivider()
-                        LinkRow("Support") { platform.openUrl(ProfileCopy.SUPPORT_URL) }
+                        LinkRow("Support", icon = Symbols.OpenInNew) { platform.openUrl(ProfileCopy.SUPPORT_URL) }
                     }
                 }
             }
@@ -218,7 +218,7 @@ private fun WeightDataRows(model: AppModel, platform: Platform) {
     if (!weight.isEmpty) {
         RowDivider()
         Box(Modifier.testTag("export-weight")) {
-            LinkRow(WeightCopy.EXPORT_CSV) {
+            LinkRow(WeightCopy.EXPORT_CSV, icon = Symbols.Share) {
                 val zone = model.clock.zone
                 val state = weight.state
                 platform.shareWeightCsv { WeightCSV.make(state.weighIns, zone) }
@@ -227,7 +227,7 @@ private fun WeightDataRows(model: AppModel, platform: Platform) {
     }
     RowDivider()
     Box(Modifier.testTag("import-weight")) {
-        LinkRow(WeightCopy.IMPORT_CSV) {
+        LinkRow(WeightCopy.IMPORT_CSV, icon = Symbols.Download) {
             weight.importNote = null
             model.requireWeightPro {
                 platform.importWeightCsv()
@@ -295,7 +295,11 @@ private fun StackSection(model: AppModel) {
     val active = model.activeItems
     val showsReorder = reordering && active.size > 1
 
-    Row(Modifier.fillMaxWidth().padding(start = SECTION_INSET, top = 22.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    // Reorder's words end where Section's trailing words do: InkButton pads its own 10 dp inside the inset.
+    Row(
+        Modifier.fillMaxWidth().padding(start = SECTION_INSET, end = SECTION_INSET - 10.dp, top = 22.dp, bottom = 4.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text("Stack", style = TakenType.sans(15, FontWeight.SemiBold), color = colors.fgMuted, modifier = Modifier.weight(1f).semantics { heading() })
         if (active.size > 1) InkButton(if (showsReorder) "Done" else "Reorder") { reordering = !showsReorder }
     }
@@ -454,7 +458,11 @@ private val SECTION_INSET = 16.dp
 @Composable
 internal fun Section(title: String, trailing: String? = null) {
     val colors = Taken.colors
-    Row(Modifier.fillMaxWidth().padding(start = SECTION_INSET, top = 22.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    // Inset at both ends, as the iPhone's section headers are, so a trailing word never meets the card's edge.
+    Row(
+        Modifier.fillMaxWidth().padding(start = SECTION_INSET, end = SECTION_INSET, top = 22.dp, bottom = 8.dp),
+        verticalAlignment = Alignment.CenterVertically,
+    ) {
         Text(title, style = TakenType.sans(15, FontWeight.SemiBold), color = colors.fgMuted, modifier = Modifier.weight(1f).semantics { heading() })
         if (trailing != null) Text(trailing, style = TakenType.sans(14, FontWeight.Medium), color = colors.signalInk)
     }
@@ -465,15 +473,34 @@ internal fun Footnote(text: String) {
     Text(text, style = TakenType.sans(14), color = Taken.colors.fgSubtle, modifier = Modifier.padding(top = 8.dp, start = SECTION_INSET))
 }
 
+/**
+ * A row that does something: its words in the look's foreground with a quiet glyph after them, as the iPhone's
+ * `ProfileLinkRow` draws them (an arrow for a page outside Taken, a share glyph for an export), and as a Material list
+ * item does (on-surface text, a trailing icon). The signal stays for what adds or is live (`lit`), and red for Erase.
+ */
 @Composable
-internal fun LinkRow(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, danger: Boolean = false, onClick: () -> Unit) {
+internal fun LinkRow(
+    title: String,
+    icon: androidx.compose.ui.graphics.vector.ImageVector? = null,
+    danger: Boolean = false,
+    lit: Boolean = false,
+    onClick: () -> Unit,
+) {
     val colors = Taken.colors
     Row(
         Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.SpaceBetween,
     ) {
-        Text(title, style = TakenType.sans(17), color = if (danger) colors.danger else colors.signalInk)
-        if (icon != null) Icon(icon, contentDescription = null, tint = colors.fgSubtle)
+        val ink = when {
+            danger -> colors.danger
+            lit -> colors.signalInk
+            else -> colors.fg
+        }
+        Text(title, style = TakenType.sans(17), color = ink, modifier = Modifier.weight(1f, fill = false))
+        if (icon != null) {
+            Spacer(Modifier.width(12.dp))
+            Icon(icon, contentDescription = null, tint = colors.fgSubtle, modifier = Modifier.size(18.dp))
+        }
     }
 }

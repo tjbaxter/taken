@@ -63,7 +63,8 @@ class PlayBilling(context: Context) : BillingGateway {
 
     /**
      * The products as Play last returned them: the purchase flow needs Play's own objects. Asked for again each time the
-     * paywall opens, since Google warns that "stale objects can cause launchBillingFlow() failures" (integrate page).
+     * paywall opens (`AppModel.presentPaywall` loads with `force`, and a purchase waits for that load), since Google warns
+     * that "stale objects can cause launchBillingFlow() failures" (integrate page).
      */
     private val products = HashMap<String, ProductDetails>()
 

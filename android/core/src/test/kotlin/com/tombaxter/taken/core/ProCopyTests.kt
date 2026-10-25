@@ -157,6 +157,12 @@ class ProCopyTests {
         assertEquals("Not active", line(ProStatus.notPro(now)))
         assertEquals("Not active", line(null))
         assertEquals(
+            "Taken Pro",
+            line(ProStatus(isPro = true, reason = ProReason.NONE, checkedAt = now)),
+            "active Pro with no reason (a debug build, a reason from a later version) is never called not active",
+        )
+        assertEquals("Not active", line(ProStatus(isPro = false, reason = ProReason.NONE, checkedAt = now)))
+        assertEquals(
             "Not active",
             line(ProStatus(true, ProReason.MONTHLY, now, expiresAt = at(2026, 10, 12, 9), willRenew = false)),
             "an ended plan is not Pro",

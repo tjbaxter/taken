@@ -75,10 +75,10 @@ internal fun ReminderSection(model: AppModel) {
             }
             if (notifications.notificationsDenied) {
                 RowDivider()
-                LinkRow(ReminderCopy.NOTIFICATIONS_OFF) { notifications.openSettings() }
+                LinkRow(ReminderCopy.NOTIFICATIONS_OFF, lit = true) { notifications.openSettings() }
             } else if (notifications.nudgeChannelOff) {
                 RowDivider()
-                LinkRow(ReminderCopy.NUDGE_CHANNEL_OFF) { notifications.openSettings(ReminderKind.NUDGE.channelId) }
+                LinkRow(ReminderCopy.NUDGE_CHANNEL_OFF, lit = true) { notifications.openSettings(ReminderKind.NUDGE.channelId) }
             }
         }
     }

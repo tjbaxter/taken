@@ -17,7 +17,9 @@ import com.tombaxter.taken.billing.ProStore
 import com.tombaxter.taken.core.model.Frequency
 import com.tombaxter.taken.core.model.Item
 import com.tombaxter.taken.core.model.StackState
+import androidx.compose.runtime.mutableStateOf
 import com.tombaxter.taken.core.pro.PlayEntitlement
+import com.tombaxter.taken.core.pro.PlayResponse
 import com.tombaxter.taken.core.pro.ProCopy
 import com.tombaxter.taken.core.pro.ProLedger
 import com.tombaxter.taken.core.pro.ProPlan
@@ -161,6 +163,83 @@ class PaywallTests {
         assertEquals("1 taken at", model.toast?.message)
         compose.onNodeWithTag("toast").assertIsDisplayed()
         compose.onNodeWithTag("undo").assertIsDisplayed()
+    }
+
+    /**
+     * Play's product details are asked for each time the paywall opens ("Caching ProductDetails objects is not
+     * recommended", https://developer.android.com/google/play/billing/integrate): a trial Play no longer offers is never
+     * sold from an earlier answer.
+     */
+    @Test
+    fun testEachOpeningAsksPlayForThePlansAgain() {
+        val play = FakeBilling()
+        val model = open(play)
+        val first = play.productQueries
+        model.presentPaywall(PaywallOrigin.BAR)
+        compose.waitForIdle()
+        assertEquals(first + 1, play.productQueries, "asked again as the paywall opens")
+        assertEquals(true, model.pro.introEligible)
+        model.closePaywall()
+        compose.waitForIdle()
+
+        // Play no longer offers this person the trial (a subscription since, on any phone).
+        play.products = FakeBilling.catalog(trial = false)
+        model.presentPaywall(PaywallOrigin.BAR)
+        compose.waitForIdle()
+        assertEquals(first + 2, play.productQueries, "and again at the next opening")
+        assertEquals(false, model.pro.introEligible)
+        compose.onNodeWithText("Continue").assertIsDisplayed()
+        play.buys(now)
+        compose.onNodeWithTag("paywall-cta").performClick()
+        compose.waitForIdle()
+        assertEquals(ProPlan.YEARLY.productId to "yearly-base", play.launches.single(), "the base plan, never the trial from the earlier answer")
+    }
+
+    /**
+     * A rotation, a fold or a theme change while Play's purchase sheet is up draws the activity and the paywall again. The
+     * purchase runs in the model's scope, so it is never cancelled: the new paywall shows it, and the trial's one ask
+     * follows (SPEC-ANDROID 10.4).
+     */
+    @Test
+    fun testAPurchaseOutlivesThePaywallBeingDrawnAgain() {
+        val play = FakeBilling()
+        val state = StackState(items = listOf(vd3)).also { it.logDose(vd3.id, now.minus(Duration.ofDays(1)), zone) }
+        val file = ProLedger(firstSeenAt = now.minus(Duration.ofDays(2)), firstDoseAt = state.doses.first().takenAt)
+        val persistence = MemoryPersistence(stack = state, ledger = file)
+        val scope = MainScope()
+        val store = ProStore(play, persistence::updateLedger, scope, clock = { now }, locale = { Locale.US })
+        val model = AppModel(
+            persistence, state, file, Profile(), null, store, clockNow = { now }, zone = { zone }, locale = { Locale.US }, scope = scope,
+        )
+        model.onTrialStarted = { trialsStarted += 1 }
+        val drawn = mutableStateOf(true)
+        compose.setContent { if (drawn.value) TakenRoot(model, Opened(urls)) }
+        store.attach(compose.activity)
+        store.foreground()
+        store.resumed()
+        compose.waitForIdle()
+        model.presentPaywall(PaywallOrigin.BAR)
+        compose.waitForIdle()
+        compose.onNodeWithTag("paywall-cta").performClick()
+        compose.waitForIdle()
+        assertEquals(PaywallBusy.BUYING, model.paywallBusy, "Play's purchase sheet is up")
+
+        // The paywall goes away and comes back, as on a configuration change, while the sheet is still up.
+        drawn.value = false
+        compose.waitForIdle()
+        val bought = FakeBilling.purchase(ProPlan.YEARLY.productId, now, acknowledged = false)
+        play.held = listOf(bought)
+        play.deliver(PlayResponse.OK, listOf(bought))
+        compose.waitForIdle()
+        assertNull(model.paywallBusy)
+        assertEquals(now.plus(Duration.ofDays(7)), persistence.ledger?.trialEnds?.get(PlayEntitlement.trialKey(now)), "the trial's end is kept")
+        drawn.value = true
+        compose.waitForIdle()
+        compose.onNodeWithText("Taken Pro is on").assertExists()
+        compose.mainClock.advanceTimeBy(1_500)
+        compose.waitForIdle()
+        assertNull(model.paywall)
+        assertEquals(1, trialsStarted, "the trial's one ask still follows")
     }
 
     @Test

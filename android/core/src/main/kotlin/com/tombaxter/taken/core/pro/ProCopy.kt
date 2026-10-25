@@ -265,6 +265,8 @@ object ProCopy {
      * known on this phone), "Pro yearly · renewing", "Pro yearly · not renewing", the monthly equivalents, "Not active".
      * A phone never sees a subscription's period end (the Purchase reference names none,
      * https://developer.android.com/reference/com/android/billingclient/api/Purchase), so no renewal date is shown.
+     * Active Pro with no reason (a debug build, or a pro.json written by a later version with a reason this one cannot
+     * read) says "Taken Pro": the line and Profile's lit dot follow one predicate, `isActive`, so they never disagree.
      */
     fun statusLine(status: ProStatus?, now: Instant, zone: ZoneId = ZoneId.systemDefault()): String {
         if (status == null || !status.isActive(now)) return "Not active"
@@ -279,9 +281,12 @@ object ProCopy {
                 val name = if (status.reason == ProReason.YEARLY) "Pro yearly" else "Pro monthly"
                 if (status.willRenew == false) "$name · not renewing" else "$name · renewing"
             }
-            ProReason.NONE -> "Not active"
+            ProReason.NONE -> ACTIVE_WITHOUT_REASON
         }
     }
+
+    /** Profile's status line for active Pro whose reason is unknown. */
+    const val ACTIVE_WITHOUT_REASON = "Taken Pro"
 
     /** Every fixed line, for the copy rules test. */
     val all: List<String>

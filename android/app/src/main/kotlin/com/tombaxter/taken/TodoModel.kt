@@ -336,6 +336,12 @@ class TodoModel(
         blocker = null
         clearNotice()
         val host = host
+        if (!host.voiceAvailable) {
+            // Below Android 12, or no on-device recognition at all: the microphone is never asked for, since Taken could
+            // never use it here. Type it instead.
+            blocker = Blocker.UNAVAILABLE
+            return
+        }
         if (!host.microphoneGranted) {
             // In context, at the first mic tap (https://developer.android.com/training/permissions/requesting): a
             // rationale only when Android says one is due, with a way to say no. The mic stays as it is while Android's

@@ -467,6 +467,25 @@ class TodoModelTests {
         assertEquals(TodoCapture.Phase.IDLE, rig.model.phase)
     }
 
+    /**
+     * Android 9 to 11, or a phone with no on-device recognition: the microphone is never asked for, since Taken could never
+     * use it there (Play's permissions policy, https://support.google.com/googleplay/android-developer/answer/9888170).
+     */
+    @Test
+    fun testAPhoneWithoutVoiceNeverAsksForTheMicrophone() = test {
+        val host = FakeHost(granted = false, rationale = true, available = false)
+        val rig = rig(isDemo = false, host = host, sorter = { FallbackSorter() })
+        rig.model.micTapped()
+        waitFor("the blocker") { rig.model.blocker != null }
+        assertEquals(TodoModel.Blocker.UNAVAILABLE, rig.model.blocker, "type it instead")
+        assertEquals(0, host.asked, "Android's microphone prompt never shows")
+        assertFalse(rig.model.askingMicrophone, "nor Taken's explanation before it")
+        assertTrue(host.captures.isEmpty())
+        rig.model.submitTyped("Call the dentist")
+        settle(rig.model)
+        assertEquals(listOf("Call the dentist"), rig.model.openTasks.map { it.title }, "typing still saves")
+    }
+
     @Test
     fun testABusyMicrophoneSaysSoAndAQuickCaptureTriesTwiceMore() = test {
         val host = FakeHost(next = { FakeCapture(answer = VoiceCapture.Start.BUSY) })
@@ -720,11 +739,13 @@ internal class FakeHost(
     var granted: Boolean = true,
     var rationale: Boolean = false,
     var next: () -> FakeCapture = { FakeCapture() },
+    var available: Boolean = true,
 ) : VoiceHost {
     var asked = 0
     var settingsOpened = 0
     val captures = mutableListOf<FakeCapture>()
 
+    override val voiceAvailable: Boolean get() = available
     override val microphoneGranted: Boolean get() = granted
     override val microphoneRationaleDue: Boolean get() = rationale
 

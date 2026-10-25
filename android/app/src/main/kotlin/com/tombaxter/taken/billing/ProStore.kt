@@ -50,6 +50,8 @@ class ProStore(
     private val locale: () -> Locale = { Locale.getDefault() },
     /** Never keep the app waiting on Play: after this long the cached answer stands (the iPhone's 4 s). */
     private val settleTimeoutMillis: Long = 4_000,
+    /** A try at acknowledging that outlives Taken's process ([WorkAcknowledgeRetry] in release builds). */
+    private val acknowledgeRetry: AcknowledgeRetry = AcknowledgeRetry.none,
 ) : ProSource {
     override var status: ProStatus? by mutableStateOf(null)
         private set
@@ -216,30 +218,60 @@ class ProStore(
 
     /**
      * Acknowledges each purchase once, retrying with Google's exponential backoff (2 s, then 4 s, 3 tries, the errors
-     * page's acknowledgement sample, https://developer.android.com/google/play/billing/errors). One missed now is
-     * acknowledged on the next query, well inside Play's three days.
+     * page's acknowledgement sample, https://developer.android.com/google/play/billing/errors). Before the first try a
+     * durable one is kept waiting ([acknowledgeRetry], WorkManager), so a purchase is acknowledged within Play's three days
+     * even when every try here fails or Taken's process goes first, for someone who then logs only from the widget, the
+     * tile and the nudge. It is withdrawn once everything this process saw is acknowledged.
      */
     private fun acknowledge(tokens: List<String>) {
-        for (token in tokens) {
-            if (!acknowledging.add(token)) continue
-            scope.launch {
+        val fresh = tokens.filter { acknowledging.add(it) }
+        if (fresh.isEmpty()) return
+        acknowledgeRetry.schedule()
+        scope.launch {
+            var all = true
+            for (token in fresh) {
                 var wait = ACKNOWLEDGE_FIRST_DELAY_MS
+                var answer = PlayResponse.ERROR
                 for (attempt in 1..ACKNOWLEDGE_TRIES) {
-                    val answer = gateway.acknowledge(token)
+                    answer = gateway.acknowledge(token)
                     if (answer == PlayResponse.OK || !answer.retriable) break
                     if (attempt < ACKNOWLEDGE_TRIES) {
                         delay(wait)
                         wait *= 2
                     }
                 }
+                if (answer != PlayResponse.OK) all = false
                 acknowledging.remove(token)
+            }
+            if (!all) {
+                acknowledgeRetry.schedule()
+            } else if (acknowledging.isEmpty()) {
+                acknowledgeRetry.cancel()
             }
         }
     }
 
+    /**
+     * The durable try ([AcknowledgeWorker]): asks Play for Taken's purchases and acknowledges each one not yet
+     * acknowledged. True when none is left, so the work ends; false asks WorkManager to try again later.
+     */
+    suspend fun acknowledgeOutstanding(): Boolean {
+        if (gateway.connect() != PlayResponse.OK) return false
+        val answer = gateway.queryPurchases()
+        if (answer.response != PlayResponse.OK) return false
+        var all = true
+        for (token in PlayEntitlement.toAcknowledge(answer.value)) {
+            if (gateway.acknowledge(token) != PlayResponse.OK) all = false
+        }
+        return all
+    }
+
     // MARK: Plans
 
-    /** Loads the three products. Prices, periods and the trial always come from here. */
+    /**
+     * Loads the three products. Prices, periods and the trial always come from here. The paywall asks with `force` each
+     * time it opens; the plans already loaded stay on screen while Play answers.
+     */
     override suspend fun loadOffers(force: Boolean) {
         loading?.let { return it.await() }
         if (offersPhase == OffersPhase.READY && !force) return
@@ -277,6 +309,9 @@ class ProStore(
     // MARK: Buying
 
     override suspend fun purchase(plan: ProPlan): PurchaseOutcome {
+        // The products as Play gives them now: a load the paywall's opening started is waited for, so the purchase flow
+        // never starts from stale details or an offer this person is no longer eligible for (integrate page).
+        loading?.await()
         val chosen = plans[plan] ?: return PurchaseOutcome.Failed(ProCopy.PLANS_LOADING)
         // Already Pro on this Google account (bought on another phone, or a cache that ran out): nothing to sell, and
         // no second subscription next to the first.
@@ -288,17 +323,23 @@ class ProStore(
         val waiter = CompletableDeferred<PurchaseOutcome>()
         buying = waiter
         buyingPlan = chosen
-        val launched = gateway.launch(host, chosen.productId, chosen.offerToken)
-        val outcome = when (launched) {
-            PlayResponse.OK -> waiter.await()
-            PlayResponse.USER_CANCELED -> PurchaseOutcome.Cancelled
-            // "Call queryPurchasesAsync()": in most cases the item is already owned (errors page).
-            PlayResponse.ITEM_ALREADY_OWNED -> owned()
-            else -> PurchaseOutcome.Failed(ProCopy.failure(launched) ?: ProCopy.DID_NOT_FINISH)
+        // Cleared however the wait ends, a cancellation included: a plan left behind would make a later update for the
+        // same product (a promo code, a pending purchase going through) record a trial that was never bought here.
+        try {
+            val launched = gateway.launch(host, chosen.productId, chosen.offerToken)
+            return when (launched) {
+                PlayResponse.OK -> waiter.await()
+                PlayResponse.USER_CANCELED -> PurchaseOutcome.Cancelled
+                // "Call queryPurchasesAsync()": in most cases the item is already owned (errors page).
+                PlayResponse.ITEM_ALREADY_OWNED -> owned()
+                else -> PurchaseOutcome.Failed(ProCopy.failure(launched) ?: ProCopy.DID_NOT_FINISH)
+            }
+        } finally {
+            if (buying === waiter) {
+                buying = null
+                buyingPlan = null
+            }
         }
-        buying = null
-        buyingPlan = null
-        return outcome
     }
 
     private suspend fun owned(): PurchaseOutcome {

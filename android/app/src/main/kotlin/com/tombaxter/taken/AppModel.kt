@@ -156,6 +156,15 @@ enum class PaywallOrigin { INTRO, ACTION, BAR, SETTINGS, LINK }
 /** The paywall was asked for; `pending` runs once Pro is on. */
 class PaywallRequest(val origin: PaywallOrigin, val pending: (() -> Unit)?)
 
+/** What the paywall is doing with Google Play: a purchase or a restore on its way. */
+enum class PaywallBusy { BUYING, RESTORING }
+
+/** What a purchase or a restore came to, kept until the paywall on screen has shown it. */
+sealed interface PaywallResult {
+    data class Bought(val outcome: PurchaseOutcome) : PaywallResult
+    data class Restored(val outcome: RestoreOutcome) : PaywallResult
+}
+
 /**
  * The app's single source of screen state, mirroring the iPhone's Taken/AppModel.swift (with the tap-row change of
  * `feat/tap-row-to-log`). Every field the screens read is Compose snapshot state; every rule comes from :core. Writes go
@@ -699,9 +708,65 @@ class AppModel(
         }
         if ((origin == PaywallOrigin.ACTION || origin == PaywallOrigin.LINK) && !keepSheet) sheet = null
         afterPaywall = null
+        paywallResult = null
         paywall = PaywallRequest(origin, pending)
-        // Prices, periods and the trial are read from Play each time the paywall opens (SPEC-ANDROID 9.3).
-        scope.launch { pro.loadOffers(force = pro.offersPhase == OffersPhase.FAILED) }
+        // Prices, periods and the trial are read from Play each time the paywall opens (SPEC-ANDROID 9.3): "Caching
+        // ProductDetails objects is not recommended, as stale objects can cause launchBillingFlow() failures", and an
+        // outdated list of eligible offers can sell a trial to someone no longer eligible for it
+        // (https://developer.android.com/google/play/billing/integrate). The plans already shown stay while Play answers.
+        scope.launch { pro.loadOffers(force = true) }
+    }
+
+    /**
+     * The paywall's purchase or restore on its way. It runs in [scope], the view model's, never the paywall's own: a
+     * configuration change while Play's purchase sheet is up recreates the activity and the paywall, and a purchase run in
+     * the paywall's scope would be cancelled mid-flow, its trial lost (SPEC-ANDROID 9.5). The paywall drawn again reads
+     * this and [paywallResult].
+     */
+    var paywallBusy: PaywallBusy? by mutableStateOf(null)
+        private set
+
+    /** What the last purchase or restore came to, until the paywall has shown it ([consumePaywallResult]). */
+    var paywallResult: PaywallResult? by mutableStateOf(null)
+        private set
+
+    /** The paywall's main button on a plan: Play's purchase flow, kept in the model's scope. */
+    fun buy(plan: ProPlan) {
+        if (paywallBusy != null) return
+        paywallBusy = PaywallBusy.BUYING
+        paywallResult = null
+        scope.launch {
+            val outcome = try {
+                pro.purchase(plan)
+            } finally {
+                paywallBusy = null
+            }
+            // A trial that started is known here, whatever the paywall on screen does next, so its one ask always follows.
+            if (outcome is PurchaseOutcome.Unlocked) {
+                if (paywall != null) paywallUnlocked(outcome.trialStarted) else if (outcome.trialStarted) onTrialStarted()
+            }
+            paywallResult = PaywallResult.Bought(outcome)
+        }
+    }
+
+    /** The paywall's Restore: Play asked again, kept in the model's scope as a purchase is. */
+    fun restorePurchases() {
+        if (paywallBusy != null) return
+        paywallBusy = PaywallBusy.RESTORING
+        paywallResult = null
+        scope.launch {
+            val outcome = try {
+                pro.restore()
+            } finally {
+                paywallBusy = null
+            }
+            paywallResult = PaywallResult.Restored(outcome)
+        }
+    }
+
+    /** The paywall has shown `result`. */
+    fun consumePaywallResult(result: PaywallResult) {
+        if (paywallResult === result) paywallResult = null
     }
 
     /** Pro just came on in the paywall: what opened it runs once it has closed, and a trial gets its ask after it. */
