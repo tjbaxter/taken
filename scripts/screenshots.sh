@@ -253,6 +253,7 @@ lands 41-today-edit "tab=today sheet=none edit=1"
 shoot 41-today-edit-blush today-edit blush
 lands 41-today-edit-blush "tab=today sheet=none edit=1"
 shoot 41-today-edit-ax3 today-edit signal standard "-type ax3"
+lands 41-today-edit-ax3 "tab=today sheet=none edit=1"
 shoot 42-today-ax3 today signal standard "-type ax3"
 lands 42-today-ax3 "tab=today sheet=none edit=0"
 # The Weight tab (SPEC 3.12; REDESIGN.md, "Weight tab page: entry first"; in every build since 1.1, off by default). Screen
