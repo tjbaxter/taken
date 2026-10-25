@@ -1,6 +1,5 @@
 package com.tombaxter.taken
 
-import android.os.Looper
 import androidx.activity.ComponentActivity
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
@@ -31,10 +30,8 @@ import org.junit.Rule
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
-import org.robolectric.Shadows.shadowOf
 import org.robolectric.annotation.Config
 import org.robolectric.annotation.GraphicsMode
-import java.time.Duration
 
 /**
  * The screens Tom sees (SPEC-ANDROID 15.3): drawn on the JVM by Robolectric's native graphics and saved by Roborazzi, no
@@ -103,8 +100,10 @@ class ScreenshotTests {
     }
 
     /**
-     * What a tap on a row does (SPEC-ANDROID 7.2): the logging moment with the Compose clock held 0.1 s after the tap on
-     * Magnesium (the row washed in the signal, the ring lifted), then the snackbar with Undo once it settles.
+     * What a tap on a row does (SPEC-ANDROID 7.2): the logging moment with the Compose clock held 0.1 s after a tap on
+     * Magnesium (the row washed in the signal, the ring lifted), then the same tap settled, with the snackbar and Undo.
+     * The settled frame logs through the model: the touch ripple is Android's RippleDrawable, which Robolectric leaves
+     * drawn over the row, where a phone fades it out.
      */
     @Test
     fun theLoggingMoment() {
@@ -119,11 +118,11 @@ class ScreenshotTests {
             compose.mainClock.advanceTimeBy(100)
             save("today-row-moment_${look.raw}")
             compose.mainClock.autoAdvance = true
-            compose.waitForIdle()
-            // The touch ripple is Android's RippleDrawable, animated on the looper's clock, not Compose's: let it finish.
-            shadowOf(Looper.getMainLooper()).idleFor(Duration.ofSeconds(1))
-            compose.waitForIdle()
-            save("today-logged_${look.raw}")
+
+            val settled = DemoScreens.make("today", look)
+            capture("today-logged_${look.raw}", settled) {
+                settled.tap(settled.today.items.first { it.item.name == "Magnesium" })
+            }
         }
     }
 
