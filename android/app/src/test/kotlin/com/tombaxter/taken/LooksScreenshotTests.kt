@@ -201,7 +201,7 @@ class LooksScreenshotTests {
     }
 
     @Test
-    @Config(qualifiers = "w411dp-h1080dp-420dpi")
+    @Config(qualifiers = "w411dp-h800dp-420dpi")
     fun theLauncherIcon() {
         // Example themed tints, light and dark: the launcher picks its own from the wallpaper.
         val lightThemed = android.graphics.Color.rgb(0xD3, 0xE3, 0xFD) to android.graphics.Color.rgb(0x04, 0x1E, 0x49)
@@ -270,6 +270,9 @@ class LooksScreenshotTests {
             val model = current ?: return@setContent
             key(model) { WithSystemBars { LaunchVeil(Looks.look(model.theme)) { TakenRoot(model, Platform.none) } } }
         }
+        // The window is laid out once, with the clock running, before the clock is held for the captures.
+        current = DemoScreens.make("today")
+        compose.waitForIdle()
         compose.mainClock.autoAdvance = false
         for (look in ThemeID.entries) {
             current = DemoScreens.make("today", look)
