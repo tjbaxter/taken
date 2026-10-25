@@ -39,7 +39,7 @@ class WeightTests {
         assertEquals(AppTab.WEIGHT, model.tab)
         assertTrue(model.weight.showsTab)
         assertFalse(model.weight.isEmpty)
-        assertEquals(listOf(AppTab.TODAY, AppTab.HISTORY, AppTab.WEIGHT), model.visibleTabs, "last, while it is on")
+        assertEquals(listOf(AppTab.TODAY, AppTab.TODO, AppTab.HISTORY, AppTab.WEIGHT), model.visibleTabs, "last, while it is on")
 
         model.hideWeightTab()
         assertEquals(AppTab.TODAY, model.tab, "a hidden tab never stays selected")
@@ -72,7 +72,7 @@ class WeightTests {
 
         val others = DemoScreens.make("today")
         assertFalse(others.weight.showsTab, "every other screen shows the default app")
-        assertEquals(listOf(AppTab.TODAY, AppTab.HISTORY), others.visibleTabs)
+        assertEquals(listOf(AppTab.TODAY, AppTab.TODO, AppTab.HISTORY), others.visibleTabs)
         assertNull(WeightState().showsTab, "off by default: null until the person chooses")
     }
 

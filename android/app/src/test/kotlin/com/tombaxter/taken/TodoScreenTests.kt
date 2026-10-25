@@ -49,8 +49,9 @@ class TodoScreenTests {
 
     @Test
     fun theTabSitsBetweenTodayAndHistory() {
-        assertEquals(listOf(AppTab.TODAY, AppTab.TODO, AppTab.HISTORY), AppTab.entries.toList(), "the iPhone's order")
+        assertEquals(listOf(AppTab.TODAY, AppTab.TODO, AppTab.HISTORY, AppTab.WEIGHT), AppTab.entries.toList(), "the iPhone's order, Weight last")
         val model = DemoScreens.make("today")
+        assertEquals(listOf(AppTab.TODAY, AppTab.TODO, AppTab.HISTORY), model.visibleTabs, "Weight only while it is on")
         show(model)
         compose.onNodeWithTag("tab-todo").performClick()
         compose.waitForIdle()
