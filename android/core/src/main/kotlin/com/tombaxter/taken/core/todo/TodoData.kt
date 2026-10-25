@@ -685,6 +685,25 @@ object TodoCaptureRoute {
         return if (path == "record") Route.RECORD else Route.LIST
     }
 
+    /**
+     * `taken://todo?task=<UUID>`: a tapped due-time notification, To-do scrolled to its task with a wash (SPEC-ANDROID
+     * 10.4; the iPhone's handler calls `TodoModel.reveal` from the notification itself).
+     */
+    fun revealUrl(id: UUID): String = "$LIST_URL?task=${id.toString().uppercase()}"
+
+    /** The to-do a `taken://todo?task=` link asks To-do to bring into view, or null. */
+    fun taskId(url: String): UUID? {
+        val uri = try {
+            java.net.URI(url)
+        } catch (e: Exception) {
+            return null
+        }
+        if (uri.scheme != SCHEME || uri.host != HOST) return null
+        val value = (uri.rawQuery ?: "").split("&").map { it.split("=", limit = 2) }
+            .firstOrNull { it.firstOrNull() == "task" }?.getOrNull(1) ?: return null
+        return com.tombaxter.taken.core.model.parseUuid(value)
+    }
+
     /** The recording asked for at `askedAt` is still wanted at `now`: at most 90 s old. */
     fun isFresh(askedAt: Instant, now: Instant, maxAge: Duration = TodoCapture.CAPTURE_MAX_AGE): Boolean =
         Duration.between(askedAt, now) <= maxAge
