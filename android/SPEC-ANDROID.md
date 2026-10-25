@@ -292,7 +292,7 @@ Every screen keeps its content, order, copy and rules from SPEC 3 and its Swift 
 
 | iPhone screen (Swift home) | Android form | Phase |
 | --- | --- | --- |
-| Shell: tabs, avatar top right, sheets from the root, links, 20 s ticker, foreground refresh (`TakenApp`, `AppModel`, `RootView`) | `MainActivity` with one Compose tree; tab header (large Geist title, subtitle, avatar `IconButton` 48 dp, TalkBack "Profile and settings"); one sheet at a time from the root; `taken://` routes on an intent filter, parsed by the ported `ProRoute`/`TodoCaptureRoute`; refresh on `ON_START` (reload stores, Pro, reschedule, widget check, pending log offer, intro paywall); a 20 s ticker while started | CORE (Pro parts NEXT) |
+| Shell: tabs, avatar top right, sheets from the root, links, 20 s ticker, foreground refresh (`TakenApp`, `AppModel`, `RootView`) | `MainActivity` with one Compose tree; tab header (large Geist title, subtitle, avatar `IconButton` 48 dp, TalkBack "Profile and settings"); one sheet at a time from the root; `taken://` routes on an intent filter, parsed by the ported `ProRoute`/`TodoCaptureRoute`; refresh on `ON_START` (reload stores, Pro, reschedule, widget check, pending log offer, intro paywall); a 20 s ticker while started | CORE; Pro parts built in NEXT 2 (Play asked on `ON_START` and `ON_RESUME`, the pending log offer, the intro paywall) |
 | Today, first run (`EmptyStackView`) | Same card and "Add to stack" | CORE |
 | Today with a stack (`TodayView`, `ProgressSummary`, `ItemRow`, `TodayPromptRow`, `BottomDock`) | Section 7.2 | CORE (quiet rows partly NEXT) |
 | Add sheet (`AddSheet.swift`) | Full-height `ModalBottomSheet`: chip grid (`FlowRow`), `+ CUSTOM` type mode with the field pinned under the header, type-ahead rows sized by `rowCapacity`, How often rows with frequency menus and weekday toggles, Add bar above the IME | CORE |
@@ -300,9 +300,10 @@ Every screen keeps its content, order, copy and rules from SPEC 3 and its Swift 
 | Set time sheet | `ModalBottomSheet` with the title, subtitle and a 24-hour `TimePicker` (input mode), "Set to 07:42" / "Log at 07:42" / disabled "That time is still to come" | CORE |
 | History (`HistoryView`, `HistoryGrid`) | Same: two stat cards, the 5 x 7 grid (cells are buttons with the iPhone's TalkBack labels), the two lines (Android wording) | CORE |
 | Day sheet (`DaySheet`) | `ModalBottomSheet`: Log at row with a time dialog, items with dose chips (tap: remove confirm) and "+ 08:00" | CORE |
-| Profile (`ProfileView`) | Full-screen destination; sections in the iPhone's order. CORE: header (photo, name, streak line), Stack (reorder, archive, delete), Look, Your day, Feel, Data (Export CSV, Erase all data), About. NEXT: Reminder, Taken Pro, Weight, Export/Import weight CSV, "Add the Take all tile" (Android 13+, section 10.2) | CORE + NEXT |
+| Profile (`ProfileView`) | Full-screen destination; sections in the iPhone's order. CORE: header (photo, name, streak line), Stack (reorder, archive, delete), Look, Your day, Feel, Data (Export CSV, Erase all data), About. NEXT 2 (built): Taken Pro between Feel and Data (9.5). NEXT: Reminder, Weight, Export/Import weight CSV, "Add the Take all tile" (Android 13+, section 10.2) | CORE + NEXT |
 | Look picker | Four live swatches side by side; tap recolours the app with a 0.3 s crossfade and refreshes widgets | CORE |
-| Paywall, trial ask | Section 9.6 and 10.4 | NEXT |
+| Paywall, intro paywall | Section 9.6: a full-screen dialog, edge to edge, its bar icons following the look | NEXT 2, built |
+| Trial ask | Section 10.4, from the seam in 9.7 | NEXT 3 |
 | Widget help sheet | Not built: Android's launcher shows its own pin dialog (section 10.1) | |
 | To-do tab, edit and type sheets | Section 11 | NEXT |
 | Weight tab and its sheets | Section 12 | NEXT |
