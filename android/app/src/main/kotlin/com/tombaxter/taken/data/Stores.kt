@@ -13,6 +13,8 @@ import com.tombaxter.taken.core.pro.ProLedger
 import com.tombaxter.taken.core.pro.ProLedgerCodec
 import com.tombaxter.taken.core.profile.Profile
 import com.tombaxter.taken.core.profile.ProfileCodec
+import com.tombaxter.taken.core.todo.TodoCodec
+import com.tombaxter.taken.core.todo.TodoState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -85,6 +87,18 @@ class TakenStores(
         produceFile = { file(LEDGER_FILE) },
     )
 
+    /**
+     * todos.json, the To-do tab's one list (SPEC-ANDROID 5.1 and 11). An unreadable file is kept aside as
+     * `todos-unreadable-<unix>.json` and the list starts empty, as the stack's does; `firstNoteAt` goes with it, so the
+     * next note is on the house again [Own choice: the iPhone's TodoStore sets the file aside the same way].
+     */
+    val todos: DataStore<TodoState> = DataStoreFactory.create(
+        serializer = JsonFileSerializer(TodoState(), { TodoCodec.decode(it) }, TodoCodec::encode),
+        corruptionHandler = ReplaceFileCorruptionHandler { setAside(TODOS_FILE, "todos-unreadable-"); TodoState() },
+        scope = scope,
+        produceFile = { file(TODOS_FILE) },
+    )
+
     val profile: DataStore<Profile> = DataStoreFactory.create(
         serializer = JsonFileSerializer(Profile(), ProfileCodec::decode, ProfileCodec::encode),
         corruptionHandler = ReplaceFileCorruptionHandler { Profile() },
@@ -113,6 +127,7 @@ class TakenStores(
         const val STACK_FILE = "taken.json"
         const val LEDGER_FILE = "pro.json"
         const val PROFILE_FILE = "profile.json"
+        const val TODOS_FILE = TodoCodec.FILE_NAME
         const val PHOTO_FILE = "profile-photo.jpg"
         val SET_ASIDE_PREFIXES = listOf("taken-unreadable-", "todos-unreadable-", "weights-unreadable-")
     }
