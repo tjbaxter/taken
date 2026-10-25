@@ -93,6 +93,7 @@ class MainActivity : ComponentActivity(), Platform {
         }
     }
 
+    /**
      * RECORD_AUDIO, asked in context at the first mic tap (SPEC-ANDROID 11,
      * https://developer.android.com/training/permissions/requesting). Registered here, before the activity starts, so the
      * answer reaches the To-do tab after a rotation too.
