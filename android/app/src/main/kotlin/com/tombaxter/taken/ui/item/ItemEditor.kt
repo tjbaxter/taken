@@ -30,6 +30,9 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -83,6 +86,25 @@ class ItemDraftState(item: Item, todayWeekday: Int) {
         if (deleted) return
         model.saveItem(id, name, frequency, archived)
     }
+
+    companion object {
+        /**
+         * What was typed and picked survives a rotation, a fold or a resize, which recreate the screen; the open sheet
+         * itself lives in AppModel (https://developer.android.com/develop/ui/compose/state-saving).
+         */
+        fun saver(item: Item, todayWeekday: Int): Saver<ItemDraftState, Any> = listSaver<ItemDraftState, Any>(
+            save = { draft -> listOf(draft.name, draft.choice.name, ArrayList(draft.weekdays.sorted()), draft.weekday, draft.archived) },
+            restore = { saved ->
+                ItemDraftState(item, todayWeekday).apply {
+                    name = saved[0] as String
+                    choice = FrequencyChoice.valueOf(saved[1] as String)
+                    weekdays = (saved[2] as List<*>).map { it as Int }.toSet()
+                    weekday = saved[3] as Int
+                    archived = saved[4] as Boolean
+                }
+            },
+        )
+    }
 }
 
 /** The item sheet from Today (edit mode, or Edit item in a row's menu). It saves as it closes, by swipe, back or close. */
@@ -93,7 +115,8 @@ fun ItemSheet(model: AppModel, itemId: UUID, onDismiss: () -> Unit) {
         LaunchedEffect(itemId) { onDismiss() }
         return
     }
-    val draft = remember(itemId) { ItemDraftState(item, model.today.day.weekday) }
+    val weekday = model.today.day.weekday
+    val draft = rememberSaveable(itemId, saver = ItemDraftState.saver(item, weekday)) { ItemDraftState(item, weekday) }
     val close = {
         draft.save(model, itemId)
         onDismiss()
@@ -115,7 +138,8 @@ fun ItemEditorScreen(model: AppModel, itemId: UUID) {
         LaunchedEffect(itemId) { model.back() }
         return
     }
-    val draft = remember(itemId) { ItemDraftState(item, model.today.day.weekday) }
+    val weekday = model.today.day.weekday
+    val draft = rememberSaveable(itemId, saver = ItemDraftState.saver(item, weekday)) { ItemDraftState(item, weekday) }
     DisposableEffect(itemId) {
         onDispose { draft.save(model, itemId) }
     }
@@ -192,11 +216,16 @@ private fun ItemEditorBody(model: AppModel, itemId: UUID, draft: ItemDraftState,
             }
         }
         Spacer(Modifier.height(8.dp))
-        Text("A change applies from today. Earlier days keep the schedule they had.", style = TakenType.sans(14), color = colors.fgSubtle)
+        Text(
+            "A change applies from today. Earlier days keep the schedule they had.",
+            style = TakenType.sans(14),
+            color = colors.fgSubtle,
+            modifier = Modifier.padding(start = EDITOR_INSET),
+        )
         // Weekly: one fixed line, never a countdown. Taken only records doses.
         if (draft.choice == FrequencyChoice.WEEKLY) {
             Spacer(Modifier.height(6.dp))
-            Text(Fmt.MISSED_DOSE_NOTE, style = TakenType.sans(14), color = colors.fgSubtle)
+            Text(Fmt.MISSED_DOSE_NOTE, style = TakenType.sans(14), color = colors.fgSubtle, modifier = Modifier.padding(start = EDITOR_INSET))
         }
         Spacer(Modifier.height(22.dp))
         Card {
@@ -228,12 +257,15 @@ private fun ItemEditorBody(model: AppModel, itemId: UUID, draft: ItemDraftState,
     }
 }
 
+/** Labels and footnotes start where the fields' text starts, one edge down the sheet as on the iPhone. */
+private val EDITOR_INSET = 16.dp
+
 @Composable
 private fun EditorTitle(title: String) {
     Text(
         title,
         style = TakenType.sans(14, FontWeight.SemiBold),
         color = Taken.colors.fgSubtle,
-        modifier = Modifier.padding(top = 20.dp, bottom = 8.dp, start = 4.dp).semantics { heading() },
+        modifier = Modifier.padding(top = 20.dp, bottom = 8.dp, start = EDITOR_INSET).semantics { heading() },
     )
 }

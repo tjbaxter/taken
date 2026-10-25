@@ -11,6 +11,7 @@ import com.tombaxter.taken.core.retention.TodayPrompt
 import com.tombaxter.taken.core.stack.ItemDay
 import com.tombaxter.taken.core.stack.logDose
 import com.tombaxter.taken.data.MemoryPersistence
+import com.tombaxter.taken.data.Persistence
 import org.junit.Test
 import org.junit.runner.RunWith
 import org.robolectric.RobolectricTestRunner
@@ -20,6 +21,7 @@ import java.time.ZonedDateTime
 import java.util.Locale
 import kotlin.test.assertEquals
 import kotlin.test.assertFalse
+import kotlin.test.assertIs
 import kotlin.test.assertNotNull
 import kotlin.test.assertNull
 import kotlin.test.assertTrue
@@ -258,6 +260,59 @@ class TodayRowTests {
         assertNull(repair.todayPrompt, "its close hides it")
     }
 
+    /** Android: until Reminders can post the nudge (NEXT 3), Today never offers to turn one on. */
+    @Test
+    fun testTodayOffersNoNudgeThisBuildCannotSend() {
+        val zone = ZoneId.of("Europe/London")
+        val now = ZonedDateTime.of(2026, 10, 21, 9, 0, 0, 0, zone).toInstant()
+        val vd3 = Item(name = "Vitamin D3", code = "VD3", frequency = Frequency.Daily(1), createdAt = now.minusSeconds(86_400), sortIndex = 0)
+        val model = model(StackState(items = listOf(vd3)), now, zone)
+        assertFalse(model.settings.reminderEnabled)
+        assertFalse(model.settings.nudgeOfferDone, "a new stack, the offer never answered")
+        assertNull(model.todayPrompt, "no Turn on for a nudge that would never come")
+    }
+
+    // MARK: Saving
+
+    /**
+     * A save that fails puts the row back to what the file holds, as on the iPhone, where a failed write never reaches the
+     * screen; a write replayed onto a file that moved on keeps the dose id the toast's Undo holds.
+     */
+    @Test
+    fun testAFailedSaveLeavesTheRowPendingAndAReplayKeepsItsDoseId() {
+        val zone = ZoneId.of("Europe/London")
+        val now = ZonedDateTime.of(2026, 10, 21, 9, 0, 0, 0, zone).toInstant()
+        val vd3 = Item(name = "Vitamin D3", code = "VD3", frequency = Frequency.Daily(1), createdAt = now.minusSeconds(86_400), sortIndex = 0)
+        val fish = Item(name = "Fish Oil", code = "FSH", frequency = Frequency.Daily(1), createdAt = now.minusSeconds(86_400), sortIndex = 1)
+        val file = FlakyFile(StackState(items = listOf(vd3, fish)))
+        val model = AppModel(
+            file, file.stack, ProLedger(firstSeenAt = now), Profile(), null, ProSource.untilBilling,
+            clockNow = { now }, zone = { zone }, locale = { Locale.US },
+        )
+
+        file.failNext = true
+        model.tap(row("Vitamin D3", model))
+        assertFalse(row("Vitamin D3", model).isPending, "the ring fills at once")
+        file.finish()
+        assertEquals("Could not save. Try again.", model.toast?.message)
+        assertTrue(row("Vitamin D3", model).isPending, "nothing was saved, so the row is pending again and a tap logs it")
+        assertTrue(file.stack.doses.isEmpty())
+        assertNull(model.ledger?.firstDoseAt, "a dose that never reached the file is not the first dose")
+
+        // Meanwhile another surface logged Fish Oil: the next tap's write is replayed onto that file.
+        file.stack = file.stack.clone().also { it.logDose(fish.id, now.minusSeconds(60), zone) }
+        model.tap(row("Vitamin D3", model))
+        val toast = assertNotNull(model.toast)
+        val undo = assertIs<UndoStep.Remove>(toast.undo)
+        assertEquals(undo.ids, file.stack.doses.filter { it.itemId == vd3.id }.map { it.id }.toSet(), "the file has the id Undo holds")
+        assertEquals(file.stack, model.state, "the screen ends on the file, Fish Oil included")
+        assertFalse(row("Fish Oil", model).isPending)
+
+        model.undo(toast)
+        assertTrue(file.stack.doses.none { it.itemId == vd3.id }, "Undo removes the dose from the file too")
+        assertTrue(row("Vitamin D3", model).isPending)
+    }
+
     // MARK: Add, erase and links
 
     @Test
@@ -316,6 +371,45 @@ class TodayRowTests {
         assertEquals(now, persistence.ledger?.firstDoseAt, "the first dose needs no Pro, and it is remembered")
         assertEquals(1, persistence.stack.doses.size, "written to the file")
         assertTrue(model.isLocked, "after it, logging needs Pro")
+    }
+
+    /** A file that can refuse a write, as a full disk does, and answers later, as DataStore does. */
+    private class FlakyFile(var stack: StackState) : Persistence {
+        var failNext = false
+        private var waiting: (() -> Unit)? = null
+
+        override val busy: Boolean get() = waiting != null
+
+        override fun saveStack(
+            base: StackState,
+            next: StackState,
+            replay: (StackState) -> Unit,
+            settled: (StackState) -> Unit,
+            onFailure: () -> Unit,
+        ) {
+            if (failNext) {
+                failNext = false
+                waiting = {
+                    onFailure()
+                    settled(stack)
+                }
+                return
+            }
+            stack = if (stack == base) next else stack.clone().also(replay)
+            settled(stack)
+        }
+
+        /** The refused write's answer arrives. */
+        fun finish() {
+            val answer = waiting
+            waiting = null
+            answer?.invoke()
+        }
+
+        override fun updateLedger(transform: (ProLedger?) -> ProLedger?) = Unit
+        override fun saveProfile(profile: Profile) = Unit
+        override fun savePhoto(jpeg: ByteArray?) = Unit
+        override fun eraseExtras() = Unit
     }
 
     private fun model(state: StackState, now: Instant, zone: ZoneId): AppModel {

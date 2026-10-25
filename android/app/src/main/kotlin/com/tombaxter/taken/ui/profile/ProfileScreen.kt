@@ -36,6 +36,7 @@ import androidx.compose.material3.rememberSwipeToDismissBoxState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -44,6 +45,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.SolidColor
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.input.pointer.pointerInput
@@ -123,39 +125,44 @@ fun ProfileScreen(model: AppModel, platform: Platform) {
             ) { Icon(Symbols.ArrowBack, contentDescription = null, tint = colors.fg) }
             Text("Profile", style = TakenType.sans(17, FontWeight.SemiBold), color = colors.fg, modifier = Modifier.padding(start = 4.dp).semantics { heading() })
         }
-        Column(
-            Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp).padding(bottom = 32.dp).imePadding(),
-        ) {
-            Header(model, platform, name, onName = { name = it }, onSubmit = { model.setProfileName(name) })
-            StackSection(model)
-            Section("Look", trailing = model.theme.title)
-            Card { Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) { LookPicker(model.theme) { model.setLook(it) } } }
-            Footnote(ProfileCopy.LOOK_FOOTNOTE)
-            Section("Your day")
-            Card {
-                SettingRow("Wake-up time") { MonoTimeButton("Wake-up time", model.settings.wakeMinutes) { model.setWakeMinutes(it) } }
-            }
-            Footnote(ProfileCopy.DAY_FOOTNOTE)
-            Section("Feel")
-            Card { SwitchRow("Haptics", checked = model.hapticsOn) { model.setHaptics(it) } }
-            Section("Data")
-            Card {
-                Column {
-                    LinkRow("Export CSV") { platform.shareCsv(model.csv()) }
-                    RowDivider()
-                    LinkRow("Erase all data", danger = true) { confirmErase = true }
+        // At 600 dp and wider the sections keep the readable width Today and History keep, centred (SPEC-ANDROID 6.2);
+        // the top bar stays full width.
+        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopCenter) {
+            Column(
+                Modifier.widthIn(max = 640.dp).fillMaxSize().verticalScroll(rememberScrollState()).padding(horizontal = 20.dp)
+                    .padding(bottom = 32.dp).imePadding(),
+            ) {
+                Header(model, platform, name, onName = { name = it }, onSubmit = { model.setProfileName(name) })
+                StackSection(model)
+                Section("Look", trailing = model.theme.title)
+                Card { Box(Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) { LookPicker(model.theme) { model.setLook(it) } } }
+                Footnote(ProfileCopy.LOOK_FOOTNOTE)
+                Section("Your day")
+                Card {
+                    SettingRow("Wake-up time") { MonoTimeButton("Wake-up time", model.settings.wakeMinutes) { model.setWakeMinutes(it) } }
                 }
-            }
-            Section("About")
-            Card {
-                Column {
-                    Text(ProfileCopy.ABOUT, style = TakenType.sans(16), color = colors.fg, modifier = Modifier.padding(16.dp))
-                    RowDivider()
-                    Text(ProfileCopy.HEALTH, style = TakenType.sans(15), color = colors.fgMuted, modifier = Modifier.padding(16.dp))
-                    RowDivider()
-                    SettingRow("Version") { Text(platform.versionName, style = TakenType.mono(15), color = colors.fgSubtle) }
-                    RowDivider()
-                    LinkRow("Support") { platform.openUrl(ProfileCopy.SUPPORT_URL) }
+                Footnote(ProfileCopy.DAY_FOOTNOTE)
+                Section("Feel")
+                Card { SwitchRow("Haptics", checked = model.hapticsOn) { model.setHaptics(it) } }
+                Section("Data")
+                Card {
+                    Column {
+                        LinkRow("Export CSV") { platform.shareCsv(model.csvExport()) }
+                        RowDivider()
+                        LinkRow("Erase all data", danger = true) { confirmErase = true }
+                    }
+                }
+                Section("About")
+                Card {
+                    Column {
+                        Text(ProfileCopy.ABOUT, style = TakenType.sans(16), color = colors.fg, modifier = Modifier.padding(16.dp))
+                        RowDivider()
+                        Text(ProfileCopy.HEALTH, style = TakenType.sans(15), color = colors.fgMuted, modifier = Modifier.padding(16.dp))
+                        RowDivider()
+                        SettingRow("Version") { Text(platform.versionName, style = TakenType.mono(15), color = colors.fgSubtle) }
+                        RowDivider()
+                        LinkRow("Support") { platform.openUrl(ProfileCopy.SUPPORT_URL) }
+                    }
                 }
             }
         }
@@ -232,7 +239,7 @@ private fun StackSection(model: AppModel) {
     val active = model.activeItems
     val showsReorder = reordering && active.size > 1
 
-    Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(start = SECTION_INSET, top = 22.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text("Stack", style = TakenType.sans(15, FontWeight.SemiBold), color = colors.fgMuted, modifier = Modifier.weight(1f).semantics { heading() })
         if (active.size > 1) InkButton(if (showsReorder) "Done" else "Reorder") { reordering = !showsReorder }
     }
@@ -244,11 +251,14 @@ private fun StackSection(model: AppModel) {
             }
             active.forEachIndexed { index, item ->
                 if (index > 0) RowDivider()
-                if (showsReorder) {
-                    ReorderRow(model, item, index, active.size)
-                } else {
-                    SwipeToDelete(item, onDelete = { pendingDelete = item }) {
-                        StackRow(item, archived = false) { model.openProfileItem(item.id) }
+                // A row's swipe and drag state follows its item, not its place in the list.
+                key(item.id) {
+                    if (showsReorder) {
+                        ReorderRow(model, item, index, active.size)
+                    } else {
+                        SwipeToDelete(item, onDelete = { pendingDelete = item }) {
+                            StackRow(item, archived = false) { model.openProfileItem(item.id) }
+                        }
                     }
                 }
             }
@@ -311,9 +321,16 @@ private fun SwipeToDelete(item: Item, onDelete: () -> Unit, content: @Composable
             if (value == SwipeToDismissBoxValue.EndToStart) onDelete()
             scope.launch { state.reset() }
         },
+        // Red only while a swipe is under way, as Google's sample paints it
+        // (https://developer.android.com/develop/ui/compose/touch-input/user-interactions/swipe-to-dismiss): at rest a
+        // full red box behind the row bled through the card's rounded corners.
         backgroundContent = {
-            Box(Modifier.fillMaxSize().background(colors.danger).padding(horizontal = 20.dp), contentAlignment = Alignment.CenterEnd) {
-                Text("Delete", style = TakenType.sans(16, FontWeight.SemiBold), color = colors.bg)
+            val swiping = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
+            Box(
+                Modifier.fillMaxSize().background(if (swiping) colors.danger else Color.Transparent).padding(horizontal = 20.dp),
+                contentAlignment = Alignment.CenterEnd,
+            ) {
+                if (swiping) Text("Delete", style = TakenType.sans(16, FontWeight.SemiBold), color = colors.bg)
             }
         },
         modifier = Modifier.semantics {
@@ -372,10 +389,16 @@ private fun ReorderRow(model: AppModel, item: Item, index: Int, count: Int) {
     }
 }
 
+/**
+ * Section headers and footnotes start where the rows' text starts inside the cards, as on the iPhone and as Material's
+ * list subheaders line up with list item text.
+ */
+private val SECTION_INSET = 16.dp
+
 @Composable
 private fun Section(title: String, trailing: String? = null) {
     val colors = Taken.colors
-    Row(Modifier.fillMaxWidth().padding(top = 22.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().padding(start = SECTION_INSET, top = 22.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = TakenType.sans(15, FontWeight.SemiBold), color = colors.fgMuted, modifier = Modifier.weight(1f).semantics { heading() })
         if (trailing != null) Text(trailing, style = TakenType.sans(14, FontWeight.Medium), color = colors.signalInk)
     }
@@ -383,7 +406,7 @@ private fun Section(title: String, trailing: String? = null) {
 
 @Composable
 private fun Footnote(text: String) {
-    Text(text, style = TakenType.sans(14), color = Taken.colors.fgSubtle, modifier = Modifier.padding(top = 8.dp, start = 4.dp))
+    Text(text, style = TakenType.sans(14), color = Taken.colors.fgSubtle, modifier = Modifier.padding(top = 8.dp, start = SECTION_INSET))
 }
 
 @Composable

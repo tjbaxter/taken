@@ -1,17 +1,24 @@
 package com.tombaxter.taken
 
 import androidx.activity.ComponentActivity
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.SemanticsActions
 import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.click
+import androidx.compose.ui.test.getUnclippedBoundsInRoot
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.onNodeWithTag
 import androidx.compose.ui.test.performClick
 import androidx.compose.ui.test.performTouchInput
 import androidx.compose.ui.test.swipe
+import androidx.compose.ui.unit.dp
 import com.tombaxter.taken.core.stack.RowSpeech
+import com.tombaxter.taken.ui.today.AllTakenCheckScale
 import com.tombaxter.taken.ui.shell.Platform
 import com.tombaxter.taken.ui.shell.TakenRoot
 import org.junit.Rule
@@ -21,6 +28,8 @@ import org.robolectric.RobolectricTestRunner
 import org.robolectric.annotation.Config
 import java.util.Locale
 import kotlin.test.assertEquals
+import kotlin.test.assertNotNull
+import kotlin.test.assertNull
 import kotlin.test.assertTrue
 
 /**
@@ -92,6 +101,49 @@ class RowGestureTests {
         assertEquals(
             listOf("Undo last dose", "Set time", "Edit item"),
             config.getOrNull(SemanticsActions.CustomActions)?.map { it.label },
+        )
+    }
+
+    /**
+     * The All taken moment (SPEC 3.1, SPEC-ANDROID 7.2): the tap that finishes the day springs the check in from 0.55,
+     * on the same tap, as the iPhone's pop does.
+     */
+    @Test
+    fun theTapThatFinishesTheDayPlaysTheAllTakenCheck() {
+        val model = show()
+        fun checkScale(): Float? = compose.onNodeWithTag("progress").fetchSemanticsNode().config.getOrNull(AllTakenCheckScale)
+        model.tap(model.today.items.first { it.item.name == "Fish Oil" })
+        compose.waitForIdle()
+        assertNull(checkScale(), "Magnesium is still to take")
+
+        compose.mainClock.autoAdvance = false
+        model.tap(model.today.items.first { it.item.name == "Magnesium" })
+        compose.mainClock.advanceTimeByFrame()
+        val first = assertNotNull(checkScale(), "All taken shows on the tap that finishes the day")
+        assertTrue(first < 0.6f, "the check springs in from 0.55, never shown full size first: $first")
+        compose.mainClock.advanceTimeBy(2_000)
+        assertEquals(1f, assertNotNull(checkScale()), 0.01f, "and settles at full size")
+    }
+
+    /**
+     * Beside the rail (600 dp and wider) nothing else pads the bottom inset: Take all must still sit above the
+     * navigation bar or taskbar (SPEC-ANDROID 6.2).
+     */
+    @Test
+    @Config(qualifiers = "w1280dp-h800dp-land-xhdpi")
+    fun besideTheRailTakeAllSitsAboveTheNavigationBar() {
+        val model = DemoScreens.make("today")
+        compose.setContent {
+            WithSystemBars(navigationBar = 48.dp) {
+                Box(Modifier.fillMaxSize().testTag("screen")) { TakenRoot(model, Platform.none) }
+            }
+        }
+        compose.waitForIdle()
+        val screen = compose.onNodeWithTag("screen").getUnclippedBoundsInRoot()
+        val takeAll = compose.onNodeWithTag("take-all").getUnclippedBoundsInRoot()
+        assertTrue(
+            takeAll.bottom <= screen.bottom - 48.dp,
+            "Take all ends ${screen.bottom - takeAll.bottom} above the bottom edge, inside a 48 dp navigation bar",
         )
     }
 

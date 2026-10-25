@@ -34,7 +34,9 @@ object TodayPrompts {
      * Which row Today shows, if any. The trial notice first (only while notifications cannot deliver the trial
      * reminder), then the nudge offer, then the repair, then the widget invite, then the weight offer. None while locked:
      * the Taken Pro bar sits there. `widgetPlaced`: a Taken stack widget is already on the home screen (Android reads
-     * Taken's placed widgets where the iPhone reads Lock Screen families), so the invite would be noise.
+     * Taken's placed widgets where the iPhone reads Lock Screen families), so the invite would be noise. `nudgeAvailable`:
+     * this build can deliver the nudge (Android: false until Reminders, NEXT 3), so the offer never promises one that
+     * cannot come.
      */
     fun pick(
         settings: StackSettings,
@@ -45,10 +47,13 @@ object TodayPrompts {
         widgetPlaced: Boolean = false,
         trialNotice: String? = null,
         weightOffer: Boolean = false,
+        nudgeAvailable: Boolean = true,
     ): TodayPrompt? {
         if (!hasStack || locked) return null
         if (trialNotice != null) return TodayPrompt.TrialEnds(trialNotice)
-        if (!settings.reminderEnabled && !settings.nudgeOfferDone) return TodayPrompt.NudgeOffer(settings.reminderMinutes)
+        if (nudgeAvailable && !settings.reminderEnabled && !settings.nudgeOfferDone) {
+            return TodayPrompt.NudgeOffer(settings.reminderMinutes)
+        }
         if (repairDay != null && settings.repairClosedDay != repairDay.ordinal) return TodayPrompt.Repair(repairDay)
         if (today.allTaken && !settings.widgetInviteDone && !widgetPlaced &&
             (settings.widgetInviteDay == null || settings.widgetInviteDay == today.day.ordinal)

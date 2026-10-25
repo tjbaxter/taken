@@ -38,6 +38,7 @@ import androidx.compose.material3.rememberTooltipState
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -50,11 +51,14 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
+import androidx.compose.ui.semantics.SemanticsPropertyKey
 import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -150,27 +154,31 @@ private fun Rows(model: AppModel, items: List<ItemDay>, notDue: Boolean) {
             // Not today: a weekly item shows the week today is in, with the line that goes with it.
             val shown = if (notDue) model.notTodayRow(entry) else TodayRules.NotTodayRow(entry, "")
             val row = shown.row
-            ItemRow(
-                row = row,
-                today = model.today.day,
-                clock = model.clock,
-                now = model.now,
-                expanded = model.expandedItemId == row.item.id,
-                nextLabel = if (notDue) model.nextLabel(entry) else null,
-                note = if (notDue) shown.note else null,
-                locked = model.isLocked,
-                editing = model.editingStack,
-                logs = model.rowLogs[row.item.id] ?: 0,
-                offersSetTime = model.offersSetTime(row),
-                actions = RowActions(
-                    onTap = { model.tap(row) },
-                    onUndoLast = { model.undoLastDose(row) },
-                    // Set time logs or moves a dose, so in locked mode it opens the paywall instead.
-                    onSetTime = { model.requirePro { model.sheet = Sheet.SetTime(row.item.id) } },
-                    onOpenDay = { model.sheet = Sheet.Day(row.day) },
-                    onEdit = { model.sheet = Sheet.EditItem(row.item.id) },
-                ),
-            )
+            // Each row's remembered state (its moment, its menu, its ring's settle) follows its item, not its place, as
+            // SwiftUI's ForEach by id does: archiving or deleting one row never plays another's moment.
+            key(row.item.id) {
+                ItemRow(
+                    row = row,
+                    today = model.today.day,
+                    clock = model.clock,
+                    now = model.now,
+                    expanded = model.expandedItemId == row.item.id,
+                    nextLabel = if (notDue) model.nextLabel(entry) else null,
+                    note = if (notDue) shown.note else null,
+                    locked = model.isLocked,
+                    editing = model.editingStack,
+                    logs = model.rowLogs[row.item.id] ?: 0,
+                    offersSetTime = model.offersSetTime(row),
+                    actions = RowActions(
+                        onTap = { model.tap(row) },
+                        onUndoLast = { model.undoLastDose(row) },
+                        // Set time logs or moves a dose, so in locked mode it opens the paywall instead.
+                        onSetTime = { model.requirePro { model.sheet = Sheet.SetTime(row.item.id) } },
+                        onOpenDay = { model.sheet = Sheet.Day(row.day) },
+                        onEdit = { model.sheet = Sheet.EditItem(row.item.id) },
+                    ),
+                )
+            }
         }
     }
 }
@@ -233,18 +241,45 @@ private fun StackHeader(model: AppModel) {
     }
 }
 
+/** For tests: the All taken check's scale on the progress line, so the moment can be checked frame by frame. */
+val AllTakenCheckScale = SemanticsPropertyKey<Float>("AllTakenCheckScale")
+
+/** The All taken check springs in from this scale (the iPhone's `pop`). */
+private const val POP_FROM = 0.55f
+
 /**
  * Today's one calm progress line: "4 of 6 taken" with a slim bar, in doses as the widgets count them. When everything
- * due is taken it becomes the All taken moment: the check springs in with the CONFIRM haptic.
+ * due is taken it becomes the All taken moment: the check springs in with the CONFIRM haptic. The moment's state lives
+ * here, on the line that exists before and after the switch (the iPhone's `onChange` sits on the same Group): the tap that
+ * finishes the day raises `lockInCount` in the same frame that shows All taken, so the check compares against the count
+ * from before it existed.
  */
 @Composable
 fun ProgressSummary(summary: DaySummary, model: AppModel, lockInCount: Int, streak: Int) {
     val colors = Taken.colors
     val last = ProgressCopy.lastTime(summary, model.clock)
-    Box(Modifier.fillMaxWidth().clearAndSetSemantics { contentDescription = ProgressCopy.spoken(summary) }) {
+    val pop = remember { Animatable(1f) }
+    var played by remember { mutableIntStateOf(lockInCount) }
+    LaunchedEffect(lockInCount) {
+        if (lockInCount > played) {
+            pop.snapTo(POP_FROM)
+            played = lockInCount
+            pop.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessLow))
+        }
+        played = lockInCount
+    }
+    // Until the effect starts, a new count draws the check small already, so it never flashes full size first.
+    val checkScale = if (lockInCount > played) POP_FROM else pop.value
+    Box(
+        Modifier.fillMaxWidth().clearAndSetSemantics {
+            contentDescription = ProgressCopy.spoken(summary)
+            testTag = "progress"
+            if (summary.dueDoses > 0 && summary.allTaken) this[AllTakenCheckScale] = checkScale
+        },
+    ) {
         when {
             summary.dueDoses == 0 -> Text("Nothing due today", style = TakenType.sans(17), color = colors.fgMuted)
-            summary.allTaken -> AllTaken(last, streak, summary.lastDose != null, lockInCount)
+            summary.allTaken -> AllTaken(last, streak, summary.lastDose != null, checkScale)
             else -> Column {
                 Row(verticalAlignment = Alignment.Bottom) {
                     Text("${summary.takenDueDoses}", style = TakenType.mono(22), color = colors.fg)
@@ -265,19 +300,10 @@ fun ProgressSummary(summary: DaySummary, model: AppModel, lockInCount: Int, stre
 }
 
 @Composable
-private fun AllTaken(last: String?, streak: Int, hasLast: Boolean, lockInCount: Int) {
+private fun AllTaken(last: String?, streak: Int, hasLast: Boolean, checkScale: Float) {
     val colors = Taken.colors
-    val pop = remember { Animatable(1f) }
-    var seen by remember { mutableIntStateOf(lockInCount) }
-    LaunchedEffect(lockInCount) {
-        if (lockInCount > seen) {
-            pop.snapTo(0.55f)
-            pop.animateTo(1f, spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessLow))
-        }
-        seen = lockInCount
-    }
     Row(verticalAlignment = Alignment.CenterVertically) {
-        Canvas(Modifier.size(40.dp).scale(pop.value)) {
+        Canvas(Modifier.size(40.dp).scale(checkScale)) {
             val radius = size.minDimension / 2
             drawCircle(Brush.radialGradient(listOf(colors.glow(0.35f), Color.Transparent), center, radius * 1.7f), radius * 1.7f)
             drawCircle(colors.signal, radius)
@@ -401,7 +427,13 @@ private fun EmptyStack(model: AppModel) {
         Spacer(Modifier.height(18.dp))
         Text("Nothing in your stack yet", style = TakenType.sans(20, FontWeight.SemiBold), color = colors.fg, textAlign = TextAlign.Center)
         Spacer(Modifier.height(6.dp))
-        Text("Tap what you take. It takes a few seconds.", style = TakenType.sans(15), color = colors.fgSubtle, textAlign = TextAlign.Center)
+        // Balanced lines, never one word alone on the second (https://developer.android.com/develop/ui/compose/text/style-paragraph).
+        Text(
+            "Tap what you take. It takes a few seconds.",
+            style = TakenType.sans(15).copy(lineBreak = LineBreak.Heading),
+            color = colors.fgSubtle,
+            textAlign = TextAlign.Center,
+        )
         Spacer(Modifier.height(24.dp))
         PrimaryButton("Add to stack", locked = model.isLocked) { model.requirePro { model.sheet = Sheet.Add } }
     }

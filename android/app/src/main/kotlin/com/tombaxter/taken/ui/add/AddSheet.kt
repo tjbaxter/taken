@@ -39,7 +39,12 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.listSaver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.snapshots.SnapshotStateList
+import androidx.compose.runtime.snapshots.SnapshotStateMap
+import androidx.compose.runtime.toMutableStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -101,13 +106,17 @@ fun AddSheet(model: AppModel, onDismiss: () -> Unit) {
 fun AddContent(model: AppModel, onClose: () -> Unit) {
     val colors = Taken.colors
     val seed = model.addSeed
-    val selected = remember { mutableStateListOf<String>().also { it.addAll(seed?.selected ?: emptyList()) } }
-    val extras = remember { mutableStateListOf<String>() }
-    val choices = remember { mutableStateMapOf<String, FrequencyChoice>().also { it.putAll(seed?.choices ?: emptyMap()) } }
-    val days = remember { mutableStateMapOf<String, Set<Int>>() }
-    val weekly = remember { mutableStateMapOf<String, Int>() }
-    var typing by remember { mutableStateOf(!seed?.query.isNullOrEmpty()) }
-    var query by remember { mutableStateOf(seed?.query ?: "") }
+    // The picks, how often each is taken and the typed text survive a rotation, a fold or a resize; the open sheet itself
+    // lives in AppModel (https://developer.android.com/develop/ui/compose/state-saving).
+    val selected = rememberSaveable(saver = PickListSaver) { mutableStateListOf<String>().also { it.addAll(seed?.selected ?: emptyList()) } }
+    val extras = rememberSaveable(saver = PickListSaver) { mutableStateListOf<String>() }
+    val choices = rememberSaveable(saver = ChoicesSaver) {
+        mutableStateMapOf<String, FrequencyChoice>().also { it.putAll(seed?.choices ?: emptyMap()) }
+    }
+    val days = rememberSaveable(saver = DaysSaver) { mutableStateMapOf<String, Set<Int>>() }
+    val weekly = rememberSaveable(saver = WeeklySaver) { mutableStateMapOf<String, Int>() }
+    var typing by rememberSaveable { mutableStateOf(!seed?.query.isNullOrEmpty()) }
+    var query by rememberSaveable { mutableStateOf(seed?.query ?: "") }
     var focused by remember { mutableStateOf(false) }
     var spoken by remember { mutableStateOf<String?>(null) }
 
@@ -276,6 +285,23 @@ fun AddContent(model: AppModel, onClose: () -> Unit) {
         Announcement(spoken)
     }
 }
+
+private val PickListSaver = listSaver<SnapshotStateList<String>, String>(
+    save = { it.toList() },
+    restore = { it.toMutableStateList() },
+)
+
+/** A picks map flattened to name, value, name, value: what a saved state can hold. */
+private fun <V : Any> pickMapSaver(encode: (V) -> Any, decode: (Any) -> V) = listSaver<SnapshotStateMap<String, V>, Any>(
+    save = { map -> map.entries.flatMap { listOf(it.key, encode(it.value)) } },
+    restore = { flat ->
+        mutableStateMapOf<String, V>().apply { flat.chunked(2).forEach { (name, value) -> put(name as String, decode(value)) } }
+    },
+)
+
+private val ChoicesSaver = pickMapSaver<FrequencyChoice>({ it.name }, { FrequencyChoice.valueOf(it as String) })
+private val DaysSaver = pickMapSaver<Set<Int>>({ ArrayList(it.sorted()) }, { saved -> (saved as List<*>).map { it as Int }.toSet() })
+private val WeeklySaver = pickMapSaver<Int>({ it }, { it as Int })
 
 /** The pinned field and the suggestions under it, as many rows as fit (`AddPlan.rowCapacity`). */
 @Composable

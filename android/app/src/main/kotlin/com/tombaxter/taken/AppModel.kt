@@ -36,8 +36,9 @@ import com.tombaxter.taken.core.stack.StackEngine
 import com.tombaxter.taken.core.stack.TodayRules
 import com.tombaxter.taken.core.stack.addItems
 import com.tombaxter.taken.core.stack.deleteItem
+import com.tombaxter.taken.core.stack.doseAt
 import com.tombaxter.taken.core.stack.eraseAll
-import com.tombaxter.taken.core.stack.logDose
+import com.tombaxter.taken.core.stack.insertDose
 import com.tombaxter.taken.core.stack.moveActiveItems
 import com.tombaxter.taken.core.stack.removeDoses
 import com.tombaxter.taken.core.stack.restore
@@ -51,6 +52,7 @@ import java.time.Instant
 import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
+import java.util.concurrent.ConcurrentHashMap
 
 /** The tabs (SPEC-ANDROID 6.2). To-do and Weight join with their phases (NEXT 5 and 6). */
 enum class AppTab { TODAY, HISTORY }
@@ -137,7 +139,8 @@ interface ProSource {
 /**
  * The app's single source of screen state, mirroring the iPhone's Taken/AppModel.swift (with the tap-row change of
  * `feat/tap-row-to-log`). Every field the screens read is Compose snapshot state; every rule comes from :core. Writes go
- * through [write]: the screen updates at once, the file follows ([Persistence]).
+ * through [write]: the screen updates at once, the file follows ([Persistence]), and the screen then ends on what the file
+ * holds ([settle]).
  */
 class AppModel(
     private val persistence: Persistence,
@@ -265,14 +268,14 @@ class AppModel(
     /**
      * The one quiet row under Today's progress line, if any. In CORE no widget exists yet, so the widget invite waits
      * (the iPhone waits the same way until WidgetKit has answered); the trial notice and the weight offer come with their
-     * phases.
+     * phases. The nudge offer waits for Reminders (NEXT 3): until this build can post the nudge, Today never offers one.
      */
     val todayPrompt: TodayPrompt?
         get() {
             if (isDemo) return demoPrompt
             return TodayPrompts.pick(
                 settings = settings, hasStack = hasStack, today = today, repairDay = repairDay, locked = isLocked,
-                widgetPlaced = true, trialNotice = null, weightOffer = false,
+                widgetPlaced = true, trialNotice = null, weightOffer = false, nudgeAvailable = NUDGE_AVAILABLE,
             )
         }
 
@@ -288,7 +291,12 @@ class AppModel(
 
     fun item(id: UUID): Item? = state.items.firstOrNull { it.id == id }
 
-    fun csv(): String = CsvExport.make(state, clock.zone)
+    /** taken-log.csv for the stack as it is now, built when called: the export builds it off the main thread. */
+    fun csvExport(): () -> String {
+        val snapshot = state
+        val zone = clock.zone
+        return { CsvExport.make(snapshot, zone) }
+    }
 
     /** "7:42 AM" in this phone's language, for TalkBack. */
     fun spoken(instant: Instant): String = Fmt.spokenTime(instant, clock.zone, locale())
@@ -345,20 +353,35 @@ class AppModel(
         repairDay = TodayPrompts.repairDay(engine, today.day)
     }
 
-    /** Every write goes through here: the screen at once, then the file. The first dose ever is noted in pro.json. */
+    /**
+     * Every write goes through here: the screen at once, then the file. A body that makes something new (a dose, an item)
+     * takes ids made before it runs, so a replay onto a file that moved on stores the ids the screen and its Undo hold.
+     */
     private fun <T> write(body: (StackState) -> T): T {
         val base = state
         val next = base.clone()
         val value = body(next)
-        val hadLogged = base.doses.isNotEmpty()
         apply(next)
-        persistence.saveStack(base, next, { body(it) }) { show(Toast(nextToastId(), "Could not save. Try again.")) }
-        if (!hadLogged && next.doses.isNotEmpty()) {
-            val at = next.doses.minOf { it.takenAt }
-            ledger = ProLedgers.noteFirstDose(ledger, at)
-            persistence.updateLedger { ProLedgers.noteFirstDose(it, at) }
+        persistence.saveStack(base, next, { body(it) }, settled = ::settle) {
+            show(Toast(nextToastId(), "Could not save. Try again."))
         }
         return value
+    }
+
+    /**
+     * Every write of the app's is done (saved or failed): the screen ends on exactly what the file holds. After a failed
+     * save that puts back what was there, so a dose that was not saved never shows as taken and a tap logs it again, as
+     * on the iPhone, where a write that fails never reaches the screen. The first dose ever is noted in pro.json once it
+     * is on disk (the iPhone notes it as it applies a saved state).
+     */
+    private fun settle(onDisk: StackState) {
+        if (onDisk != state) apply(onDisk)
+        val current = ledger ?: return
+        if (current.firstDoseAt == null && onDisk.doses.isNotEmpty()) {
+            val at = onDisk.doses.minOf { it.takenAt }
+            ledger = ProLedgers.noteFirstDose(current, at)
+            persistence.updateLedger { ProLedgers.noteFirstDose(it, at) }
+        }
     }
 
     // MARK: Tabs and routes
@@ -460,8 +483,8 @@ class AppModel(
     fun log(item: Item, at: Instant? = null): Boolean {
         val time = at ?: clockNow()
         val wasAllTaken = today.allTaken
-        val zone = clock.zone
-        val dose = write { it.logDose(item.id, time, zone) } ?: return false
+        val made = doseAt(item.id, time, clock.zone)
+        val dose = write { it.insertDose(made) } ?: return false
         afterTake(wasAllTaken)
         val spokenLine = "${item.name} taken at ${spoken(time)}."
         show(Toast(nextToastId(), "${item.name} taken at", Fmt.clock(time, clock), UndoStep.Remove(setOf(dose.id)), spokenLine))
@@ -473,7 +496,9 @@ class AppModel(
         val time = at ?: clockNow()
         val wasAllTaken = today.allTaken
         val clock = this.clock
-        val logged = write { it.takeAllPending(time, clock) }
+        // One id per item, made once: a replay of this write logs the same doses the toast's Undo removes.
+        val ids = ConcurrentHashMap<UUID, UUID>()
+        val logged = write { it.takeAllPending(time, clock) { item -> ids.getOrPut(item) { UUID.randomUUID() } } }
         if (logged.isEmpty()) return
         afterTake(wasAllTaken)
         val spokenLine = "${logged.size} taken at ${spoken(time)}."
@@ -524,7 +549,8 @@ class AppModel(
             feel(Haptic.CONFIRM)
             show(Toast(nextToastId(), "${item.name} set to", Fmt.clock(at, clock), UndoStep.Restore(listOf(existing)), "${item.name} set to ${spoken(at)}."))
         } else {
-            val dose = write { it.logDose(item.id, at, zone) } ?: return
+            val made = doseAt(item.id, at, zone)
+            val dose = write { it.insertDose(made) } ?: return
             afterTake(wasAllTaken)
             show(Toast(nextToastId(), "${item.name} taken at", Fmt.clock(at, clock), UndoStep.Remove(setOf(dose.id)), "${item.name} taken at ${spoken(at)}."))
         }
@@ -536,8 +562,8 @@ class AppModel(
     fun logDose(item: Item, day: DayKey, minutes: Int) {
         val (at, isFuture) = moment(day, minutes)
         if (isFuture) return
-        val zone = clock.zone
-        write { it.logDose(item.id, at, zone) } ?: return
+        val made = doseAt(item.id, at, clock.zone)
+        write { it.insertDose(made) } ?: return
         feel(Haptic.CONFIRM)
         announce("${item.name} logged at ${spoken(at)}.")
     }
@@ -551,7 +577,8 @@ class AppModel(
 
     fun addItems(drafts: List<ItemDraft>) {
         val at = clockNow()
-        val added = write { it.addItems(drafts, at) }
+        val ids = drafts.map { UUID.randomUUID() }
+        val added = write { it.addItems(drafts, at) { index -> ids[index] } }
         if (added.isEmpty()) return
         feel(Haptic.CONFIRM)
         show(Toast(nextToastId(), if (added.size == 1) "${added[0].name} added" else "${added.size} added to your stack"))
@@ -588,15 +615,17 @@ class AppModel(
 
     // MARK: One-time rows
 
-    /** Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. */
+    /**
+     * Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. Until Reminders
+     * (NEXT 3) the offer shows only in demo captures ([NUDGE_AVAILABLE]); with Reminders, Turn on asks for
+     * POST_NOTIFICATIONS first and keeps `reminderEnabled` only once it is granted, as the iPhone's setReminderEnabled does.
+     */
     fun answerNudgeOffer(turnOn: Boolean) {
         if (isDemo) demoPrompt = null
         if (!turnOn) {
             write { it.settings.nudgeOfferDone = true }
             return
         }
-        // The nudge's delivery (the permission prompt, the alarm and the notification) comes with Reminders, NEXT 3;
-        // the answer and the setting are kept now.
         requirePro {
             write { it.settings.setReminder(true) }
             show(Toast(nextToastId(), RetentionCopy.NUDGE_ON, Fmt.minutes(settings.reminderMinutes)))
@@ -689,6 +718,9 @@ class AppModel(
     }
 
     companion object {
+        /** This build can post the evening nudge. False until Reminders (NEXT 3), so Today never offers it before then. */
+        const val NUDGE_AVAILABLE = false
+
         /** Erase all data's dialog, said before it acts (Android wording, SPEC-ANDROID 6.4). */
         const val ERASE_MESSAGE =
             "This removes your stack, every logged dose, all your to-dos, your weigh-ins, your weight goal and your profile from this phone. It cannot be undone."

@@ -61,7 +61,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 container.persistence.updateLedger { it ?: fresh }
             }
             val profile = stores.profile.data.first()
-            val photo = withContext(Dispatchers.IO) { stores.photoFile.takeIf { it.exists() }?.readBytes() }
+            val photo = withContext(Dispatchers.IO) { com.tombaxter.taken.data.PhotoFile.read(stores.photoFile) }
             val loaded = AppModel(
                 persistence = container.persistence,
                 initialState = state,

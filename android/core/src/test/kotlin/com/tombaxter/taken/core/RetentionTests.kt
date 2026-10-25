@@ -63,6 +63,25 @@ class RetentionTests {
         assertNull(TodayPrompts.pick(on, hasStack = true, today = today, repairDay = null, locked = false), "not when the nudge is already on")
     }
 
+    /** Android: until Reminders can deliver the nudge (NEXT 3), the offer stays off Today and the next row shows. */
+    @Test
+    fun testTheNudgeOfferWaitsForABuildThatCanDeliverIt() {
+        val vd3 = makeItem("Vitamin D3", "VD3", created = at(2026, 10, 12, 9))
+        val state = StackState(items = listOf(vd3))
+        val today = summary(state, at(2026, 10, 19, 9))
+        assertNull(
+            TodayPrompts.pick(state.settings, hasStack = true, today = today, repairDay = null, locked = false, nudgeAvailable = false),
+            "no offer to turn on a nudge that cannot come",
+        )
+        val sunday = monday.adding(-1)
+        assertEquals(
+            TodayPrompt.Repair(sunday),
+            TodayPrompts.pick(state.settings, hasStack = true, today = today, repairDay = sunday, locked = false, nudgeAvailable = false),
+            "the repair takes its place",
+        )
+        assertFalse(state.settings.nudgeOfferDone, "nothing is answered for the person, so the offer can come once the nudge can")
+    }
+
     @Test
     fun testOneTimeAnswersAreKeptInTheFileAndThroughErase() {
         val plain = StackCodec.encode(StackState())

@@ -15,6 +15,7 @@ import com.tombaxter.taken.core.stack.StackEngine
 import com.tombaxter.taken.core.stack.WidgetSnapshot
 import com.tombaxter.taken.core.stack.addItems
 import com.tombaxter.taken.core.stack.deleteItem
+import com.tombaxter.taken.core.stack.insertDose
 import com.tombaxter.taken.core.stack.logActiveDose
 import com.tombaxter.taken.core.stack.logDose
 import com.tombaxter.taken.core.stack.logNextDoseIfPending
@@ -213,6 +214,41 @@ class DayLogicTests {
     }
 
     // MARK: Take all
+
+    /**
+     * Android's writes fix their new ids before the mutation runs (AppModel), so a write replayed onto a file that moved on
+     * stores the ids the screen and its Undo hold.
+     */
+    @Test
+    fun testIdsMadeBeforeTheWriteAreTheIdsItStores() {
+        val c = londonClock()
+        val created = at(2026, 10, 1, 8)
+        val vd3 = makeItem("Vitamin D3", "VD3", created = created, sortIndex = 0)
+        val fish = makeItem("Fish Oil", "FSH", Frequency.Daily(2), created = created, sortIndex = 1)
+        val now = at(2026, 10, 12, 21)
+
+        val dose = com.tombaxter.taken.core.stack.doseAt(vd3.id, now, london)
+        val screen = StackState(items = listOf(vd3, fish))
+        val file = StackState(items = listOf(vd3, fish))
+        file.logDose(fish.id, now.minusSeconds(3_600), london)
+        assertEquals(dose, screen.insertDose(dose))
+        assertEquals(dose, file.insertDose(dose), "the replay stores the same dose, id and all")
+        assertEquals(1, file.doses.count { it.id == dose.id })
+        file.insertDose(dose)
+        assertEquals(1, file.doses.count { it.id == dose.id }, "a dose already there is never doubled")
+        assertNull(StackState(items = listOf(fish)).insertDose(dose), "an item that is gone logs nothing")
+
+        val ids = HashMap<java.util.UUID, java.util.UUID>()
+        val idFor = { item: java.util.UUID -> ids.getOrPut(item) { java.util.UUID.randomUUID() } }
+        val first = StackState(items = listOf(vd3, fish)).takeAllPending(now, c, idFor)
+        val replayed = StackState(items = listOf(vd3, fish)).takeAllPending(now, c, idFor)
+        assertEquals(first.map { it.id }, replayed.map { it.id }, "Take all replayed: the same id for each item")
+
+        val drafts = listOf(ItemDraft("Creatine"), ItemDraft("Zinc"))
+        val itemIds = drafts.map { java.util.UUID.randomUUID() }
+        val added = StackState().addItems(drafts, now) { itemIds[it] }
+        assertEquals(itemIds, added.map { it.id })
+    }
 
     @Test
     fun testTakeAllOnlyTouchesPendingDueDoses() {

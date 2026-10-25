@@ -36,6 +36,7 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.ByteArrayOutputStream
 import java.io.File
+import java.io.IOException
 
 /**
  * The one activity: edge to edge with the look's system bar icons, Taken's Compose tree, `taken://` links, and the
@@ -44,6 +45,9 @@ import java.io.File
 class MainActivity : ComponentActivity(), Platform {
     private val viewModel: AppViewModel by viewModels { AppViewModel.factory((application as TakenApp).container) }
     private var pendingLink: String? = null
+
+    /** The screen's model once the files are read (the tests reach it here). */
+    internal val model: AppModel? get() = viewModel.model
 
     /** The system photo picker: no media permission (https://developer.android.com/training/data-storage/shared/photopicker). */
     private val photoPicker = registerForActivityResult(ActivityResultContracts.PickVisualMedia()) { uri ->
@@ -57,7 +61,11 @@ class MainActivity : ComponentActivity(), Platform {
     override fun onCreate(savedInstanceState: Bundle?) {
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
-        pendingLink = intent?.data?.toString()
+        // A link is handled once. A recreated activity (rotation, fold, resize, a return after process death) gets its
+        // launch intent again, and so does a task relaunched from Recents: neither replays the link. Navigation does the
+        // same with the deep-link-handled flag it keeps in saved state (NavController's KEY_DEEP_LINK_HANDLED).
+        // A link that came before the files were read is carried across in the saved state instead.
+        pendingLink = if (savedInstanceState == null) launchLink(intent) else savedInstanceState.getString(PENDING_LINK)
         setContent {
             val model = viewModel.model
             if (model == null) {
@@ -77,7 +85,12 @@ class MainActivity : ComponentActivity(), Platform {
                 )
             }
             LifecycleEventEffect(Lifecycle.Event.ON_START) { model.didBecomeActive() }
-            LifecycleEventEffect(Lifecycle.Event.ON_STOP) { model.didEnterBackground() }
+            // A configuration change (rotation, fold, resize, dark mode, font size) stops the activity too; only a real
+            // trip to the background ends edit mode
+            // (https://developer.android.com/reference/android/app/Activity#isChangingConfigurations()).
+            LifecycleEventEffect(Lifecycle.Event.ON_STOP) {
+                if (!isChangingConfigurations) model.didEnterBackground()
+            }
             // A 20 s ticker while Taken is in front keeps the time and the day current.
             LaunchedEffect(model) {
                 repeatOnLifecycle(Lifecycle.State.STARTED) {
@@ -91,8 +104,15 @@ class MainActivity : ComponentActivity(), Platform {
         }
     }
 
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        pendingLink?.let { outState.putString(PENDING_LINK, it) }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
+        // The newest intent is the activity's from now on, so a later recreation reads this one, not the first.
+        setIntent(intent)
         val link = intent.data?.toString() ?: return
         val model = viewModel.model
         if (model == null) pendingLink = link else model.handle(link)
@@ -103,18 +123,30 @@ class MainActivity : ComponentActivity(), Platform {
     override val touchExploration: Boolean
         get() = getSystemService(AccessibilityManager::class.java)?.isTouchExplorationEnabled == true
 
-    /** taken-log.csv through the Android Sharesheet with a FileProvider URI (https://developer.android.com/training/sharing/send). */
-    override fun shareCsv(text: String) {
-        val folder = File(cacheDir, "exports").apply { mkdirs() }
-        val file = File(folder, com.tombaxter.taken.core.stack.CsvExport.FILE_NAME)
-        file.writeText(text)
-        val uri = FileProvider.getUriForFile(this, "$packageName.files", file)
-        val send = Intent(Intent.ACTION_SEND).apply {
-            type = "text/csv"
-            putExtra(Intent.EXTRA_STREAM, uri)
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+    /**
+     * taken-log.csv through the Android Sharesheet with a FileProvider URI (https://developer.android.com/training/sharing/send).
+     * The log is built and written off the main thread, where disk work never belongs
+     * (https://developer.android.com/topic/performance/vitals/anr); the Sharesheet opens back on it.
+     */
+    override fun shareCsv(make: () -> String) {
+        lifecycleScope.launch {
+            val uri = withContext(Dispatchers.IO) {
+                try {
+                    val folder = File(cacheDir, "exports").apply { mkdirs() }
+                    val file = File(folder, com.tombaxter.taken.core.stack.CsvExport.FILE_NAME)
+                    file.writeText(make())
+                    FileProvider.getUriForFile(this@MainActivity, "$packageName.files", file)
+                } catch (e: IOException) {
+                    null
+                }
+            } ?: return@launch
+            val send = Intent(Intent.ACTION_SEND).apply {
+                type = "text/csv"
+                putExtra(Intent.EXTRA_STREAM, uri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            }
+            startActivity(Intent.createChooser(send, null))
         }
-        startActivity(Intent.createChooser(send, null))
     }
 
     override fun pickPhoto() {
@@ -141,6 +173,20 @@ class MainActivity : ComponentActivity(), Platform {
         } catch (e: PackageManager.NameNotFoundException) {
             "1.0.0"
         }
+
+    private companion object {
+        const val PENDING_LINK = "taken.pendingLink"
+    }
+}
+
+/**
+ * The `taken://` link an activity was started with, or null: none, or a task relaunched from Recents, which hands the
+ * first intent back (FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) and must not replay its link.
+ */
+internal fun launchLink(intent: Intent?): String? {
+    if (intent == null) return null
+    if ((intent.flags and Intent.FLAG_ACTIVITY_LAUNCHED_FROM_HISTORY) != 0) return null
+    return intent.data?.toString()
 }
 
 /** A chosen photo as Taken keeps it: the centre square, at most 600 pixels, as JPEG at quality 85 (the iPhone's rule). */

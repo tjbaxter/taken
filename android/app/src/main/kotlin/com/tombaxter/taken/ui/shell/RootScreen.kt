@@ -103,7 +103,8 @@ import com.tombaxter.taken.ui.today.TodayScreen
 interface Platform {
     /** TalkBack is on: the toast stays until it is dismissed, as VoiceOver keeps it on the iPhone. */
     val touchExploration: Boolean
-    fun shareCsv(text: String)
+    /** Shares taken-log.csv; `make` builds its text, off the main thread. */
+    fun shareCsv(make: () -> String)
     fun pickPhoto()
     fun openUrl(url: String)
     val versionName: String
@@ -112,7 +113,7 @@ interface Platform {
         /** For tests and captures: nothing leaves the screen. */
         val none: Platform = object : Platform {
             override val touchExploration = false
-            override fun shareCsv(text: String) = Unit
+            override fun shareCsv(make: () -> String) = Unit
             override fun pickPhoto() = Unit
             override fun openUrl(url: String) = Unit
             override val versionName = "1.0.0"
@@ -186,12 +187,12 @@ fun MainShell(model: AppModel, platform: Platform) {
                     }
                 }
                 Box(Modifier.weight(1f).fillMaxHeight(), contentAlignment = Alignment.TopCenter) {
-                    Box(Modifier.widthIn(max = 640.dp).fillMaxSize()) { TabContent(model, platform) }
+                    Box(Modifier.widthIn(max = 640.dp).fillMaxSize()) { TabContent(model, platform, wide = true) }
                 }
             }
         } else {
             Column(Modifier.fillMaxSize()) {
-                Box(Modifier.weight(1f).fillMaxWidth()) { TabContent(model, platform) }
+                Box(Modifier.weight(1f).fillMaxWidth()) { TabContent(model, platform, wide = false) }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
                 NavigationBar(containerColor = colors.bg, tonalElevation = 0.dp) {
                     for (tab in AppTab.entries) {
@@ -224,9 +225,19 @@ private fun tabIcon(tab: AppTab, selected: Boolean) = when (tab) {
     AppTab.HISTORY -> if (selected) Symbols.CalendarMonthFill else Symbols.CalendarMonth
 }
 
+/**
+ * A tab's content inside the system bars. On phones the NavigationBar below pads the bottom inset; beside the rail nothing
+ * does, so the content pads it itself and Take all and the snackbar sit above the navigation bar or taskbar
+ * (https://developer.android.com/develop/ui/compose/system/system-bars). The rail pads its own start side.
+ */
 @Composable
-private fun TabContent(model: AppModel, platform: Platform) {
-    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(WindowInsetsSides.Top + WindowInsetsSides.Horizontal))) {
+private fun TabContent(model: AppModel, platform: Platform, wide: Boolean) {
+    val sides = if (wide) {
+        WindowInsetsSides.Top + WindowInsetsSides.End + WindowInsetsSides.Bottom
+    } else {
+        WindowInsetsSides.Top + WindowInsetsSides.Horizontal
+    }
+    Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(sides))) {
         when (model.tab) {
             AppTab.TODAY -> TodayScreen(model) {
                 Column {

@@ -1,17 +1,29 @@
 package com.tombaxter.taken
 
 import androidx.activity.ComponentActivity
+import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.test.DeviceConfigurationOverride
+import androidx.compose.ui.test.WindowInsets
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
+import androidx.compose.ui.test.onNodeWithText
+import androidx.compose.ui.test.performClick
+import androidx.compose.ui.test.performScrollTo
 import androidx.compose.ui.test.performTouchInput
+import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.dp
+import androidx.core.graphics.Insets
+import androidx.core.view.WindowInsetsCompat
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureScreenRoboImage
 import com.tombaxter.taken.core.theme.ThemeID
+import com.tombaxter.taken.ui.profile.ProfileCopy
 import com.tombaxter.taken.ui.shell.Platform
 import com.tombaxter.taken.ui.shell.TakenRoot
 import org.junit.Rule
@@ -23,10 +35,11 @@ import org.robolectric.annotation.GraphicsMode
 
 /**
  * The screens Tom sees (SPEC-ANDROID 15.3): drawn on the JVM by Robolectric's native graphics and saved by Roborazzi, no
- * emulator. Names follow the iPhone's scripts/screenshots.sh, with the look after an underscore. Phone size is the Play
- * store's 1080 x 1920 (`w360dp-h640dp-xxhdpi`); there is also a small phone, a landscape tablet and 200% text.
- * `./gradlew :app:recordRoborazziDebug` writes them to app/build/outputs/roborazzi; CI uploads them as
- * android-screenshots.
+ * emulator. Names follow the iPhone's scripts/screenshots.sh, with the look after an underscore. The review set is a
+ * current 20:9 phone (`w411dp-h914dp-420dpi`, 1080 x 2400) with a status bar and a navigation bar as window insets, so
+ * the frames show what a phone shows; there is also a small phone, a landscape tablet and 200% text. The Play store set
+ * has its own 9:16 size (SPEC-ANDROID 14.2). `./gradlew :app:recordRoborazziDebug` writes them to
+ * app/build/outputs/roborazzi; CI uploads them as android-screenshots.
  */
 @RunWith(RobolectricTestRunner::class)
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
@@ -38,11 +51,16 @@ class ScreenshotTests {
 
     private var current by mutableStateOf<AppModel?>(null)
 
+    /** The review frames get a phone's system bars; the store frames do not (real app only, no device chrome). */
+    private var systemBars = true
+
     private fun start() {
         compose.setContent {
             val model = current ?: return@setContent
             // A new model is a new screen: nothing carries over from the last capture.
-            key(model) { TakenRoot(model, Platform.none) }
+            key(model) {
+                if (systemBars) WithSystemBars { TakenRoot(model, Platform.none) } else TakenRoot(model, Platform.none)
+            }
         }
     }
 
@@ -51,8 +69,10 @@ class ScreenshotTests {
         compose.waitForIdle()
         interact()
         compose.waitForIdle()
-        captureScreenRoboImage("build/outputs/roborazzi/$name.png")
+        save(name)
     }
+
+    private fun save(name: String) = captureScreenRoboImage("build/outputs/roborazzi/$name.png")
 
     private val looks = ThemeID.entries
 
@@ -75,6 +95,42 @@ class ScreenshotTests {
         for (look in listOf(ThemeID.SIGNAL, ThemeID.BLUSH)) {
             capture("today-menu_${look.raw}", DemoScreens.make("today", look)) {
                 compose.onNodeWithTag("row-Fish Oil").performTouchInput { longClick() }
+            }
+        }
+    }
+
+    /**
+     * What a tap on a row does (SPEC-ANDROID 7.2): the logging moment with the Compose clock held 0.1 s after the tap on
+     * Magnesium (the row washed in the signal, the ring lifted), then the snackbar with Undo once it settles.
+     */
+    @Test
+    fun theLoggingMoment() {
+        start()
+        for (look in listOf(ThemeID.SIGNAL, ThemeID.BLUSH)) {
+            current = DemoScreens.make("today", look)
+            compose.waitForIdle()
+            compose.onNodeWithTag("row-Magnesium").performScrollTo()
+            compose.waitForIdle()
+            compose.mainClock.autoAdvance = false
+            compose.onNodeWithTag("row-Magnesium").performClick()
+            compose.mainClock.advanceTimeBy(100)
+            save("today-row-moment_${look.raw}")
+            compose.mainClock.autoAdvance = true
+            compose.waitForIdle()
+            save("today-logged_${look.raw}")
+        }
+    }
+
+    /** Profile below the stack: the Look picker and Your day, then Feel, Data and About. */
+    @Test
+    fun profileSections() {
+        start()
+        for (look in listOf(ThemeID.SIGNAL, ThemeID.BLUSH)) {
+            capture("settings-look_${look.raw}", DemoScreens.make("settings", look)) {
+                compose.onNodeWithText(ProfileCopy.DAY_FOOTNOTE).performScrollTo()
+            }
+            capture("settings-data_${look.raw}", DemoScreens.make("settings", look)) {
+                compose.onNodeWithText("Support").performScrollTo()
             }
         }
     }
@@ -110,8 +166,11 @@ class ScreenshotTests {
         }
     }
 
+    /** The Play store's phone frames: 9:16 at 1215 x 2160, no system bars (SPEC-ANDROID 14.2). */
     @Test
+    @Config(qualifiers = STORE)
     fun storeSets() {
+        systemBars = false
         start()
         for (stack in listOf(com.tombaxter.taken.core.demo.DemoStack.US, com.tombaxter.taken.core.demo.DemoStack.NEUTRAL)) {
             capture("store-today_${stack.raw}", DemoScreens.make("today", ThemeID.SIGNAL, stack))
@@ -119,9 +178,33 @@ class ScreenshotTests {
     }
 
     companion object {
-        /** The Play store's phone screenshot: 360 x 640 dp at xxhdpi is 1080 x 1920 pixels (SPEC-ANDROID 14.2). */
-        const val PHONE = "w360dp-h640dp-xxhdpi"
+        /** A current 20:9 phone: 411 x 914 dp at 420 dpi is 1080 x 2400 pixels (Pixel class). [Own choice] */
+        const val PHONE = "w411dp-h914dp-420dpi"
         const val SMALL_PHONE = "w320dp-h568dp-xhdpi"
         const val TABLET = "w1280dp-h800dp-land-xhdpi"
+
+        /**
+         * Play's phone screenshot: 405 x 720 dp at xxhdpi is 1215 x 2160 pixels, 9:16 and over 1080 px as promotion
+         * needs (https://support.google.com/googleplay/android-developer/answer/9866151), and tall enough that the hero
+         * frame shows a pending row above Take all. [Own choice on the size]
+         */
+        const val STORE = "w405dp-h720dp-xxhdpi"
     }
+}
+
+/**
+ * A phone's system bars around the screen: a status bar and a gesture navigation bar, 24 dp each, given to Compose as
+ * window insets (`DeviceConfigurationOverride.WindowInsets`,
+ * https://developer.android.com/reference/kotlin/androidx/compose/ui/test/DeviceConfigurationOverride.Companion), since
+ * Robolectric draws none. Edge-to-edge padding then shows as it does on a device. [Own choice: 24 dp]
+ */
+@Composable
+fun WithSystemBars(statusBar: Dp = 24.dp, navigationBar: Dp = 24.dp, content: @Composable () -> Unit) {
+    val insets = with(LocalDensity.current) {
+        WindowInsetsCompat.Builder()
+            .setInsets(WindowInsetsCompat.Type.statusBars(), Insets.of(0, statusBar.roundToPx(), 0, 0))
+            .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, navigationBar.roundToPx()))
+            .build()
+    }
+    DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(insets)) { content() }
 }

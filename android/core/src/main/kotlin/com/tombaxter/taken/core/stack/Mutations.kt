@@ -29,16 +29,24 @@ private fun StackState.replaceItem(index: Int, transform: (Item) -> Item) {
     items = items.toMutableList().also { it[index] = transform(it[index]) }
 }
 
-fun StackState.addItems(drafts: List<ItemDraft>, now: Instant): List<Item> {
+/**
+ * Add drafts to the stack. `itemId` gives each draft's id by its index (Android: AppModel makes the ids before the write,
+ * so a write replayed onto a file that moved on stores the ids the screen holds; a fresh id each by default).
+ */
+fun StackState.addItems(
+    drafts: List<ItemDraft>,
+    now: Instant,
+    itemId: (Int) -> UUID = { UUID.randomUUID() },
+): List<Item> {
     var next = (items.maxOfOrNull { it.sortIndex } ?: -1) + 1
     val added = ArrayList<Item>()
-    for (draft in drafts) {
+    for ((index, draft) in drafts.withIndex()) {
         val name = draft.name.trim()
         if (name.isEmpty()) continue
         val code = Catalog.sanitizeCode(draft.code ?: "")
         val item = Item(
-            name = name, code = code.ifEmpty { Catalog.code(name) }, frequency = draft.frequency, createdAt = now,
-            sortIndex = next,
+            id = itemId(index), name = name, code = code.ifEmpty { Catalog.code(name) }, frequency = draft.frequency,
+            createdAt = now, sortIndex = next,
         )
         next += 1
         added.add(item)
@@ -104,10 +112,20 @@ fun StackState.moveActiveItems(fromOffsets: Set<Int>, toOffset: Int) {
 }
 
 /** Log one dose. `zone` is where it was taken, so the dose keeps its day after the phone changes zone. */
-fun StackState.logDose(itemId: UUID, at: Instant, zone: ZoneId = ZoneId.systemDefault()): Dose? {
-    if (items.none { it.id == itemId }) return null
-    val dose = Dose(itemId = itemId, takenAt = at, utcOffset = DayClock.offset(zone, at))
-    doses = doses + dose
+fun StackState.logDose(itemId: UUID, at: Instant, zone: ZoneId = ZoneId.systemDefault()): Dose? =
+    insertDose(doseAt(itemId, at, zone))
+
+/** A dose of `itemId` taken at `at` where `zone` says, with a fresh id (or the one given), not yet in any state. */
+fun doseAt(itemId: UUID, at: Instant, zone: ZoneId, id: UUID = UUID.randomUUID()): Dose =
+    Dose(id = id, itemId = itemId, takenAt = at, utcOffset = DayClock.offset(zone, at))
+
+/**
+ * Log a dose made before the write (Android): its id is fixed outside the mutation, so a write replayed onto a file that
+ * moved on stores the same id the screen and its Undo hold. Null when the item is gone; a dose already there is kept as is.
+ */
+fun StackState.insertDose(dose: Dose): Dose? {
+    if (items.none { it.id == dose.itemId }) return null
+    if (doses.none { it.id == dose.id }) doses = doses + dose
     return dose
 }
 
@@ -135,11 +153,16 @@ fun StackState.logNextDoseIfPending(itemId: UUID, now: Instant, clock: DayClock)
  * TAKE ALL: one dose for every item that still has a pending due dose today, skipping any item logged in the last hour,
  * so a repeated tap never logs a 2x item's next dose. Nothing else is touched.
  */
-fun StackState.takeAllPending(now: Instant, clock: DayClock): List<Dose> {
+fun StackState.takeAllPending(
+    now: Instant,
+    clock: DayClock,
+    /** Each logged dose's id, by its item (Android: the same id again when the write is replayed). */
+    doseId: (UUID) -> UUID = { UUID.randomUUID() },
+): List<Dose> {
     val engine = StackEngine(this, clock)
     val logged = ArrayList<Dose>()
     for (row in engine.quickLogRows(engine.todaySummary(now), now)) {
-        logDose(row.item.id, now, clock.zone)?.let { logged.add(it) }
+        insertDose(doseAt(row.item.id, now, clock.zone, doseId(row.item.id)))?.let { logged.add(it) }
     }
     return logged
 }

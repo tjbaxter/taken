@@ -7,9 +7,11 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.IntrinsicSize
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.aspectRatio
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -182,7 +184,9 @@ private fun DayCell(cell: HistoryCell, modifier: Modifier, onClick: () -> Unit) 
 /** The streak and the last 30 days. */
 @Composable
 private fun StatsRow(streak: Int, adherence: Adherence) {
-    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+    // One height for both cards, the numbers on one line at the bottom, even when a label wraps at large text
+    // (https://developer.android.com/develop/ui/compose/layouts/intrinsic-measurements).
+    Row(Modifier.height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
         Stat(
             label = "Streak", value = "$streak", unit = if (streak == 1) "day" else "days",
             spoken = "Streak, $streak ${if (streak == 1) "day" else "days"}", modifier = Modifier.weight(1f),
@@ -202,6 +206,7 @@ private fun Stat(label: String, value: String, unit: String, spoken: String, mod
     val shape = RoundedCornerShape(Taken.shapes.card)
     Column(
         modifier
+            .fillMaxHeight()
             .background(colors.bgRaised, shape)
             .border(1.dp, colors.line, shape)
             .padding(horizontal = 16.dp, vertical = 14.dp)
@@ -209,6 +214,7 @@ private fun Stat(label: String, value: String, unit: String, spoken: String, mod
     ) {
         Text(label, style = TakenType.sans(14, FontWeight.Medium), color = colors.fgSubtle)
         Spacer(Modifier.height(6.dp))
+        Spacer(Modifier.weight(1f))
         Row(verticalAlignment = Alignment.Bottom) {
             Text(value, style = TakenType.mono(28), color = colors.fg)
             Spacer(Modifier.width(if (unit == "%") 1.dp else 5.dp))

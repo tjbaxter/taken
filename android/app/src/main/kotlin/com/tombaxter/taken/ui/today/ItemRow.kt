@@ -135,6 +135,9 @@ fun ItemRow(
         Column(
             Modifier
                 .fillMaxWidth()
+                // While its menu is open the row stays held in the inset tone, so the menu below it reads as this row's
+                // and not the next one's. [Own choice; no shadow, as SPEC 4 asks]
+                .background(if (menuOpen) colors.bgInset else Color.Transparent)
                 .background(colors.signalWash.copy(alpha = colors.signalWash.alpha * wash.value))
                 .combinedClickable(
                     onClick = actions.onTap,
@@ -210,7 +213,8 @@ fun ItemRow(
             onDismissRequest = { menuOpen = false },
             offset = androidx.compose.ui.unit.DpOffset(16.dp, 0.dp),
             shape = RoundedCornerShape(Taken.shapes.card),
-            containerColor = colors.bgRaised,
+            // The inset tone, not the card's own: on Blush the card and a raised menu were the same near-white.
+            containerColor = colors.bgInset,
             tonalElevation = 0.dp,
             shadowElevation = 0.dp,
             border = BorderStroke(1.dp, colors.lineStrong),
