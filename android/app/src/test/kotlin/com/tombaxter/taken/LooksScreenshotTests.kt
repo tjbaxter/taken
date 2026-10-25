@@ -46,6 +46,7 @@ import androidx.test.core.app.ApplicationProvider
 import com.github.takahirom.roborazzi.ExperimentalRoborazziApi
 import com.github.takahirom.roborazzi.captureRoboImage
 import com.github.takahirom.roborazzi.captureScreenRoboImage
+import com.tombaxter.taken.core.theme.Launch
 import com.tombaxter.taken.core.theme.Looks
 import com.tombaxter.taken.core.theme.ThemeID
 import com.tombaxter.taken.ui.shell.LaunchVeil
@@ -270,14 +271,21 @@ class LooksScreenshotTests {
             val model = current ?: return@setContent
             key(model) { WithSystemBars { LaunchVeil(Looks.look(model.theme)) { TakenRoot(model, Platform.none) } } }
         }
-        // The window is laid out once, with the clock running, before the clock is held for the captures.
+        // The window is laid out once, with the clock running, before any capture.
         current = DemoScreens.make("today")
         compose.waitForIdle()
-        compose.mainClock.autoAdvance = false
         for (look in ThemeID.entries) {
+            // A light look is caught mid-fade with the clock held; a dark look has no veil, so 0.1 s in is its settled
+            // screen, drawn with the clock running.
+            val veiled = Launch.veiled(Looks.look(look))
+            compose.mainClock.autoAdvance = !veiled
             current = DemoScreens.make("today", look)
-            compose.mainClock.advanceTimeByFrame()
-            compose.mainClock.advanceTimeBy(100)
+            if (veiled) {
+                compose.mainClock.advanceTimeByFrame()
+                compose.mainClock.advanceTimeBy(100)
+            } else {
+                compose.waitForIdle()
+            }
             captureScreenRoboImage("build/outputs/roborazzi/launch_${look.raw}.png")
         }
         compose.mainClock.autoAdvance = true
