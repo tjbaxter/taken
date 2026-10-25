@@ -147,6 +147,29 @@ final class TodayRowTests: XCTestCase {
     }
 
     @MainActor
+    func testTheBackgroundKeepsEditModeWhileAnItemSheetIsUp() throws {
+        let model = demoModel()
+        model.setEditingStack(true)
+        let fish = try row("Fish Oil", in: model)
+        model.tap(fish)
+        XCTAssertEqual(model.sheet, .editItem(fish.item.id))
+        model.didEnterBackground()
+        XCTAssertTrue(model.editingStack, "the mode never changes under the sheet")
+
+        model.sheet = nil
+        let magnesium = try row("Magnesium", in: model)
+        let doses = model.state.doses
+        model.tap(magnesium)
+        XCTAssertEqual(model.sheet, .editItem(magnesium.item.id), "the next item opens, as edit mode promised")
+        XCTAssertEqual(model.state.doses, doses, "and nothing logs")
+        XCTAssertNil(model.toast)
+
+        model.sheet = nil
+        model.didEnterBackground()
+        XCTAssertFalse(model.editingStack, "with no sheet up, the next open is a tap that logs")
+    }
+
+    @MainActor
     func testTheTodayEditScreenOpensTodayInEditMode() {
         let model = demoModel("today-edit")
         XCTAssertEqual(model.tab, .today)
