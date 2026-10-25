@@ -15,14 +15,19 @@ import com.tombaxter.taken.core.model.Item
 import com.tombaxter.taken.core.model.ItemDraft
 import com.tombaxter.taken.core.model.StackSettings
 import com.tombaxter.taken.core.model.StackState
+import com.tombaxter.taken.core.pro.PendingLog
+import com.tombaxter.taken.core.pro.PlanPrice
+import com.tombaxter.taken.core.pro.PlayEntitlement
 import com.tombaxter.taken.core.pro.ProAccess
 import com.tombaxter.taken.core.pro.ProCopy
 import com.tombaxter.taken.core.pro.ProGate
 import com.tombaxter.taken.core.pro.ProLedger
 import com.tombaxter.taken.core.pro.ProLedgers
-import com.tombaxter.taken.core.pro.ProReason
+import com.tombaxter.taken.core.pro.ProPendingAction
+import com.tombaxter.taken.core.pro.ProPlan
 import com.tombaxter.taken.core.pro.ProRoute
-import com.tombaxter.taken.core.pro.ProStatus
+import com.tombaxter.taken.core.pro.of
+import com.tombaxter.taken.core.reminders.TrialReminder
 import com.tombaxter.taken.core.profile.Profile
 import com.tombaxter.taken.core.retention.RetentionCopy
 import com.tombaxter.taken.core.retention.TodayPrompt
@@ -39,6 +44,7 @@ import com.tombaxter.taken.core.stack.deleteItem
 import com.tombaxter.taken.core.stack.doseAt
 import com.tombaxter.taken.core.stack.eraseAll
 import com.tombaxter.taken.core.stack.insertDose
+import com.tombaxter.taken.core.stack.logNextDoseIfPending
 import com.tombaxter.taken.core.stack.moveActiveItems
 import com.tombaxter.taken.core.stack.removeDoses
 import com.tombaxter.taken.core.stack.restore
@@ -53,6 +59,11 @@ import java.time.ZoneId
 import java.util.Locale
 import java.util.UUID
 import java.util.concurrent.ConcurrentHashMap
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.MainScope
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /** The tabs (SPEC-ANDROID 6.2). To-do and Weight join with their phases (NEXT 5 and 6). */
 enum class AppTab { TODAY, HISTORY }
@@ -111,33 +122,6 @@ enum class PaywallOrigin { INTRO, ACTION, BAR, SETTINGS, LINK }
 class PaywallRequest(val origin: PaywallOrigin, val pending: (() -> Unit)?)
 
 /**
- * Where Taken Pro's answer comes from. The Billing client is in the app from NEXT 1 but asks Play nothing yet; Play's
- * purchases reach the gate with NEXT 2 (SPEC-ANDROID 17). Until then the app uses [ProSource.untilBilling], so no build
- * locks anyone out before Taken Pro can be bought, and tests use a locked source to drive locked mode through the real
- * gate.
- */
-interface ProSource {
-    val status: ProStatus?
-    val settled: Boolean
-    /** The yearly trial is still open to this person (null until the store says). */
-    val introEligible: Boolean?
-
-    companion object {
-        /** No store yet: the gate reads Pro as on, for good, so logging is never locked before Billing exists. */
-        val untilBilling: ProSource = fixed(ProStatus(isPro = true, reason = ProReason.NONE, checkedAt = Instant.EPOCH))
-
-        /** No Pro, the store has answered: locked mode after the first dose. */
-        val locked: ProSource = fixed(null)
-
-        fun fixed(status: ProStatus?, eligible: Boolean? = true): ProSource = object : ProSource {
-            override val status = status
-            override val settled = true
-            override val introEligible = eligible
-        }
-    }
-}
-
-/**
  * The app's single source of screen state, mirroring the iPhone's Taken/AppModel.swift (with the tap-row change of
  * `feat/tap-row-to-log`). Every field the screens read is Compose snapshot state; every rule comes from :core. Writes go
  * through [write]: the screen updates at once, the file follows ([Persistence]), and the screen then ends on what the file
@@ -157,6 +141,8 @@ class AppModel(
     launchTab: AppTab = AppTab.TODAY,
     launchEditing: Boolean = false,
     demoPrompt: TodayPrompt? = null,
+    /** Where the model's timed work runs (the intro paywall's 1.5 s, the wait for Play): the view model's scope. */
+    private val scope: CoroutineScope = MainScope(),
 ) {
     var state: StackState by mutableStateOf(initialState)
         private set
@@ -193,7 +179,19 @@ class AppModel(
             frontTab = value
         }
 
-    var sheet: Sheet? by mutableStateOf(null)
+    private var shownSheet: Sheet? by mutableStateOf(null)
+
+    /** The sheet in front. Closing it lets the intro paywall that waited for it come up. */
+    var sheet: Sheet?
+        get() = shownSheet
+        set(value) {
+            shownSheet = value
+            if (value == null && introWaitsForSheet) {
+                introWaitsForSheet = false
+                scheduleIntro(INTRO_AFTER_SHEET_MS)
+            }
+        }
+
     var toast: Toast? by mutableStateOf(null)
         private set
     var expandedItemId: UUID? by mutableStateOf(null)
@@ -219,6 +217,32 @@ class AppModel(
     var paywall: PaywallRequest? by mutableStateOf(null)
         private set
 
+    /** What the paywall was opened for, run once it has closed with Pro on. */
+    private var afterPaywall: (() -> Unit)? = null
+    private var introJob: Job? = null
+    private var introWaitsForSheet = false
+
+    // MARK: Seams for the Reminders and Widgets phases (SPEC-ANDROID 10, NEXT 3 and 4)
+
+    /**
+     * Pro itself changed (a purchase, a renewal seen, a cancellation, a refund): the widgets, the tile and the reminders
+     * follow it. The integrator sets this to refresh widgets (`updateAll`), the tile and the alarms.
+     */
+    var onProChanged: () -> Unit = {}
+
+    /**
+     * A trial just started in the paywall, which has closed: the Reminders phase shows its one notification ask here
+     * (`TrialAsk.shows`, SPEC-ANDROID 10.4) and plans the reminder (`trialReminderPlan`).
+     */
+    var onTrialStarted: () -> Unit = {}
+
+    /**
+     * Whether the trial reminder can reach the person as a notification (Reminders built and notifications allowed).
+     * Until the Reminders phase sets it, Today carries the reminder's words instead, as the iPhone does while
+     * notifications are off.
+     */
+    var trialReminderDeliverable: () -> Boolean = { false }
+
     /** Goes up each time a tap finishes the day (All taken), to play its check once. */
     var lockInCount: Int by mutableStateOf(0)
         private set
@@ -239,6 +263,8 @@ class AppModel(
 
     init {
         recomputeStats()
+        pro.listen { proDidChange() }
+        pro.adoptLedger(initialLedger)
     }
 
     // MARK: Derived
@@ -264,7 +290,33 @@ class AppModel(
     /** Locked mode: the log stays readable, logging opens the paywall. */
     val isLocked: Boolean get() = access == ProAccess.LOCKED
 
-    val lockedBarText: String get() = ProCopy.lockedBar(eligible = pro.introEligible, intro = null)
+    val lockedBarText: String get() = ProCopy.lockedBar(eligible = pro.introEligible, intro = pro.offers[ProPlan.YEARLY]?.intro)
+
+    /** Cached Pro holds now. */
+    val proActive: Boolean get() = pro.status?.isActive(now) == true
+
+    /**
+     * The price the current subscription renews at: the plan it renews to when Play named one, else its own plan, from
+     * this launch's plans or the last ones Play gave (pro.json).
+     */
+    val renewalPrice: PlanPrice?
+        get() {
+            val status = pro.status ?: return null
+            val plan = status.renewsTo ?: status.plan ?: return null
+            if (!plan.isSubscription) return null
+            return pro.offers[plan]?.let { PlanPrice.of(it) } ?: ledger?.prices?.get(plan.productId)
+        }
+
+    /**
+     * The trial reminder that should exist now, for the Reminders phase to hand to its alarm (SPEC-ANDROID 10.4): its
+     * moment and its words, or null. Taken Pro never posts it itself.
+     */
+    fun trialReminderPlan(at: Instant = clockNow()): TrialReminder.Plan? =
+        TrialReminder.plan(pro.status, renewalPrice, state, at, clock.zone, ledger?.trialReminder)
+
+    /** Today's line with the reminder's words, while notifications cannot carry it. */
+    private val trialNotice: String?
+        get() = if (trialReminderDeliverable()) null else TrialReminder.notice(pro.status, renewalPrice, state, now, clock.zone)
 
     /**
      * The one quiet row under Today's progress line, if any. In CORE no widget exists yet, so the widget invite waits
@@ -276,7 +328,7 @@ class AppModel(
             if (isDemo) return demoPrompt
             return TodayPrompts.pick(
                 settings = settings, hasStack = hasStack, today = today, repairDay = repairDay, locked = isLocked,
-                widgetPlaced = true, trialNotice = null, weightOffer = false, nudgeAvailable = NUDGE_AVAILABLE,
+                widgetPlaced = true, trialNotice = trialNotice, weightOffer = false, nudgeAvailable = NUDGE_AVAILABLE,
             )
         }
 
@@ -317,9 +369,16 @@ class AppModel(
         if (dayChanged) recomputeStats()
     }
 
-    /** Taken came to the front (`ON_START`): rebuild, since the time zone or the day may have changed while away. */
+    /**
+     * Taken came to the front (`ON_START`): rebuild, since the time zone or the day may have changed while away; offer a
+     * log a widget, the tile or a nudge was refused while locked; and the one intro paywall, if a first dose logged
+     * elsewhere has not had it yet.
+     */
     fun didBecomeActive() {
         apply(state)
+        if (isDemo) return
+        consumePendingLog()
+        if (state.doses.isNotEmpty() && !introShown) scheduleIntro()
     }
 
     /** Taken went to the background (`ON_STOP`): the stack's edit mode ends, so the next open is a tap that logs again. */
@@ -335,6 +394,13 @@ class AppModel(
 
     fun adoptLedger(fresh: ProLedger?) {
         ledger = fresh
+        pro.adoptLedger(fresh)
+    }
+
+    /** pro.json's small writes: the screen's copy at once, the file after. */
+    private fun updateLedger(transform: (ProLedger?) -> ProLedger?) {
+        ledger = transform(ledger)
+        if (!isDemo) persistence.updateLedger(transform)
     }
 
     private fun apply(fresh: StackState) {
@@ -382,6 +448,8 @@ class AppModel(
             val at = onDisk.doses.minOf { it.takenAt }
             ledger = ProLedgers.noteFirstDose(current, at)
             persistence.updateLedger { ProLedgers.noteFirstDose(it, at) }
+            // The first dose ever: the moment Taken makes sense. The paywall follows it once (PRO.md).
+            scheduleIntro()
         }
     }
 
@@ -399,7 +467,17 @@ class AppModel(
             }
             return
         }
-        if (!access.allowsLogging) presentPaywall(PaywallOrigin.LINK)
+        // A locked widget or tile sends `taken://pro`, with the log it was asked for: the paywall, and the log once Pro
+        // is on. If Pro is on by now (Play answered since), the log simply happens.
+        val pending = route.then?.let { PendingLog(it, clockNow()) }
+        when (access) {
+            ProAccess.PRO, ProAccess.FIRST_SESSION, ProAccess.PENDING -> pending?.let(::applyPending)
+            ProAccess.LOCKED -> presentPaywall(PaywallOrigin.LINK, pending?.let { log -> { applyPending(log) } })
+            ProAccess.CHECKING -> scope.launch {
+                pro.settle()
+                handle(url)
+            }
+        }
     }
 
     /** The avatar: Profile, as a full screen with Up and back (SPEC-ANDROID 6.3). */
@@ -434,20 +512,118 @@ class AppModel(
 
     // MARK: Taken Pro
 
-    /** Runs `action` while logging is open; otherwise opens the paywall and runs it once Pro is on. */
+    /** The one automatic paywall after the first dose has been shown. */
+    val introShown: Boolean get() = ledger?.introShownAt != null
+
+    /**
+     * Runs `action` while logging is open; otherwise opens the paywall and runs it once Pro is on. While Play's first
+     * answer of this launch is on its way (at most 4 s) it waits for it, so a payer never sees a lock flash.
+     */
     fun requirePro(action: () -> Unit) {
-        if (access.allowsLogging) action() else presentPaywall(PaywallOrigin.ACTION, action)
+        when (access) {
+            ProAccess.PRO, ProAccess.FIRST_SESSION, ProAccess.PENDING -> action()
+            ProAccess.LOCKED -> presentPaywall(PaywallOrigin.ACTION, action)
+            ProAccess.CHECKING -> scope.launch {
+                pro.settle()
+                requirePro(action)
+            }
+        }
     }
 
     fun presentPaywall(origin: PaywallOrigin, pending: (() -> Unit)? = null) {
         if (paywall != null) return
+        // Any paywall counts as the one after the first dose, so it never comes up on its own a second time. Plans looked
+        // at from Profile before anything was logged do not: the first dose still brings it up once.
+        if (origin != PaywallOrigin.SETTINGS || state.doses.isNotEmpty()) {
+            val at = clockNow()
+            if (!introShown) updateLedger { ProLedgers.markIntroShown(it, at) }
+        }
         if (origin == PaywallOrigin.ACTION || origin == PaywallOrigin.LINK) sheet = null
+        afterPaywall = null
         paywall = PaywallRequest(origin, pending)
+        // Prices, periods and the trial are read from Play each time the paywall opens (SPEC-ANDROID 9.3).
+        scope.launch { pro.loadOffers(force = pro.offersPhase == OffersPhase.FAILED) }
     }
 
+    /** Pro just came on in the paywall: what opened it runs once it has closed, and a trial gets its ask after it. */
+    fun paywallUnlocked(trialStarted: Boolean) {
+        afterPaywall = paywall?.pending
+        if (trialStarted) trialAskDue = true
+    }
+
+    private var trialAskDue = false
+
+    /** The paywall closed: with Pro on, the tap that opened it runs now. */
     fun closePaywall() {
         paywall = null
+        val action = afterPaywall
+        afterPaywall = null
+        if (trialAskDue) {
+            trialAskDue = false
+            onTrialStarted()
+        }
+        if (action != null && access.allowsLogging) action()
     }
+
+    /** About 1.5 s after the first dose the paywall slides up, once, never over a sheet in use (PRO.md). */
+    private fun scheduleIntro(delayMillis: Long = INTRO_DELAY_MS) {
+        if (isDemo || introShown || introJob != null) return
+        introJob = scope.launch {
+            delay(delayMillis)
+            pro.settle()
+            introJob = null
+            showIntroIfDue()
+        }
+    }
+
+    private fun showIntroIfDue() {
+        if (introShown || paywall != null || access != ProAccess.LOCKED) return
+        if (sheet != null) {
+            introWaitsForSheet = true
+            return
+        }
+        presentPaywall(PaywallOrigin.INTRO)
+    }
+
+    /** A log a widget, the tile or a nudge could not make while locked, offered now Taken is open (10 minutes). */
+    private fun consumePendingLog() {
+        if (ledger?.pending == null) return
+        val (_, pending) = ProLedgers.takePending(ledger, PENDING_LOG_MAX_AGE, clockNow())
+        updateLedger { ProLedgers.takePending(it, PENDING_LOG_MAX_AGE, clockNow()).first }
+        if (pending == null) return
+        scope.launch {
+            pro.refresh()
+            requirePro { applyPending(pending) }
+        }
+    }
+
+    /** Logs what was asked for, at the time it was asked for. */
+    private fun applyPending(pending: PendingLog) {
+        when (val action = pending.action) {
+            ProPendingAction.TakeAll -> takeAll(pending.at)
+            is ProPendingAction.Log -> logIfPending(action.itemId, pending.at)
+        }
+    }
+
+    /** A widget row's log, refused while locked and offered again: only while that dose is still pending. */
+    private fun logIfPending(itemId: UUID, at: Instant) {
+        val wasAllTaken = today.allTaken
+        val clock = this.clock
+        val id = UUID.randomUUID()
+        val dose = write { it.logNextDoseIfPending(itemId, at, clock, id) } ?: return
+        val item = item(dose.itemId) ?: return
+        afterTake(wasAllTaken)
+        show(Toast(nextToastId(), "${item.name} taken at", Fmt.clock(at, clock), UndoStep.Remove(setOf(dose.id)), "${item.name} taken at ${spoken(at)}."))
+    }
+
+    private fun proDidChange() {
+        if (isDemo) return
+        onProChanged()
+    }
+
+    /** Profile's Manage subscription: Play's subscription center, at the subscription held (SPEC-ANDROID 9.5). */
+    val manageSubscriptionUrl: String
+        get() = PlayEntitlement.manageUrl(pro.heldSubscription?.productId, PLAY_PACKAGE)
 
     // MARK: Editing the stack
 
@@ -718,9 +894,25 @@ class AppModel(
         onEffect(Effect.Announce(text))
     }
 
+    /** A haptic for a screen of its own (the paywall's plans and its success), under Profile's Haptics switch. */
+    fun feedback(haptic: Haptic) = feel(haptic)
+
+    /** A sentence for TalkBack from a screen of its own ("Taken Pro is on."). */
+    fun say(text: String) = announce(text)
+
     companion object {
         /** This build can post the evening nudge. False until Reminders (NEXT 3), so Today never offers it before then. */
         const val NUDGE_AVAILABLE = false
+
+        /** The package Play knows: debug builds add `.debug`, which Play sells nothing to. */
+        const val PLAY_PACKAGE = "com.tombaxter.taken"
+
+        /** The intro paywall, after the first dose (PRO.md: about 1.5 s). */
+        const val INTRO_DELAY_MS = 1_500L
+        const val INTRO_AFTER_SHEET_MS = 500L
+
+        /** A refused log is offered again for 10 minutes (the iPhone's `takePendingLog(maxAge:)`). */
+        val PENDING_LOG_MAX_AGE: java.time.Duration = java.time.Duration.ofMinutes(10)
 
         /** Erase all data's dialog, said before it acts (Android wording, SPEC-ANDROID 6.4). */
         const val ERASE_MESSAGE =

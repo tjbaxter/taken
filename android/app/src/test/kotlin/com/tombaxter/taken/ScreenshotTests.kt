@@ -88,6 +88,53 @@ class ScreenshotTests {
         }
     }
 
+    /**
+     * Taken Pro (SPEC-ANDROID 9.5 and 9.6): the paywall with the trial, after the trial was used, without the yearly plan,
+     * loading and offline; Today locked and with the trial notice; Profile's Taken Pro section in each state. The ones Tom
+     * reviews most in every look, the rest in Signal.
+     */
+    @Test
+    fun takenProScreens() {
+        start()
+        for (look in looks) {
+            for (screen in DemoScreens.proScreensEveryLook) {
+                if (screen in DemoScreens.screens) continue
+                capture("${screen}_${look.raw}", DemoScreens.make(screen, look)) { scrollToPro(screen) }
+            }
+        }
+        for (screen in DemoScreens.proScreens) {
+            if (screen in DemoScreens.proScreensEveryLook) continue
+            capture("${screen}_signal", DemoScreens.make(screen)) { scrollToPro(screen) }
+        }
+    }
+
+    /** Profile's Taken Pro section in view. */
+    private fun scrollToPro(screen: String) {
+        if (screen.startsWith("settings-pro")) compose.onNodeWithTag("pro-status").performScrollTo()
+    }
+
+    /** What the paywall's button does: Play's PENDING answer, and Pro coming on (the button lit, before it closes). */
+    @Test
+    fun thePaywallAfterItsButton() {
+        start()
+        for (look in listOf(ThemeID.SIGNAL, ThemeID.BLUSH)) {
+            capture("paywall-pending_${look.raw}", DemoScreens.make("paywall-pending", look)) {
+                compose.onNodeWithTag("paywall-cta").performClick()
+            }
+            current = DemoScreens.make("paywall-unlocked", look)
+            compose.waitForIdle()
+            compose.mainClock.autoAdvance = false
+            compose.onNodeWithTag("paywall-cta").performClick()
+            compose.mainClock.advanceTimeBy(400)
+            save("paywall-unlocked_${look.raw}")
+            compose.mainClock.autoAdvance = true
+            compose.waitForIdle()
+        }
+        // Monthly and lifetime chosen: their own terms under the button.
+        capture("paywall-monthly_signal", DemoScreens.make("paywall")) { compose.onNodeWithTag("plan-monthly").performClick() }
+        capture("paywall-lifetime_signal", DemoScreens.make("paywall")) { compose.onNodeWithTag("plan-lifetime").performClick() }
+    }
+
     /** The long-press menu on a row: Undo last dose, Set time…, Edit item. */
     @Test
     fun theLongPressMenu() {
@@ -148,16 +195,17 @@ class ScreenshotTests {
     @Config(fontScale = 2f)
     fun largerText() {
         start()
-        for (screen in listOf("today", "today-edit", "item", "log", "add", "settings")) {
+        for (screen in listOf("today", "today-edit", "item", "log", "add", "settings", "paywall", "locked")) {
             capture("${screen}_signal_font200", DemoScreens.make(screen))
         }
+        capture("settings-pro-trial_signal_font200", DemoScreens.make("settings-pro-trial")) { scrollToPro("settings-pro-trial") }
     }
 
     @Test
     @Config(qualifiers = SMALL_PHONE)
     fun smallPhone() {
         start()
-        for (screen in listOf("today", "today-edit", "add", "day")) {
+        for (screen in listOf("today", "today-edit", "add", "day", "paywall")) {
             capture("${screen}_signal_small", DemoScreens.make(screen))
         }
     }
@@ -166,7 +214,7 @@ class ScreenshotTests {
     @Config(qualifiers = TABLET)
     fun landscapeTablet() {
         start()
-        for (screen in listOf("today", "log", "settings")) {
+        for (screen in listOf("today", "log", "settings", "paywall")) {
             capture("${screen}_signal_tablet", DemoScreens.make(screen))
         }
     }

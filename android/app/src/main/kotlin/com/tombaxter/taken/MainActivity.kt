@@ -1,5 +1,6 @@
 package com.tombaxter.taken
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ContentResolver
 import android.content.Intent
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -104,11 +106,27 @@ class MainActivity : ComponentActivity(), Platform {
         }
     }
 
+    private val pro: ProSource get() = (application as TakenApp).container.pro
+
     override fun onStart() {
         super.onStart()
         // Google: connect the BillingClient "when your app is launched or comes to the foreground"
-        // (https://developer.android.com/google/play/billing/integrate). It asks Play for nothing yet (NEXT 1).
-        (application as TakenApp).container.billing.connect()
+        // (https://developer.android.com/google/play/billing/integrate). Taken Pro asks Play for the account's purchases.
+        pro.attach(this)
+        pro.foreground()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Google: "call queryPurchasesAsync() in your app's onResume() method to handle purchases that have transitioned to
+        // the PURCHASED state while your app was not running" (same page).
+        pro.resumed()
+    }
+
+    override fun onDestroy() {
+        // Play's purchase screen needs a live activity; a destroyed one is never handed to it.
+        pro.attach(null)
+        super.onDestroy()
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -167,6 +185,14 @@ class MainActivity : ComponentActivity(), Platform {
             // No browser on this phone: nothing to open.
         }
     }
+
+    override val notificationsOff: Boolean
+        get() {
+            if (NotificationManagerCompat.from(this).areNotificationsEnabled()) return false
+            // Before Android 13 notifications are on unless turned off; from 13 a prompt not yet answered may still come.
+            if (Build.VERSION.SDK_INT < 33) return true
+            return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        }
 
     override val versionName: String
         get() = try {

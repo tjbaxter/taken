@@ -69,8 +69,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.NavDisplay
 import com.tombaxter.taken.AppModel
@@ -80,11 +78,9 @@ import com.tombaxter.taken.Haptic
 import com.tombaxter.taken.Route
 import com.tombaxter.taken.Sheet
 import com.tombaxter.taken.Toast
-import com.tombaxter.taken.core.pro.ProCopy
 import com.tombaxter.taken.ui.add.AddSheet
 import com.tombaxter.taken.ui.components.Announcement
 import com.tombaxter.taken.ui.components.AvatarImage
-import com.tombaxter.taken.ui.components.CapsuleGlyph
 import com.tombaxter.taken.ui.components.CloseButton
 import com.tombaxter.taken.ui.components.Symbols
 import com.tombaxter.taken.ui.day.DaySheet
@@ -92,6 +88,7 @@ import com.tombaxter.taken.ui.history.HistoryScreen
 import com.tombaxter.taken.ui.item.ItemEditorScreen
 import com.tombaxter.taken.ui.item.ItemSheet
 import com.tombaxter.taken.ui.item.SetTimeSheet
+import com.tombaxter.taken.ui.paywall.PaywallHost
 import com.tombaxter.taken.ui.profile.ProfileScreen
 import com.tombaxter.taken.ui.theme.Taken
 import com.tombaxter.taken.ui.theme.TakenTheme
@@ -109,6 +106,13 @@ interface Platform {
     fun openUrl(url: String)
     val versionName: String
 
+    /**
+     * Notifications are turned off for Taken where Android lets the person turn them off (the app's notification
+     * settings, or a refused prompt on Android 13+). The paywall then promises no reminder it knows cannot come. Not
+     * asked yet counts as on: the ask may follow a trial.
+     */
+    val notificationsOff: Boolean
+
     companion object {
         /** For tests and captures: nothing leaves the screen. */
         val none: Platform = object : Platform {
@@ -117,6 +121,7 @@ interface Platform {
             override fun pickPhoto() = Unit
             override fun openUrl(url: String) = Unit
             override val versionName = "1.0.0"
+            override val notificationsOff = false
         }
     }
 }
@@ -154,7 +159,7 @@ fun TakenRoot(model: AppModel, platform: Platform) {
             Announcement(announcement)
         }
         SheetsHost(model)
-        PaywallHost(model)
+        PaywallHost(model, platform)
     }
 }
 
@@ -239,7 +244,7 @@ private fun TabContent(model: AppModel, platform: Platform, wide: Boolean) {
     }
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(sides))) {
         when (model.tab) {
-            AppTab.TODAY -> TodayScreen(model) {
+            AppTab.TODAY -> TodayScreen(model, openUrl = platform::openUrl) {
                 Column {
                     ToastHost(model, platform)
                     TakeAllButton(model)
@@ -300,35 +305,6 @@ private fun SheetsHost(model: AppModel) {
         is Sheet.Day -> DaySheet(model, sheet.day) { model.sheet = null }
         is Sheet.SetTime -> SetTimeSheet(model, sheet.itemId) { model.sheet = null }
         is Sheet.EditItem -> ItemSheet(model, sheet.itemId) { model.sheet = null }
-    }
-}
-
-/**
- * The paywall's place. Taken Pro's purchase screen comes with Google Play Billing (NEXT 2, SPEC-ANDROID 9.6); until then
- * locked mode is reachable only in tests, and this shows the headline and a visible close.
- */
-@Composable
-private fun PaywallHost(model: AppModel) {
-    if (model.paywall == null) return
-    val colors = Taken.colors
-    Dialog(onDismissRequest = { model.closePaywall() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(colors.bg).windowInsetsPadding(WindowInsets.safeDrawing).testTag("paywall")) {
-            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                CapsuleGlyph(Modifier.size(22.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("Taken Pro", style = TakenType.sans(17, FontWeight.SemiBold), color = colors.fg, modifier = Modifier.weight(1f))
-                CloseButton { model.closePaywall() }
-            }
-            Spacer(Modifier.height(40.dp))
-            Text(
-                ProCopy.HEADLINE,
-                style = TakenType.sans(36, FontWeight.SemiBold),
-                color = colors.fg,
-                modifier = Modifier.padding(horizontal = 24.dp).semantics { heading() },
-            )
-            Spacer(Modifier.height(10.dp))
-            Text("Every dose, logged to the minute.", style = TakenType.sans(17), color = colors.fgMuted, modifier = Modifier.padding(horizontal = 24.dp))
-        }
     }
 }
 

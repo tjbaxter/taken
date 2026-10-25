@@ -10,13 +10,13 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
-import com.tombaxter.taken.billing.PlayBilling
 import com.tombaxter.taken.core.pro.ProLedger
 import com.tombaxter.taken.data.DataStorePersistence
 import com.tombaxter.taken.data.TakenStores
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,16 +35,22 @@ class TakenApp : Application() {
 
 /**
  * Taken's few objects, by hand (SPEC-ANDROID 3.1: no DI framework for a graph this small,
- * https://developer.android.com/training/dependency-injection/manual): the stores, the persistence over them, the one
- * Google Play Billing client (SPEC-ANDROID 9.3; it connects and asks nothing yet), and Taken Pro's answer, which stays
- * [ProSource.untilBilling] until NEXT 2 reads Play's purchases.
+ * https://developer.android.com/training/dependency-injection/manual): the stores, the persistence over them, and Taken
+ * Pro's answer. A release build asks Google Play through the one BillingClient of the process ([BuildWiring], SPEC-ANDROID
+ * 9.3); a debug build, whose `.debug` package Play sells nothing to, reads Pro as on.
  */
 class AppContainer(context: Context) {
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val stores = TakenStores(context)
     val persistence = DataStorePersistence(stores, scope)
-    val billing = PlayBilling(context)
-    val pro: ProSource = ProSource.untilBilling
+    val pro: ProSource = BuildWiring.pro(context, persistence, scope)
+
+    init {
+        // pro.json as it is written: the cached answer before Play's, the trials this phone recorded, the prices.
+        scope.launch {
+            stores.ledger.data.catch { }.collect { pro.adoptLedger(it.ledger) }
+        }
+    }
 }
 
 /**
@@ -73,6 +79,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 initialPhoto = photo,
                 pro = container.pro,
                 clockNow = { Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS) },
+                scope = viewModelScope,
             )
             model = loaded
             launch { stores.stack.data.collect { loaded.adopt(it) } }

@@ -91,7 +91,7 @@ import com.tombaxter.taken.ui.theme.TakenType
  * row into a way into its item until the check.
  */
 @Composable
-fun TodayScreen(model: AppModel, bottomDock: @Composable () -> Unit) {
+fun TodayScreen(model: AppModel, openUrl: (String) -> Unit = {}, bottomDock: @Composable () -> Unit) {
     val colors = Taken.colors
     Column(Modifier.fillMaxSize().background(colors.bg)) {
         Column(
@@ -105,7 +105,7 @@ fun TodayScreen(model: AppModel, bottomDock: @Composable () -> Unit) {
         ) {
             TabHeader(model, title = "Today", subtitle = Fmt.longDay(model.today.day))
             if (model.hasStack) {
-                StackContent(model)
+                StackContent(model, openUrl)
             } else {
                 Spacer(Modifier.height(28.dp))
                 EmptyStack(model)
@@ -116,7 +116,7 @@ fun TodayScreen(model: AppModel, bottomDock: @Composable () -> Unit) {
 }
 
 @Composable
-private fun StackContent(model: AppModel) {
+private fun StackContent(model: AppModel, openUrl: (String) -> Unit) {
     val today = model.today
     Spacer(Modifier.height(18.dp))
     ProgressSummary(today, model, model.lockInCount, model.streak)
@@ -127,7 +127,7 @@ private fun StackContent(model: AppModel) {
         val prompt = model.todayPrompt
         if (prompt != null) {
             Spacer(Modifier.height(16.dp))
-            TodayPromptRow(model, prompt)
+            TodayPromptRow(model, prompt, openUrl)
         }
     }
     StackHeader(model)
@@ -355,7 +355,7 @@ private fun LockedBar(text: String, onClick: () -> Unit) {
 
 /** Today's one quiet row (SPEC 3.1): the nudge offer or the repair, never in the way of a row. */
 @Composable
-private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt) {
+private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt, openUrl: (String) -> Unit) {
     val colors = Taken.colors
     val shape = RoundedCornerShape(Taken.shapes.card)
     when (prompt) {
@@ -409,7 +409,22 @@ private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt) {
                 contentAlignment = Alignment.Center,
             ) { Icon(Symbols.Close, contentDescription = null, tint = colors.fgSubtle, modifier = Modifier.size(18.dp)) }
         }
-        // The widget invite, the trial notice and the weight offer come with their phases (NEXT 4, 2 and 6).
+        // The trial reminder's own words while notifications cannot carry them (`TrialReminder.notice`): a tap opens
+        // Play's subscription center, where the trial can be cancelled. No close: it goes when the trial ends, converts
+        // or is cancelled, or with Profile's Trial reminder.
+        is TodayPrompt.TrialEnds -> Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(colors.bgRaised, shape).border(1.dp, colors.line, shape)
+                .clickable(role = Role.Button, onClickLabel = "open your subscription") { openUrl(model.manageSubscriptionUrl) }
+                .semantics(mergeDescendants = true) {}
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .testTag("trial-notice"),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(Symbols.Notifications, contentDescription = null, tint = colors.signalInk, modifier = Modifier.size(16.dp).padding(top = 2.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(prompt.text, style = TakenType.sans(15, FontWeight.Medium), color = colors.fg)
+        }
+        // The widget invite and the weight offer come with their phases (NEXT 4 and 6).
         else -> Unit
     }
 }

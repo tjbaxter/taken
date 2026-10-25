@@ -105,8 +105,8 @@ object ProfileCopy {
 }
 
 /**
- * Profile (SPEC-ANDROID 6.3 and 7.1): a full screen with Up and back, changes saved as they are made. CORE's sections, in
- * the iPhone's order: the header (photo, name, streak), Stack, Look, Your day, Feel, Data, About. Reminder, Taken Pro and
+ * Profile (SPEC-ANDROID 6.3 and 7.1): a full screen with Up and back, changes saved as they are made. The sections, in
+ * the iPhone's order: the header (photo, name, streak), Stack, Look, Your day, Feel, Taken Pro, Data, About. Reminder and
  * Weight join with their phases.
  */
 @Composable
@@ -144,6 +144,7 @@ fun ProfileScreen(model: AppModel, platform: Platform) {
                 Footnote(ProfileCopy.DAY_FOOTNOTE)
                 Section("Feel")
                 Card { SwitchRow("Haptics", checked = model.hapticsOn) { model.setHaptics(it) } }
+                ProSection(model, platform)
                 Section("Data")
                 Card {
                     Column {
@@ -396,7 +397,7 @@ private fun ReorderRow(model: AppModel, item: Item, index: Int, count: Int) {
 private val SECTION_INSET = 16.dp
 
 @Composable
-private fun Section(title: String, trailing: String? = null) {
+internal fun Section(title: String, trailing: String? = null) {
     val colors = Taken.colors
     Row(Modifier.fillMaxWidth().padding(start = SECTION_INSET, top = 22.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = TakenType.sans(15, FontWeight.SemiBold), color = colors.fgMuted, modifier = Modifier.weight(1f).semantics { heading() })
@@ -405,12 +406,12 @@ private fun Section(title: String, trailing: String? = null) {
 }
 
 @Composable
-private fun Footnote(text: String) {
+internal fun Footnote(text: String) {
     Text(text, style = TakenType.sans(14), color = Taken.colors.fgSubtle, modifier = Modifier.padding(top = 8.dp, start = SECTION_INSET))
 }
 
 @Composable
-private fun LinkRow(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, danger: Boolean = false, onClick: () -> Unit) {
+internal fun LinkRow(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, danger: Boolean = false, onClick: () -> Unit) {
     val colors = Taken.colors
     Row(
         Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp),
