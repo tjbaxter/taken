@@ -19,7 +19,7 @@ enum SheetRoute: Identifiable, Hashable {
     case settings
     case day(DayKey)
     case setTime(UUID)
-    /// The item sheet: tap an item's name on Today.
+    /// The item sheet: Edit on Today, then a tap on the row; or Edit item in a row's long-press menu.
     case editItem(UUID)
     /// A to-do's words and due time.
     case todoEdit(UUID)
@@ -93,11 +93,25 @@ final class AppModel {
     private(set) var streak: Int = 0
     private(set) var adherence = Adherence(taken: 0, due: 0)
 
-    /// The tab in front.
-    var tab: AppTab
+    /// The tab in front. Leaving Today ends its edit mode.
+    var tab: AppTab {
+        get { frontTab }
+        set {
+            if newValue != .today && editingStack { editingStack = false }
+            frontTab = newValue
+        }
+    }
+    private var frontTab: AppTab
     var sheet: SheetRoute?
     var toast: Toast?
     var expandedItemID: UUID?
+    /// Today's stack is being edited (Edit beside the Stack title): a tap on a row opens its item sheet instead of
+    /// logging, and Take all steps aside. It ends on Done, on leaving Today, when Taken goes to the background and when
+    /// the stack empties (REDESIGN.md, "Tap the row to log").
+    private(set) var editingStack: Bool
+    /// How many doses a tap on each Today row has logged, by item: the row's ring pops and the row washes each time its
+    /// count goes up (`ItemRowView`), so the moment plays where the finger is and not for Take all, a widget or Siri.
+    private(set) var rowLogs: [UUID: Int] = [:]
     /// The Taken Pro sheet, and which presentation level shows it.
     var paywall: PaywallRequest?
     /// The one notification ask after a trial starts (`TrialAsk`): the presentation level it is on, once nothing else
@@ -181,7 +195,9 @@ final class AppModel {
         #else
         self.weight = WeightModel(store: .shared, isDemo: false, clockNow: clockNow)
         #endif
-        self.tab = Self.tab(forScreen: launchScreen)
+        self.frontTab = Self.tab(forScreen: launchScreen)
+        // `-demo -screen today-edit`: Today in edit mode, for CI's capture of it.
+        self.editingStack = isDemo && launchScreen == "today-edit"
         let addScreen = isDemo && launchScreen == "add"
         self.demoPreselect = addScreen ? ["Vitamin D3", "Fish Oil", "Finasteride"] : []
         self.demoChoices = addScreen ? ["Finasteride": .alternate] : [:]
@@ -610,6 +626,8 @@ final class AppModel {
         engine = StackEngine(state: fresh, clock: DayClock(dayStartHour: fresh.settings.dayStartHour))
         today = engine.todaySummary(now: now)
         recomputeStats()
+        // The last item archived or deleted: Today shows first run, with nothing left to edit.
+        if editingStack && !hasStack { editingStack = false }
     }
 
     private func recomputeStats() {
@@ -890,16 +908,39 @@ final class AppModel {
         Task { await Sync.afterWrite(snapshot) }
     }
 
+    // MARK: Editing the stack
+
+    /// Edit and Done beside the Stack title. Editing closes any row's times, so every row shows its chevron.
+    func setEditingStack(_ editing: Bool) {
+        guard editing != editingStack else { return }
+        withAnimation(.snappy(duration: 0.22)) {
+            editingStack = editing
+            if editing { expandedItemID = nil }
+        }
+    }
+
+    /// Taken went to the background: the stack's edit mode ends, so the next open is a tap that logs again.
+    func didEnterBackground() {
+        if editingStack { editingStack = false }
+    }
+
     // MARK: Taking
 
-    /// Tap on a row: pending logs a dose, taken shows the detail. Never un-takes. A weekly item's open week logs from
-    /// its ring (it counts for the due day, at the real time); once the week is logged a tap only shows the detail, until
-    /// the 1 to 3 days before the next due day, when the row is today's quiet ring and logs an early dose
-    /// (`notTodayRow`).
+    /// Tap on a row, anywhere on it: pending logs a dose, taken shows the detail. Never un-takes. A weekly item's open
+    /// week logs from its row (it counts for the due day, at the real time); once the week is logged a tap only shows
+    /// the detail, until the 1 to 3 days before the next due day, when the row is today's quiet ring and logs an early
+    /// dose (`notTodayRow`). While the stack is being edited a tap opens the item sheet and never logs.
     func tap(_ row: ItemDay) {
+        if editingStack {
+            sheet = .editItem(row.item.id)
+            return
+        }
         if row.isPending || row.isOpen || (!row.isDue && row.doses.isEmpty) {
             let item = row.item
-            requirePro { [weak self] in self?.log(item) }
+            requirePro { [weak self] in
+                guard let self, self.log(item) else { return }
+                self.rowLogs[item.id, default: 0] += 1
+            }
         } else {
             Haptics.soft(hapticsOn)
             withAnimation(.snappy(duration: 0.22)) {
@@ -908,14 +949,17 @@ final class AppModel {
         }
     }
 
-    func log(_ item: Item, at time: Date? = nil) {
+    /// Logs a dose now (or at `time`), with the haptic and the toast. False when nothing was written.
+    @discardableResult
+    func log(_ item: Item, at time: Date? = nil) -> Bool {
         let at = time ?? clockNow()
         let wasLocked = today.allTaken
         let zone = clock.calendar.timeZone
-        guard let dose = write({ $0.logDose(itemId: item.id, at: at, timeZone: zone) }) ?? nil else { return }
+        guard let dose = write({ $0.logDose(itemId: item.id, at: at, timeZone: zone) }) ?? nil else { return false }
         afterTake(wasLocked: wasLocked)
         show(Toast(message: "\(item.name) taken at", time: Fmt.clock(at, clock), undo: .remove([dose.id])))
         announce("\(item.name) taken at \(Fmt.spoken(at)).")
+        return true
     }
 
     /// A widget row asked for this item: logs only while a dose is still pending, never twice in the hour.

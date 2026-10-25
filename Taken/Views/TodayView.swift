@@ -76,6 +76,7 @@ struct RootView: View {
         .onChange(of: model.sheet) { _, _ in DemoProbe.record(model) }
         .onChange(of: model.paywall?.id) { _, _ in DemoProbe.record(model) }
         .onChange(of: model.trialAsk) { _, _ in DemoProbe.record(model) }
+        .onChange(of: model.editingStack) { _, _ in DemoProbe.record(model) }
         .onChange(of: TodoModel.shared.phase) { _, phase in
             DemoProbe.record(model)
             // A trial ask that waited for the voice note comes once it is done.
@@ -132,8 +133,9 @@ struct RootView: View {
     }
 }
 
-/// Today: a large title with the date, one calm progress line, then the stack with a "+" beside its title. Items not
-/// due today sit in a quiet Not today group with the day they are next due.
+/// Today: a large title with the date, one calm progress line, then the stack with Edit and a "+" beside its title.
+/// Items not due today sit in a quiet Not today group with the day they are next due. A tap on a row logs; Edit turns
+/// every row into a way into its item sheet until Done.
 struct TodayView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.theme) private var theme
@@ -184,6 +186,7 @@ struct TodayView: View {
                 .foregroundStyle(theme.fg)
                 .accessibilityAddTraits(.isHeader)
             Spacer(minLength: 8)
+            EditStackButton()
             AddToStackButton()
         }
         .padding(.top, 20)
@@ -219,6 +222,8 @@ struct TodayView: View {
                             nextLabel: notDue ? model.nextLabel(for: entry) : nil,
                             note: notDue ? shown.note : nil,
                             locked: model.isLocked,
+                            editing: model.editingStack,
+                            logs: model.rowLogs[row.id] ?? 0,
                             onTake: { model.tap(row) },
                             onOpen: { model.sheet = .editItem(row.item.id) })
                     .contextMenu { menu(for: row) }
@@ -276,6 +281,34 @@ struct TodayView: View {
     }
 }
 
+/// Edit beside the stack's title, and Done while editing: in edit mode a tap on a row opens its item sheet instead of
+/// logging. Text, not a pencil: Apple's HIG keeps edit as a text label, and its pencil symbol means Rename
+/// (REDESIGN.md, "Tap the row to log").
+struct EditStackButton: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.theme) private var theme
+
+    init() {}
+
+    var body: some View {
+        let editing = model.editingStack
+        Button {
+            model.setEditingStack(!editing)
+        } label: {
+            Text(editing ? "Done" : "Edit")
+                .font(.sans(16, editing ? .sansSemibold : .sansMedium, relativeTo: .body))
+                .foregroundStyle(theme.signalInk)
+                .padding(.horizontal, 6)
+                .frame(minWidth: 44, minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(PressStyle())
+        .accessibilityLabel(editing ? "Done" : "Edit stack")
+        .accessibilityHint(editing ? "A tap on an item logs it again."
+                                   : "Then a tap on an item opens it instead of logging it.")
+    }
+}
+
 /// The clear "+" beside the stack's title: opens Add.
 struct AddToStackButton: View {
     @Environment(AppModel.self) private var model
@@ -312,7 +345,8 @@ struct BottomDock: View {
     var body: some View {
         // Counts what Take all logs right now, so the number on the button is the number it takes.
         let pending = model.takeAllCount
-        let showTakeAll = pending >= 2
+        // Nothing logs while the stack is being edited, so Take all steps aside until Done.
+        let showTakeAll = pending >= 2 && !model.editingStack
         let visible = showTakeAll || model.toast != nil
         VStack(spacing: 10) {
             if let toast = model.toast {
