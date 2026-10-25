@@ -258,6 +258,14 @@ class TodayRowTests {
         assertEquals(repair.today.day.adding(-1), repair.repairDay, "the demo's yesterday is partial")
         repair.closeRepair(repair.today.day.adding(-1))
         assertNull(repair.todayPrompt, "its close hides it")
+
+        // NEXT 4: the widget invite, on a day that reached All taken. Its tap asks the launcher to pin the widget where
+        // the iPhone's opens how to add it (SurfaceTests checks the request).
+        val invite = demoModel("today-widget-invite")
+        assertEquals(TodayPrompt.WidgetInvite, invite.todayPrompt)
+        assertTrue(invite.today.allTaken)
+        invite.closeWidgetInvite(pin = true)
+        assertNull(invite.todayPrompt)
     }
 
     /**
