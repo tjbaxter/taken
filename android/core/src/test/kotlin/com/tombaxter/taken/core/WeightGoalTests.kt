@@ -177,8 +177,8 @@ class WeightGoalTests {
 
     @Test
     fun testTheSlotSaysHowCloseTheTrendIsInTheUnitShown() {
-        val goal = WeightGoal(90.0, day(1))
-        fun readout(values: List<Double>, unit: WeightUnit = kg, goal: WeightGoal = goal): GoalReadout {
+        val ninety = WeightGoal(90.0, day(1))
+        fun readout(values: List<Double>, unit: WeightUnit = kg, goal: WeightGoal = ninety): GoalReadout {
             val trend = points(values)
             val moments = WeightGoals.moments(goal, trend, everyDay(trend), 180.0)
             return WeightGoals.readout(goal, trend, moments, unit)
