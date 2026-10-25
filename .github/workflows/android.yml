@@ -18,6 +18,8 @@ on:
     paths:
       - "android/**"
       - ".github/workflows/android.yml"
+      # Draws the Android launcher icon, the splash glyph and the Play icon (the icons job).
+      - "brand/icon.py"
   workflow_dispatch:
 
 concurrency:
@@ -136,6 +138,33 @@ jobs:
           name: screenshots-test-report
           path: android/app/build/reports/tests/
           retention-days: 7
+
+  icons:
+    name: Icons drawn from the iPhone's artwork
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # brand/icon.py draws the launcher icon's three layers, the splash screen's glyph and the Play store icon from the
+      # iPhone icon's geometry (SPEC-ANDROID 17, NEXT 7). This draws them again, fails on any difference, and checks
+      # Play's icon rules. numpy and Pillow at the versions the iPhone's icons were rendered with, from PyPI, each wheel
+      # checked against its published SHA-256 ("Hash-checking mode",
+      # https://pip.pypa.io/en/stable/topics/secure-installs/).
+      - name: numpy and Pillow
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -m venv "$RUNNER_TEMP/icons"
+          cat > "$RUNNER_TEMP/icons-requirements.txt" <<'REQ'
+          numpy==2.3.5 --hash=sha256:0d8163f43acde9a73c2a33605353a4f1bc4798745a8b1d73183b28e5b435ae28
+          pillow==12.2.0 --hash=sha256:62f5409336adb0663b7caa0da5c7d9e7bdbaae9ce761d34669420c2a801b2780 --hash=sha256:b86024e52a1b269467a802258c25521e6d742349d760728092e1bc2d135b4d76
+          REQ
+          "$RUNNER_TEMP/icons/bin/pip" install --quiet --require-hashes --only-binary :all: -r "$RUNNER_TEMP/icons-requirements.txt"
+      - name: The Android icons are what brand/icon.py draws
+        run: '"$RUNNER_TEMP/icons/bin/python" brand/icon.py --android --check'
 
   release:
     name: Release bundle (R8, unsigned) and its checks
