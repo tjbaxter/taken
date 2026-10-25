@@ -58,6 +58,7 @@ import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
@@ -432,8 +433,11 @@ private fun TrialTimeline(steps: List<TrialStep>) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(horizontal = 4.dp, vertical = 2.dp)
-            .clearAndSetSemantics { contentDescription = steps.joinToString(". ") { it.line } }
-            .testTag("trial-timeline"),
+            // One line for TalkBack; the tag goes inside, since clearing semantics also clears what follows it.
+            .clearAndSetSemantics {
+                contentDescription = steps.joinToString(". ") { it.line }
+                testTag = "trial-timeline"
+            },
     ) { measurables, constraints ->
         val loose = constraints.copy(minWidth = 0, minHeight = 0)
         val gap = 10.dp.roundToPx()
