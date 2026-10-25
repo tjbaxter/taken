@@ -11,6 +11,8 @@ gives exact, crisp anti-aliasing. Colours come from the Taken design tokens
     python3 brand/icon.py --concepts brand/concepts   # render every concept
     python3 brand/icon.py --look blush --out /tmp/blush.png   # one look's icon
     python3 brand/icon.py --looks-sheet brand/looks.jpg       # every look, large and at Home Screen sizes
+    python3 brand/icon.py --android            # Taken for Android: launcher icon layers, splash glyph, Play icon
+    python3 brand/icon.py --android --check    # the same, compared with what is committed (android.yml)
 
 Variants:
     default  opaque sRGB, no alpha (App Store marketing icon rule)
@@ -1078,6 +1080,331 @@ def contact_sheet(names, out, ss=2):
     return out
 
 
+# ---------------------------------------------------------------- Android (android/SPEC-ANDROID.md 17, NEXT 7)
+#
+# Taken for Android has one launcher icon, Signal's, as SPEC-ANDROID 19 item 5 recommends: an adaptive icon whose three
+# layers are vector drawables drawn from this file's geometry, the Play store's 512 px icon rendered by the same renderer
+# as the iPhone icons, and the splash screen's glyph. `python3 brand/icon.py --android` writes them;
+# `--android --check` (android.yml) renders them again and fails when a committed file differs.
+#
+# Sources, read 25 Oct 2026:
+# - Adaptive icons (https://developer.android.com/develop/ui/views/launch/icon_design_adaptive): "Size all layers to
+#   108x108 dp"; "The outer 18 dp on each of the four sides of the layers is reserved for masking and to create visual
+#   effects such as parallax or pulsing"; the "66x66 safe zone" is "never clipped by a shaped mask defined by an OEM";
+#   "The layers can be either vectors or bitmaps, though vectors are preferred"; a `monochrome` layer is what Android 13
+#   and later tint when the person turns on themed icons, and from Android 16 QPR 2 Android themes an app without one
+#   itself.
+# - Play's icon (https://developer.android.com/distribute/google-play/resources/icon-design-specifications): 512 x 512,
+#   "32-bit PNG", sRGB, at most 1024 KB, "Full square", "Don't round the edges of your final asset", "Don't add drop
+#   shadows"; Play applies its own mask (a radius of 30% of the icon) and shadow.
+# - The splash screen (https://developer.android.com/develop/ui/views/launch/splash-screen): "App icon without an icon
+#   background: this must be 288x288 dp and fit within a circle 192 dp in diameter", and the icon "must be a vector
+#   drawable".
+#
+# [Own choice] The iPhone's 1024 square maps onto the adaptive icon's inner 72 dp (the masked viewport), so a 108 dp layer
+# is 1536 units with the iPhone frame at 256..1280: every mask then shows what the iPhone's squircle shows, and the
+# brackets' outer corners sit 32 dp from the centre, inside the 33 dp safe zone. The splash glyph keeps the same scale
+# (288 / 192 is 108 / 72), so the capsule stays the size it was in the icon. Vector drawables have no blur: the glow is the
+# lit half stroked in bands whose stacked opacity follows the iPhone's Gaussian glow (sigma 50, 0.30 strength), and the
+# lit half's warm core is a radial gradient sampled from brand/icon-1024.png. No grain: a vector has no pixels to dither.
+
+ANDROID_DIR = os.path.join(REPO, "android")
+ANDROID_RES = os.path.join(ANDROID_DIR, "app", "src", "main", "res")
+ANDROID_STORE = os.path.join(ANDROID_DIR, "store-assets")
+A_VIEW = 1536.0      # a 108 dp layer, in iPhone icon units
+A_OFF = 256.0        # where the iPhone's 1024 square starts inside it
+A_DP = 108.0 / A_VIEW
+A_SAFE_DP = 33.0     # the safe zone's radius
+PLAY_SIZE = 512
+PLAY_MAX_BYTES = 1024 * 1024
+
+# The Signal icon's capsule (concept_split2 at FINAL_K) and frame (viewfinder, edge_ticks), as the iPhone draws them.
+A_HL, A_RAD, A_GAP, A_STROKE = 156.0 * FINAL_K, 116.0 * FINAL_K, 18.0, 16.0
+A_BRACKET_HALF, A_BRACKET_ARM, A_BRACKET_T, A_BRACKET_ROUND, A_BRACKET_OPACITY = 322.0, 104.0, 16.0, 3.0, 0.9
+A_TICK_LEN, A_TICK_T, A_TICK_ROUND = 40.0, 12.0, 2.0
+# The lit half's centre, in the capsule's own frame (its axis is +x): where the warm core and the glow are centred.
+A_LIT_CENTRE = (-150.0, 0.0)
+# The lit half's colour from its centre outwards (offset = distance / the capsule's radius), sampled across the lit half
+# of brand/icon-1024.png (glow and core included) at 0, 40, 60, 80, 100 and 115 units from its centre and at its edge.
+A_LIT_STOPS = ((0.0, "#FFC614"), (0.32, "#FFC411"), (0.48, "#FFC20E"), (0.64, "#FFBF09"), (0.8, "#FFBC06"),
+               (0.92, "#FFBA04"), (1.0, "#FFB902"))
+# The glow: the iPhone screens 0.30 x a Gaussian blur (sigma 50) of the lit half over everything; outside a straight
+# edge that is 0.15 x erfc(d / (50 sqrt 2)) of the signal at a distance d. Bands of 8 units out to 104.
+A_GLOW_SIGMA, A_GLOW_STRENGTH, A_GLOW_BAND, A_GLOW_REACH = 50.0, 0.30, 8.0, 104.0
+# Themed icons tint the monochrome layer's alpha (the colours are the launcher's). Each part keeps the iPhone's tinted
+# icon's grey as its opacity: the lit half white, the outline 0.62, the brackets 0.62 at 0.9, the ticks 0.30.
+A_MONO_ALPHA = {"lit": 1.0, "outline": 0.62, "brackets": 0.62 * A_BRACKET_OPACITY, "ticks": 0.30}
+
+
+def _num(v):
+    """A short, exact-enough number for path data: at most two decimals, no trailing zeros, never "-0"."""
+    s = f"{v:.2f}".rstrip("0").rstrip(".")
+    return "0" if s in ("-0", "") else s
+
+
+def _hex(c):
+    return "#" + "".join(f"{int(round(float(v) * 255)):02X}" for v in c)
+
+
+def _capsule_point(px, py, cx=512.0, cy=512.0, angle_deg=45.0):
+    """A point in the capsule's frame (axis +x, centred) on the icon: turned 45 degrees up and to the right, as the
+    iPhone draws it (SVG rotate(-45) in y-down coordinates), then moved into the 1536 layer."""
+    a = math.radians(angle_deg)
+    c, s = math.cos(a), math.sin(a)
+    return (cx + px * c + py * s + A_OFF, cy - px * s + py * c + A_OFF)
+
+
+def _capsule_path(kind, hl=A_HL, rad=A_RAD, gap=A_GAP, stroke=A_STROKE):
+    """Path data for the lit half, the unlit half (the shell) or the centre line of the shell's inner outline."""
+    g = gap / 2.0
+    if kind == "lit":
+        pts, r, sweep = ((-g, -rad), (-hl, -rad), (-hl, rad), (-g, rad)), rad, 0
+    elif kind == "shell":
+        pts, r, sweep = ((g, -rad), (hl, -rad), (hl, rad), (g, rad)), rad, 1
+    elif kind == "outline":
+        i = stroke / 2.0
+        pts, r, sweep = ((g + i, -(rad - i)), (hl, -(rad - i)), (hl, rad - i), (g + i, rad - i)), rad - i, 1
+    else:
+        raise ValueError(kind)
+    p = [_capsule_point(*q) for q in pts]
+    return (f"M{_num(p[0][0])},{_num(p[0][1])} L{_num(p[1][0])},{_num(p[1][1])} "
+            f"A{_num(r)},{_num(r)} 0 0,{sweep} {_num(p[2][0])},{_num(p[2][1])} L{_num(p[3][0])},{_num(p[3][1])} Z")
+
+
+def _rrect(x, y, w, h, r):
+    """A rounded rectangle, clockwise, so rectangles in one path join (non-zero fill) instead of doubling their alpha."""
+    x, y = x + A_OFF, y + A_OFF
+    return (f"M{_num(x + r)},{_num(y)} H{_num(x + w - r)} A{_num(r)},{_num(r)} 0 0,1 {_num(x + w)},{_num(y + r)} "
+            f"V{_num(y + h - r)} A{_num(r)},{_num(r)} 0 0,1 {_num(x + w - r)},{_num(y + h)} H{_num(x + r)} "
+            f"A{_num(r)},{_num(r)} 0 0,1 {_num(x)},{_num(y + h - r)} V{_num(y + r)} A{_num(r)},{_num(r)} 0 0,1 "
+            f"{_num(x + r)},{_num(y)} Z")
+
+
+def _bracket_paths():
+    """The four viewfinder corners (viewfinder(), as svg_mark draws them), a path each: its two arms in one path, so
+    the square where they meet is drawn once. One path for all four would pass lint's 800-character limit (VectorPath)."""
+    half, arm, t = A_BRACKET_HALF, A_BRACKET_ARM, A_BRACKET_T
+    out = []
+    for sx in (-1, 1):
+        for sy in (-1, 1):
+            ox, oy = 512 + sx * half, 512 + sy * half
+            hx0 = ox if sx < 0 else ox - arm
+            hy0 = oy if sy < 0 else oy - t
+            vx0 = ox if sx < 0 else ox - t
+            vy0 = oy if sy < 0 else oy - arm
+            out.append(_rrect(hx0, hy0, arm, t, A_BRACKET_ROUND) + " " + _rrect(vx0, vy0, t, arm, A_BRACKET_ROUND))
+    return out
+
+
+def _ticks_path():
+    """The centre tick on each side (edge_ticks())."""
+    half, length, t = A_BRACKET_HALF, A_TICK_LEN, A_TICK_T
+    boxes = ((512 - t / 2, 512 - half, t, length), (512 - t / 2, 512 + half - length, t, length),
+             (512 - half, 512 - t / 2, length, t), (512 + half - length, 512 - t / 2, length, t))
+    return " ".join(_rrect(x, y, w, h, A_TICK_ROUND) for x, y, w, h in boxes)
+
+
+def _glow_bands():
+    """(half width, opacity) of each stroke of the glow, widest first, so that the strokes stacked over a point d
+    outside the lit half's edge add up to the iPhone's glow there, 0.15 x erfc(d / (sigma sqrt 2))."""
+    edges = []
+    w = A_GLOW_BAND
+    while w <= A_GLOW_REACH + 1e-6:
+        edges.append(w)
+        w += A_GLOW_BAND
+    target = [0.5 * A_GLOW_STRENGTH * math.erfc(((w - A_GLOW_BAND / 2.0)) / (A_GLOW_SIGMA * math.sqrt(2.0)))
+              for w in edges]
+    bands, outer = [], 0.0
+    for w, t in reversed(list(zip(edges, target))):
+        a = 1.0 - (1.0 - t) / (1.0 - outer)
+        bands.append((w, a))
+        outer = t
+    return bands
+
+
+def _vector(width_dp, height_dp, body, comment):
+    aapt = '    xmlns:aapt="http://schemas.android.com/aapt"\n' if "<aapt:attr" in body else ""
+    return (
+        '<?xml version="1.0" encoding="utf-8"?>\n'
+        f"<!-- {comment}\n     Drawn by the Android part of brand/icon.py from the iPhone icon's geometry: change icon.py, never this\n"
+        "     file, and run it again. -->\n"
+        '<vector xmlns:android="http://schemas.android.com/apk/res/android"\n'
+        f"{aapt}"
+        f'    android:width="{_num(width_dp)}dp"\n'
+        f'    android:height="{_num(height_dp)}dp"\n'
+        f'    android:viewportWidth="{_num(A_VIEW)}"\n'
+        f'    android:viewportHeight="{_num(A_VIEW)}">\n'
+        f"{body}"
+        "</vector>\n"
+    )
+
+
+def _path(data, fill=None, alpha=None, stroke=None, stroke_width=None, stroke_alpha=None, join=None, gradient=None):
+    attrs = []
+    if fill:
+        attrs.append(f'android:fillColor="{fill}"')
+    if alpha is not None:
+        attrs.append(f'android:fillAlpha="{_num4(alpha)}"')
+    if stroke:
+        attrs.append(f'android:strokeColor="{stroke}"')
+        attrs.append(f'android:strokeWidth="{_num(stroke_width)}"')
+        if stroke_alpha is not None:
+            attrs.append(f'android:strokeAlpha="{_num4(stroke_alpha)}"')
+        if join:
+            attrs.append(f'android:strokeLineJoin="{join}"')
+    attrs.append(f'android:pathData="{data}"')
+    inner = "".join(f"\n        {a}" for a in attrs)
+    if gradient is None:
+        return f"    <path{inner} />\n"
+    return f"    <path{inner}>\n{gradient}    </path>\n"
+
+
+def _num4(v):
+    s = f"{v:.4f}".rstrip("0").rstrip(".")
+    return "0" if s in ("-0", "") else s
+
+
+def _radial(cx, cy, radius, stops):
+    items = "".join(f'                <item android:offset="{_num(o)}" android:color="{c}" />\n' for o, c in stops)
+    return (
+        '        <aapt:attr name="android:fillColor">\n'
+        f'            <gradient android:type="radial" android:centerX="{_num(cx)}" android:centerY="{_num(cy)}"\n'
+        f'                android:gradientRadius="{_num(radius)}">\n'
+        f"{items}"
+        "            </gradient>\n"
+        "        </aapt:attr>\n"
+    )
+
+
+def _capsule_body(pal):
+    """The capsule as the colour icon and the splash draw it: the shell, the glow, the shell's outline, then the lit half.
+    The iPhone screens its glow over everything; a vector can only lay it over, which on the light outline turns the grey
+    beige, so the outline is drawn above the glow and stays grey, as the iPhone's nearly does."""
+    body = _path(_capsule_path("shell"), fill=_hex(pal["fill_deep"]))
+    lit = _capsule_path("lit")
+    for w, a in _glow_bands():
+        body += _path(lit, stroke=_hex(pal["lit"]), stroke_width=2 * w, stroke_alpha=a, join="round")
+    body += _path(_capsule_path("outline"), stroke=_hex(pal["line"]), stroke_width=A_STROKE)
+    cx, cy = _capsule_point(*A_LIT_CENTRE)
+    body += _path(lit, gradient=_radial(cx, cy, A_RAD, A_LIT_STOPS))
+    return body
+
+
+def android_background():
+    """The background layer: Signal's canvas, lifted toward the raised panel at the centre (Renderer.background, lift
+    1.0 over 640 units with a smoothstep), filling the whole 108 dp layer."""
+    bg, raised = LOOKS["signal"]["bg"], LOOKS["signal"]["raised"]
+    stops = []
+    for t in (0.0, 0.2, 0.4, 0.6, 0.8, 1.0):
+        u = 1.0 - t
+        f = u * u * (3 - 2 * u)
+        stops.append((t, _hex(bg + (raised - bg) * f)))
+    c = 512 + A_OFF
+    body = _path(f"M0,0 H{_num(A_VIEW)} V{_num(A_VIEW)} H0 Z", gradient=_radial(c, c, 640.0, stops))
+    return _vector(108, 108, body, "Taken's launcher icon, background layer: Signal's canvas with the iPhone icon's lift at the centre.")
+
+
+def android_foreground():
+    """The foreground layer: the viewfinder brackets, the edge ticks and the split capsule with its glow."""
+    pal = PALETTES["default"]
+    body = "".join(_path(d, fill=_hex(pal["line"]), alpha=A_BRACKET_OPACITY) for d in _bracket_paths())
+    body += _path(_ticks_path(), fill=_hex(pal["line_dim"]))
+    body += _capsule_body(pal)
+    return _vector(108, 108, body, "Taken's launcher icon, foreground layer: the iPhone icon's brackets, ticks and split capsule.")
+
+
+def android_monochrome():
+    """The monochrome layer for themed icons: the iPhone's tinted icon, its greys as opacity."""
+    white = "#FFFFFF"
+    body = "".join(_path(d, fill=white, alpha=A_MONO_ALPHA["brackets"]) for d in _bracket_paths())
+    body += _path(_ticks_path(), fill=white, alpha=A_MONO_ALPHA["ticks"])
+    body += _path(_capsule_path("outline"), stroke=white, stroke_width=A_STROKE, stroke_alpha=A_MONO_ALPHA["outline"])
+    body += _path(_capsule_path("lit"), fill=white, alpha=A_MONO_ALPHA["lit"])
+    return _vector(108, 108, body, "Taken's launcher icon, monochrome layer: what Android 13 and later tint as a themed icon.")
+
+
+def android_splash_icon():
+    """The splash screen's glyph: the capsule alone, at its size in the icon, in the 288 dp box Android 12 and later draw."""
+    return _vector(288, 288, _capsule_body(PALETTES["default"]),
+                   "Taken's splash screen glyph: the icon's capsule at the icon's scale (288 dp, inside the 192 dp circle).")
+
+
+def android_play_icon(ss=8):
+    """The Play store icon: the Signal icon at 512 px, a full square, opaque, as 32-bit PNG."""
+    return render(FINAL, "default", PLAY_SIZE, ss).convert("RGBA")
+
+
+ANDROID_VECTORS = {
+    os.path.join(ANDROID_RES, "drawable", "ic_launcher_background.xml"): android_background,
+    os.path.join(ANDROID_RES, "drawable", "ic_launcher_foreground.xml"): android_foreground,
+    os.path.join(ANDROID_RES, "drawable", "ic_launcher_monochrome.xml"): android_monochrome,
+    os.path.join(ANDROID_RES, "drawable", "splash_icon.xml"): android_splash_icon,
+}
+PLAY_ICON = os.path.join(ANDROID_STORE, "icon-512.png")
+
+
+def android_safe_zone_dp():
+    """The farthest point of the artwork from the icon's centre, in dp: the brackets' outer corners, or the glow beyond the
+    capsule's tip."""
+    corner = math.hypot(A_BRACKET_HALF, A_BRACKET_HALF)
+    glow = A_HL + A_RAD + A_GLOW_REACH
+    return max(corner, glow) * A_DP
+
+
+def write_android():
+    for path, make in ANDROID_VECTORS.items():
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write(make())
+        print("wrote", os.path.relpath(path, REPO))
+    save_png(android_play_icon(), PLAY_ICON)
+    print("wrote", os.path.relpath(PLAY_ICON, REPO), f"({os.path.getsize(PLAY_ICON)} bytes)")
+
+
+def check_android():
+    """Renders everything again and compares it with what is committed; then checks Play's and Android's rules."""
+    failures = []
+    for path, make in ANDROID_VECTORS.items():
+        rel = os.path.relpath(path, REPO)
+        try:
+            with open(path) as f:
+                ok = f.read() == make()
+        except FileNotFoundError:
+            ok = False
+        print(("OK   " if ok else "FAIL ") + f"{rel} is what icon.py draws")
+        if not ok:
+            failures.append(rel)
+    rel = os.path.relpath(PLAY_ICON, REPO)
+    with open(PLAY_ICON, "rb") as f:
+        raw = f.read()
+    img = Image.open(PLAY_ICON)
+    img.load()
+    checks = [
+        (img.size == (PLAY_SIZE, PLAY_SIZE), f"{rel} is {PLAY_SIZE} x {PLAY_SIZE}"),
+        (img.mode == "RGBA" and raw[24] == 8 and raw[25] == 6, f"{rel} is a 32-bit PNG (8-bit RGBA)"),
+        (len(raw) <= PLAY_MAX_BYTES, f"{rel} is at most 1024 KB ({len(raw)} bytes)"),
+        ("icc_profile" in img.info, f"{rel} carries an sRGB profile"),
+        (img.mode == "RGBA" and img.getchannel("A").getextrema() == (255, 255),
+         f"{rel} is a full square: opaque everywhere, no rounding"),
+    ]
+    fresh = np.asarray(android_play_icon(), np.int16)
+    have = np.asarray(img.convert("RGBA"), np.int16)
+    if fresh.shape == have.shape:
+        diff = np.abs(fresh - have)
+        # numpy's maths differ by a level here and there between machines; the artwork may not.
+        checks.append((diff.max() <= 3 and diff.mean() <= 0.1,
+                       f"{rel} is what icon.py renders (largest difference {diff.max()}, mean {diff.mean():.4f})"))
+    else:
+        checks.append((False, f"{rel} is what icon.py renders"))
+    reach = android_safe_zone_dp()
+    checks.append((reach <= A_SAFE_DP, f"the icon's artwork reaches {reach:.1f} dp from the centre, inside the 33 dp safe zone"))
+    for ok, what in checks:
+        print(("OK   " if ok else "FAIL ") + what)
+        if not ok:
+            failures.append(what)
+    return not failures
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--sheet", help="write a contact sheet of every concept to this PNG")
@@ -1092,7 +1419,15 @@ def main():
     ap.add_argument("--look", choices=LOOK_ORDER, help="with --out: that look's icon")
     ap.add_argument("--looks-sheet", help="write every look's icon, large and at Home Screen sizes, to this image")
     ap.add_argument("--icons-only", action="store_true", help="only the asset catalog icon sets")
+    ap.add_argument("--android", action="store_true",
+                    help="only Taken for Android's launcher icon layers, splash glyph and Play store icon")
+    ap.add_argument("--check", action="store_true", help="with --android: compare with the committed files, write nothing")
     a = ap.parse_args()
+    if a.android:
+        if a.check:
+            raise SystemExit(0 if check_android() else 1)
+        write_android()
+        return
     if a.looks_sheet:
         print("wrote", looks_sheet(a.looks_sheet, ss=a.ss))
         return

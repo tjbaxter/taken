@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- The Taken mark's lit half, white so the widget tints it with the look's signal (the launcher icon's geometry,
-     ic_launcher_foreground.xml, cropped to the capsule). Widgets draw drawables, not Compose canvases. -->
+<!-- The Taken mark's lit half, white so the widget tints it with the look's signal: the iPhone widgets' small capsule
+     glyph (Shared/Theme.swift CapsuleGlyph), not the launcher icon's. Widgets draw drawables, not Compose canvases. -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
