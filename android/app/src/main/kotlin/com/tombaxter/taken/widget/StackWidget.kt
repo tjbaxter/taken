@@ -6,6 +6,7 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.unit.Dp
+import androidx.compose.ui.unit.coerceIn
 import androidx.compose.ui.unit.dp
 import androidx.glance.GlanceId
 import androidx.glance.GlanceModifier
@@ -201,7 +202,8 @@ private fun Large(face: StackWidgetFace, palette: WidgetPalette, height: Dp) {
         CounterBlock(face, palette, counterSize = 38)
         Spacer(GlanceModifier.height(10.dp))
         Box(GlanceModifier.fillMaxWidth().height(1.dp).background(palette.line)) {}
-        Rows(face, palette, height - 24.dp - LARGE_BLOCK - 11.dp, divider = false, names = true)
+        // The rows share the height left, up to 60 dp each, so the 4x4 has no empty band under its last row.
+        Rows(face, palette, height - 24.dp - LARGE_BLOCK - 11.dp, divider = false, names = true, spread = true)
     }
 }
 
@@ -330,9 +332,10 @@ private fun Bottom(face: StackWidgetFace, palette: WidgetPalette) {
  * Glance holds ten children to a column, so each row carries its own divider.
  */
 @Composable
-private fun Rows(face: StackWidgetFace, palette: WidgetPalette, height: Dp, divider: Boolean, names: Boolean) {
+private fun Rows(face: StackWidgetFace, palette: WidgetPalette, height: Dp, divider: Boolean, names: Boolean, spread: Boolean = false) {
     val fit = rowsFitting(height, face.rows.size)
     if (fit.shown == 0 && face.rows.isNotEmpty()) return
+    val rowHeight = if (spread) spreadRowHeight(height, fit.shown, face.rows.size) else WidgetSizes.TOUCH
     Column(GlanceModifier.fillMaxWidth()) {
         if (face.rows.isEmpty()) {
             if (height >= WidgetSizes.TOUCH) {
@@ -343,13 +346,25 @@ private fun Rows(face: StackWidgetFace, palette: WidgetPalette, height: Dp, divi
             return@Column
         }
         face.rows.take(fit.shown).forEachIndexed { index, row ->
-            RowLine(row, palette, topDivider = divider || index > 0, name = names)
+            RowLine(row, palette, topDivider = divider || index > 0, name = names, height = rowHeight)
         }
         face.more(fit.shown)?.let {
             Text(it, style = palette.hud(9f, palette.fgFaint), maxLines = 1, modifier = GlanceModifier.padding(top = 2.dp))
         }
     }
 }
+
+/**
+ * A row's height when every row fits: the height left shared between them, never under the 48 dp touch target and at
+ * most [SPREAD_MAX] [Own choice], so a large widget has no empty band under its last row. With a "+n MORE" line the rows
+ * stay 48 dp.
+ */
+internal fun spreadRowHeight(height: Dp, shown: Int, count: Int): Dp {
+    if (shown == 0 || shown < count) return WidgetSizes.TOUCH
+    return (height / shown).coerceIn(WidgetSizes.TOUCH, SPREAD_MAX)
+}
+
+private val SPREAD_MAX = 60.dp
 
 /** How many 48 dp rows fit, leaving room for the "+n MORE" line when not all of them do. */
 internal data class RowFit(val shown: Int)
@@ -368,9 +383,9 @@ private const val MAX_ROWS = 8
 
 /** One item: its mark, code, name and time or count; a tap logs it when it may. */
 @Composable
-private fun RowLine(row: WidgetRowFace, palette: WidgetPalette, topDivider: Boolean, name: Boolean) {
+private fun RowLine(row: WidgetRowFace, palette: WidgetPalette, topDivider: Boolean, name: Boolean, height: Dp = WidgetSizes.TOUCH) {
     val context = LocalContext.current
-    var modifier = GlanceModifier.fillMaxWidth().height(WidgetSizes.TOUCH)
+    var modifier = GlanceModifier.fillMaxWidth().height(height)
     row.tap.action(context)?.let { modifier = modifier.clickable(it) }
     Column(modifier.semantics { contentDescription = row.spoken; testTag = "widget-row-${row.code}" }) {
         if (topDivider) {

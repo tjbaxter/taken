@@ -215,8 +215,9 @@ class PlayStoreScreenshotTests {
 
     /**
      * The widget frame: the stack widget at 4x4 on a home screen's wallpaper, drawn by Glance into an AppWidgetHostView
-     * as WidgetScreenshotTests draws it, at the card's 336 dpi so it sits on the 400 dp screen as on a phone. The
-     * wallpaper is warm and plain so the dark widget reads against it. [Own choice]
+     * as WidgetScreenshotTests draws it, at the card's 336 dpi so it sits on the 400 dp screen as on a phone. It spans 80%
+     * of the screen, as a 4-column widget does on a phone this wide, so it is the frame's clear subject, and its rows fill
+     * it. The wallpaper is warm and plain so the dark widget reads against it. [Own choice: the size and the wallpaper]
      */
     @Composable
     private fun BoxScope.HomeScreen() {
@@ -235,7 +236,7 @@ class PlayStoreScreenshotTests {
         )
         AndroidView(
             factory = { context -> stackWidget(context) },
-            modifier = Modifier.align(Alignment.TopCenter).padding(top = WIDGET_TOP).size(WidgetSizes.LARGE),
+            modifier = Modifier.align(Alignment.TopCenter).padding(top = WIDGET_TOP).size(STORE_WIDGET),
         )
     }
 
@@ -256,7 +257,7 @@ class PlayStoreScreenshotTests {
         assertTrue(state.items.all { it.name in NEUTRAL_STACK })
         val face = StackWidgetFace(WidgetSnapshot(state, now, DemoScreens.zone, locked = false), Locale.US)
         val remote = runBlocking {
-            GlanceRemoteViews().compose(phone, WidgetSizes.LARGE) { StackWidgetContent(face, Looks.SIGNAL) }.remoteViews
+            GlanceRemoteViews().compose(phone, STORE_WIDGET) { StackWidgetContent(face, Looks.SIGNAL) }.remoteViews
         }
         return HostView(phone).also { host -> host.addView(remote.apply(phone, host)) }
     }
@@ -293,6 +294,9 @@ class PlayStoreScreenshotTests {
 
         /** Where the widget sits on the wallpaper, in the screen's dp: a little above the middle of 830. */
         val WIDGET_TOP = 170.dp
+
+        /** The store frame's 4x4: 320 dp across, 80% of the 400 dp screen, at the 4x4's height. */
+        val STORE_WIDGET = androidx.compose.ui.unit.DpSize(320.dp, WidgetSizes.LARGE.height)
 
         /** Google's limit for taglines. */
         const val MAX_TAGLINE_SHARE = 0.20f

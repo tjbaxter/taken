@@ -390,7 +390,7 @@ private fun DrawScope.drawChart(
         val centreY = if (above) y - 12.dp.toPx() else y + 12.dp.toPx()
         drawText(text, topLeft = Offset(left, centreY - text.size.height / 2f))
     }
-    // The scrub: a rule on the day and its popover above the plot.
+    // The scrub: a rule on the day and its popover beside it, inside the plot.
     if (selected != null) {
         val x = geometry.x(selected)
         drawLine(colors.lineStrong, Offset(x, plot.top), Offset(x, plot.bottom), hairline)
@@ -432,7 +432,10 @@ private fun DrawScope.drawLitBead(at: Offset, colors: TakenColors) {
     drawCircle(colors.signal, 4.dp.toPx(), at)
 }
 
-/** "3 Aug", the trend, the day's weigh-in and, on a point's day, its fact, on the inset surface with a strong hairline. */
+/**
+ * "3 Aug", the trend, the day's weigh-in and, on a point's day, its fact, on the inset surface with a strong hairline,
+ * inside the plot beside the scrub's rule.
+ */
 private fun DrawScope.drawPopover(
     day: DayKey,
     x: Float,
@@ -468,8 +471,16 @@ private fun DrawScope.drawPopover(
     val gap = 2.dp.toPx()
     val width = lines.maxOf { row -> row.sumOf { it.size.width } } + padX * 2
     val height = lines.sumOf { row -> row.maxOf { it.size.height } }.toFloat() + gap * (lines.size - 1) + padY * 2
-    val left = (x - width / 2).coerceIn(0f, (size.width - width).coerceAtLeast(0f))
-    val top = geometry.plot.top - height
+    // Inside the plot, at its top, beside the rule on the side with room, so it never covers the range picker or the
+    // change line above the chart, nor the day it describes. [Own choice: the iPhone's annotation sits above the plot
+    // with its vertical overflow disabled, which Android's single canvas cannot keep clear of the controls.]
+    val plot = geometry.plot
+    val gapX = 8.dp.toPx()
+    val roomRight = plot.right - x
+    val roomLeft = x - plot.left
+    val beside = if (roomRight >= width + gapX || roomRight >= roomLeft) x + gapX else x - gapX - width
+    val left = beside.coerceIn(0f, (size.width - width).coerceAtLeast(0f))
+    val top = plot.top + 2.dp.toPx()
     val radius = CornerRadius(7.dp.toPx(), 7.dp.toPx())
     drawRoundRect(colors.bgInset, Offset(left, top), Size(width, height), radius)
     drawRoundRect(colors.lineStrong, Offset(left, top), Size(width, height), radius, style = Stroke(1.dp.toPx()))

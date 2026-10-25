@@ -606,11 +606,17 @@ private fun FigureLine(model: AppModel, locale: Locale) {
     // The caret pulses on appear and whenever the number turns grey or empty again (after Undo).
     var pulse by remember { mutableIntStateOf(0) }
     LaunchedEffect(grey && !focused) { if (grey && !focused) pulse += 1 }
-    Row(Modifier.clearAndSetSemantics { }, verticalAlignment = Alignment.Bottom) {
-        Box(Modifier.alignByBaseline(), contentAlignment = Alignment.CenterStart) {
-            // The box keeps the longer of the grey value and the draft, so nothing re-centres while typing.
-            Digits(WeightEntry.sizing(ghost, weight.draft), Color.Transparent)
-            Box(contentAlignment = Alignment.CenterStart) {
+    // Two layers, as the iPhone's WeightEntryView draws them. Underneath, hidden, the line's width for centring: the longer
+    // of the grey value and the draft, then the unit, so nothing re-centres while typing. On top, from the same start,
+    // what shows: the digits and, always right after their trailing edge on the same baseline, the unit.
+    Box(Modifier.clearAndSetSemantics { }, contentAlignment = Alignment.CenterStart) {
+        Row(verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.alignByBaseline()) { Digits(WeightEntry.sizing(ghost, weight.draft), Color.Transparent) }
+            Spacer(Modifier.width(8.dp))
+            UnitText(unit.symbol, Color.Transparent, Modifier.alignByBaseline())
+        }
+        Row(verticalAlignment = Alignment.Bottom) {
+            Box(Modifier.alignByBaseline(), contentAlignment = Alignment.CenterStart) {
                 Digits(shown, if (grey) colors.fgSubtle else colors.fg)
                 if (caret) {
                     Caret(
@@ -629,15 +635,21 @@ private fun FigureLine(model: AppModel, locale: Locale) {
                     )
                 }
             }
+            Spacer(Modifier.width(8.dp))
+            UnitText(unit.symbol, if (grey) colors.fgSubtle else colors.fgMuted, Modifier.alignByBaseline())
         }
-        Spacer(Modifier.width(8.dp))
-        Text(
-            unit.symbol,
-            style = TakenType.sans(22, FontWeight.Medium).copy(fontSize = cappedSp(22, 1.5f)),
-            color = if (grey) colors.fgSubtle else colors.fgMuted,
-            modifier = Modifier.alignByBaseline(),
-        )
     }
+}
+
+/** The unit after the digits: Geist Medium 22, growing with the text size up to 150%. */
+@Composable
+private fun UnitText(symbol: String, color: Color, modifier: Modifier) {
+    Text(
+        symbol,
+        style = TakenType.sans(22, FontWeight.Medium).copy(fontSize = cappedSp(22, 1.5f)),
+        color = color,
+        modifier = modifier,
+    )
 }
 
 /** A size that grows with the person's text size up to `cap` times, the iPhone's `dynamicTypeSize(...accessibility1)`. */

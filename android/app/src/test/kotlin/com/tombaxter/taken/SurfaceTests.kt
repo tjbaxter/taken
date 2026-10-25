@@ -4,6 +4,7 @@ import android.app.AlarmManager
 import android.content.ComponentName
 import android.content.pm.PackageManager
 import android.content.res.XmlResourceParser
+import androidx.compose.ui.unit.dp
 import androidx.glance.action.actionParametersOf
 import androidx.glance.appwidget.testing.unit.hasRunCallbackClickAction
 import androidx.glance.appwidget.testing.unit.hasStartActivityClickAction
@@ -253,6 +254,16 @@ class SurfaceTests {
         container.surfaces.tileAdded = false
         runBlocking { container.surfaces.refresh() }
         assertNull(refreshAlarm(), "the tile went: the alarm goes too")
+    }
+
+    /** The 4x4's rows share the height left under its counter, so no empty band sits under the last one. */
+    @Test
+    fun testTheLargeWidgetsRowsShareTheHeightLeft() {
+        val left = 271.dp
+        assertEquals(left / 5, com.tombaxter.taken.widget.spreadRowHeight(left, shown = 5, count = 5), "five rows fill it")
+        assertEquals(60.dp, com.tombaxter.taken.widget.spreadRowHeight(left, shown = 2, count = 2), "never taller than 60 dp")
+        assertEquals(WidgetSizes.TOUCH, com.tombaxter.taken.widget.spreadRowHeight(left, shown = 5, count = 7), "with +n MORE they stay 48 dp")
+        assertEquals(WidgetSizes.TOUCH, com.tombaxter.taken.widget.spreadRowHeight(200.dp, shown = 5, count = 5), "never under the touch target")
     }
 
     // MARK: Shortcuts and widget infos

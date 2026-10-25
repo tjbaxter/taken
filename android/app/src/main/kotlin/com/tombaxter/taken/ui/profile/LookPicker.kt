@@ -23,6 +23,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.selected
@@ -31,6 +32,7 @@ import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.tombaxter.taken.core.theme.Look
 import com.tombaxter.taken.core.theme.Looks
 import com.tombaxter.taken.core.theme.ThemeID
 import com.tombaxter.taken.ui.components.CapsuleGlyph
@@ -45,42 +47,54 @@ import com.tombaxter.taken.ui.theme.TakenType
  */
 @Composable
 fun LookPicker(selection: ThemeID, onSelect: (ThemeID) -> Unit) {
-    val current = Taken.colors
-    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-        for (look in Looks.ALL) {
-            val chosen = look.id == selection
-            val swatch = TakenColors.of(look)
-            Column(
-                Modifier
-                    .weight(1f)
-                    .clip(RoundedCornerShape(14.dp))
-                    .clickable(role = Role.RadioButton, onClickLabel = "apply") { onSelect(look.id) }
-                    .semantics(mergeDescendants = true) {
-                        contentDescription = "${look.id.title} look"
-                        selected = chosen
-                        if (!chosen) stateDescription = ProfileCopy.LOOK_HINT
-                    }
-                    .padding(vertical = 4.dp),
-                horizontalAlignment = Alignment.CenterHorizontally,
-            ) {
-                Box(
-                    Modifier
-                        .fillMaxWidth()
-                        .then(if (chosen) Modifier.border(2.dp, current.signal, RoundedCornerShape(15.dp)) else Modifier)
-                        .padding(3.dp),
-                ) {
-                    Preview(swatch)
-                }
-                Spacer(Modifier.height(8.dp))
-                Text(
-                    look.id.title,
-                    style = TakenType.sans(13, if (chosen) FontWeight.SemiBold else FontWeight.Medium),
-                    color = if (chosen) current.fg else current.fgSubtle,
-                    maxLines = 1,
-                    overflow = TextOverflow.Ellipsis,
-                )
+    // From 150% text the four go two by two, so each name has room to be read whole ("Phosphor" at 200% is wider than a
+    // quarter of a phone). [Own choice for the threshold, the one the paywall's plans use]
+    val columns = if (LocalDensity.current.fontScale >= LARGE_TEXT) 2 else Looks.ALL.size
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        for (row in Looks.ALL.chunked(columns)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                for (look in row) LookTile(look.id == selection, look, Modifier.weight(1f)) { onSelect(look.id) }
             }
         }
+    }
+}
+
+/** From this font scale the looks go two by two. */
+private const val LARGE_TEXT = 1.5f
+
+/** One look: its live miniature, ringed in the current signal while chosen, and its name under it. */
+@Composable
+private fun LookTile(chosen: Boolean, look: Look, modifier: Modifier, onSelect: () -> Unit) {
+    val current = Taken.colors
+    val swatch = TakenColors.of(look)
+    Column(
+        modifier
+            .clip(RoundedCornerShape(14.dp))
+            .clickable(role = Role.RadioButton, onClickLabel = "apply", onClick = onSelect)
+            .semantics(mergeDescendants = true) {
+                contentDescription = "${look.id.title} look"
+                selected = chosen
+                if (!chosen) stateDescription = ProfileCopy.LOOK_HINT
+            }
+            .padding(vertical = 4.dp),
+        horizontalAlignment = Alignment.CenterHorizontally,
+    ) {
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .then(if (chosen) Modifier.border(2.dp, current.signal, RoundedCornerShape(15.dp)) else Modifier)
+                .padding(3.dp),
+        ) {
+            Preview(swatch)
+        }
+        Spacer(Modifier.height(8.dp))
+        Text(
+            look.id.title,
+            style = TakenType.sans(13, if (chosen) FontWeight.SemiBold else FontWeight.Medium),
+            color = if (chosen) current.fg else current.fgSubtle,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis,
+        )
     }
 }
 

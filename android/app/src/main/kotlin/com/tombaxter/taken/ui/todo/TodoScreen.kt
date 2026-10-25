@@ -290,7 +290,8 @@ private fun TodoRow(todo: TodoModel, task: TodoTask, onEdit: () -> Unit) {
                     }
                 }
             }
-            Box(Modifier.fillMaxWidth().padding(start = 60.dp).height(1.dp).background(colors.line))
+            // The hairline stops at the row's 20 dp end margin, level with the due times, as the iPhone's separators do.
+            Box(Modifier.fillMaxWidth().padding(start = 60.dp, end = 20.dp).height(1.dp).background(colors.line))
         }
     }
 }

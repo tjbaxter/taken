@@ -51,7 +51,6 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardCapitalization
-import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tombaxter.taken.AppModel
@@ -59,6 +58,7 @@ import com.tombaxter.taken.core.todo.TodoCopy
 import com.tombaxter.taken.core.todo.TodoEditRules
 import com.tombaxter.taken.core.todo.TodoText
 import com.tombaxter.taken.ui.components.Card
+import com.tombaxter.taken.ui.components.CloseButton
 import com.tombaxter.taken.ui.components.RowDivider
 import com.tombaxter.taken.ui.components.SwitchRow
 import com.tombaxter.taken.ui.components.TakenSheet
@@ -279,19 +279,22 @@ fun TodoTypeSheet(model: AppModel, onDismiss: () -> Unit) {
     }
 }
 
-/** Cancel, the title, and the confirming action (Save, Add): the iPhone's sheet bar, Material's dismiss-then-confirm order. */
+/**
+ * The close X, the title, and the confirming action (Save, Add): Material's full-screen dialog bar, "a close icon, a
+ * title, and a confirming action" in that order (https://m3.material.io/components/dialogs/guidelines), with the same
+ * round close every other Taken sheet has, where the iPhone's bar has a Cancel word. [Own choice informed by the Material
+ * page]
+ */
 @Composable
 private fun SheetBar(title: String, confirm: String, enabled: Boolean, onCancel: () -> Unit, onConfirm: () -> Unit) {
     val colors = Taken.colors
     Row(Modifier.fillMaxWidth().padding(horizontal = 8.dp, vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-        TextButton(onClick = onCancel, modifier = Modifier.heightIn(min = 48.dp).testTag("sheet-cancel")) {
-            Text(TodoCopy.CANCEL, style = TakenType.sans(16, FontWeight.Medium), color = colors.fgMuted)
-        }
+        Box(Modifier.testTag("sheet-cancel")) { CloseButton(onCancel) }
+        Spacer(Modifier.width(8.dp))
         Text(
             title,
-            style = TakenType.sans(17, FontWeight.SemiBold),
+            style = TakenType.sans(20, FontWeight.SemiBold),
             color = colors.fg,
-            textAlign = TextAlign.Center,
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
             modifier = Modifier.weight(1f).semantics { heading() },

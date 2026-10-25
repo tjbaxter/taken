@@ -63,6 +63,7 @@ import androidx.compose.ui.semantics.liveRegion
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.Constraints
 import androidx.compose.ui.unit.dp
@@ -348,7 +349,9 @@ private fun Features() {
                     }
                 }
                 Spacer(Modifier.width(12.dp))
-                Text(line, style = TakenType.sans(16, FontWeight.Medium), color = colors.fg)
+                // Balanced lines for short text, so a row that wraps never leaves one word alone
+                // (https://developer.android.com/develop/ui/compose/text/style-paragraph).
+                Text(line, style = TakenType.sans(16, FontWeight.Medium).copy(lineBreak = LineBreak.Heading), color = colors.fg)
             }
         }
     }

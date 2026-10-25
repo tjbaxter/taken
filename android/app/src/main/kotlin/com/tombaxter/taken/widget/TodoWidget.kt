@@ -183,7 +183,9 @@ private fun Mic(face: TodoWidgetFace, palette: WidgetPalette) {
 @Composable
 private fun TodoLine(row: TodoWidgetRow, palette: WidgetPalette, stacked: Boolean) {
     val context = LocalContext.current
-    var modifier = GlanceModifier.fillMaxWidth().height(WidgetSizes.TOUCH)
+    // The list's scroll thumb runs down the end edge: the words and the due time stop short of it, so it never lies across
+    // the last digit of a time. [Own choice: 8 dp, a little wider than the thumb]
+    var modifier = GlanceModifier.fillMaxWidth().height(WidgetSizes.TOUCH).padding(end = SCROLLBAR_ROOM)
     WidgetTap.Open(row.url).action(context)?.let { modifier = modifier.clickable(it) }
     val dueStyle = palette.mono(if (stacked) 11f else 12f, if (row.overdue) palette.signalInk else palette.fgSubtle)
     if (stacked) {
@@ -201,3 +203,6 @@ private fun TodoLine(row: TodoWidgetRow, palette: WidgetPalette, stacked: Boolea
         }
     }
 }
+
+/** Room at the end of each to-do row for the list's scroll thumb. */
+private val SCROLLBAR_ROOM = 8.dp

@@ -14,6 +14,8 @@ import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -60,7 +62,6 @@ import androidx.compose.ui.semantics.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.LineBreak
 import androidx.compose.ui.text.style.TextAlign
-import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.tombaxter.taken.AppModel
 import com.tombaxter.taken.PaywallOrigin
@@ -300,6 +301,7 @@ fun ProgressSummary(summary: DaySummary, model: AppModel, lockInCount: Int, stre
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun AllTaken(last: String?, streak: Int, hasLast: Boolean, checkScale: Float) {
     val colors = Taken.colors
@@ -315,15 +317,21 @@ private fun AllTaken(last: String?, streak: Int, hasLast: Boolean, checkScale: F
         Column {
             Text("All taken", style = TakenType.sans(24, FontWeight.SemiBold), color = colors.signalInk)
             Spacer(Modifier.height(3.dp))
-            Row(verticalAlignment = Alignment.Bottom) {
+            // The last dose and the streak each stay whole: at large text the streak goes to a line of its own rather than
+            // being cut to "15-da…".
+            FlowRow {
                 if (last != null) {
-                    Text("Last dose ", style = TakenType.sans(14), color = colors.fgSubtle)
-                    Text(last, style = TakenType.mono(14), color = colors.fgSubtle)
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text("Last dose ", style = TakenType.sans(14), color = colors.fgSubtle)
+                        Text(last, style = TakenType.mono(14), color = colors.fgSubtle)
+                    }
                 }
                 if (streak > 1) {
-                    Text(if (hasLast) " · " else "", style = TakenType.sans(14), color = colors.fgSubtle)
-                    Text("$streak", style = TakenType.mono(14), color = colors.fgSubtle)
-                    Text("-day streak", style = TakenType.sans(14), color = colors.fgSubtle, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                    Row(verticalAlignment = Alignment.Bottom) {
+                        Text(if (hasLast) " · " else "", style = TakenType.sans(14), color = colors.fgSubtle)
+                        Text("$streak", style = TakenType.mono(14), color = colors.fgSubtle)
+                        Text("-day streak", style = TakenType.sans(14), color = colors.fgSubtle)
+                    }
                 }
             }
         }
@@ -435,7 +443,7 @@ private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt, openUrl: (Strin
             Row(verticalAlignment = Alignment.Top) {
                 Icon(Symbols.MonitorWeight, contentDescription = null, tint = colors.signalInk, modifier = Modifier.size(18.dp).padding(top = 1.dp))
                 Spacer(Modifier.width(10.dp))
-                Text(WeightCopy.OFFER, style = TakenType.sans(15, FontWeight.Medium), color = colors.fg)
+                Text(WeightCopy.OFFER, style = TakenType.sans(15, FontWeight.Medium).copy(lineBreak = LineBreak.Heading), color = colors.fg)
             }
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
                 Box(
@@ -475,7 +483,9 @@ private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt, openUrl: (Strin
                         .padding(start = 16.dp, top = 12.dp, bottom = 12.dp),
                     verticalAlignment = Alignment.CenterVertically,
                 ) {
-                    Text(RetentionCopy.WIDGET_INVITE, style = TakenType.sans(15, FontWeight.Medium), color = colors.fg)
+                    // Balanced lines for short text: never "widget" alone on a second line
+                    // (https://developer.android.com/develop/ui/compose/text/style-paragraph).
+                    Text(RetentionCopy.WIDGET_INVITE, style = TakenType.sans(15, FontWeight.Medium).copy(lineBreak = LineBreak.Heading), color = colors.fg)
                 }
                 Box(
                     Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button) { model.closeWidgetInvite(pin = false) }
