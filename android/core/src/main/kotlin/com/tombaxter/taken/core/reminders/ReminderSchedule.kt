@@ -120,14 +120,16 @@ object ReminderSchedule {
      * What a kind posts at `now`, its alarm having been armed for `armedAt`: the notifications planned, just before that
      * moment, to come from it on, and due by now, read from the stack and the to-dos as they are now (a dose logged or a
      * to-do done since leaves its notification out). A nudge is posted only on the day it is for: one that comes due
-     * after the day has rolled over is last night's, which the iPhone never shows either. Nothing when `armedAt` is still
-     * to come.
+     * after the day has rolled over is last night's, which the iPhone never shows either. A due time is posted only on
+     * its own date, since "Due 16:00" names no day [Own choice]. Nothing when `armedAt` is still to come.
      */
     fun due(snapshot: ReminderSnapshot, kind: ReminderKind, armedAt: Instant, now: Instant): List<Reminder> {
         if (armedAt > now) return emptyList()
+        val today = now.atZone(snapshot.zone).toLocalDate()
         return planned(snapshot, kind, armedAt.minusMillis(1))
             .filter { it.fireAt <= now }
             .filter { it.kind != ReminderKind.NUDGE || Reminders.isCurrent(it.day, snapshot.stack, now, snapshot.zone) }
+            .filter { it.kind != ReminderKind.TODO || it.fireAt.atZone(snapshot.zone).toLocalDate() == today }
     }
 
     /**

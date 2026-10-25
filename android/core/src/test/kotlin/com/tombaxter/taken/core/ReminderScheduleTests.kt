@@ -145,6 +145,16 @@ class ReminderScheduleTests {
     }
 
     @Test
+    fun testADueTimeFromAnEarlierDateIsNeverPostedLate() {
+        val s = snapshot(tasks = listOf(task("Call the dentist", at(2026, 10, 12, 16))))
+        assertEquals(1, ReminderSchedule.due(s, ReminderKind.TODO, at(2026, 10, 12, 16), at(2026, 10, 12, 23, 59)).size)
+        assertTrue(
+            ReminderSchedule.due(s, ReminderKind.TODO, at(2026, 10, 12, 16), at(2026, 10, 13, 0, 1)).isEmpty(),
+            "off until after midnight: \"Due 16:00\" would read as today's",
+        )
+    }
+
+    @Test
     fun testNothingIsDueBeforeItsArmedMoment() {
         val s = snapshot(tasks = listOf(task("Call the dentist", at(2026, 10, 12, 16))))
         assertTrue(ReminderSchedule.due(s, ReminderKind.TODO, at(2026, 10, 12, 16), at(2026, 10, 12, 15)).isEmpty())
