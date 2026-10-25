@@ -103,13 +103,15 @@ import com.tombaxter.taken.ui.todo.MicrophoneRationale
 import com.tombaxter.taken.ui.todo.TodoEditSheet
 import com.tombaxter.taken.ui.todo.TodoScreen
 import com.tombaxter.taken.ui.todo.TodoTypeSheet
+import com.tombaxter.taken.notify.NotificationHost
+import com.tombaxter.taken.ui.profile.NotificationRationale
 import com.tombaxter.taken.voice.VoiceHost
 
 /**
- * What the screen needs from Android beyond the model: TalkBack's state, sharing a file, picking a photo, and the
- * microphone for voice to-dos ([VoiceHost]).
+ * What the screen needs from Android beyond the model: TalkBack's state, sharing a file, picking a photo, the microphone
+ * for voice to-dos ([VoiceHost]) and notifications for the reminders ([NotificationHost]).
  */
-interface Platform : VoiceHost {
+interface Platform : VoiceHost, NotificationHost {
     /** TalkBack is on: the toast stays until it is dismissed, as VoiceOver keeps it on the iPhone. */
     val touchExploration: Boolean
     /** Shares taken-log.csv; `make` builds its text, off the main thread. */
@@ -120,7 +122,7 @@ interface Platform : VoiceHost {
 
     companion object {
         /** For tests and captures: nothing leaves the screen. */
-        val none: Platform = object : Platform, VoiceHost by VoiceHost.none {
+        val none: Platform = object : Platform, VoiceHost by VoiceHost.none, NotificationHost by NotificationHost.none {
             override val touchExploration = false
             override fun shareCsv(make: () -> String) = Unit
             override fun pickPhoto() = Unit
@@ -153,6 +155,11 @@ fun TakenRoot(model: AppModel, platform: Platform) {
             model.todo.host = platform
             onDispose { model.todo.host = VoiceHost.none }
         }
+        // Notifications are asked for, and their settings opened, by the activity on screen.
+        DisposableEffect(model, platform) {
+            model.notifications.host = platform
+            onDispose { model.notifications.host = NotificationHost.none }
+        }
         // The screen stays on only while a note is starting or being heard, so a five-minute note is never cut short by
         // the screen timeout: the view's keepScreenOn is FLAG_KEEP_SCREEN_ON, cleared the moment listening ends
         // (https://developer.android.com/develop/background-work/background-tasks/awake/screen-on).
@@ -178,6 +185,7 @@ fun TakenRoot(model: AppModel, platform: Platform) {
         SheetsHost(model)
         PaywallHost(model)
         if (model.todo.askingMicrophone) MicrophoneRationale(model.todo)
+        if (model.notifications.asking) NotificationRationale(model.notifications, model.settings.reminderMinutes)
     }
 }
 

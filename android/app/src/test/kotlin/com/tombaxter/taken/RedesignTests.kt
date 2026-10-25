@@ -15,7 +15,7 @@ import kotlin.test.assertTrue
  * The app-level cases of TakenTests/RedesignTests.swift (its pure cases are in :core's RedesignTests), adapted to Android
  * routing (SPEC-ANDROID 8.2): a voice to-do request brings To-do to the front over any sheet and over Profile, which is a
  * screen on Android (6.3); the demo screens open on their tab; a real launch opens on Today; the erase dialog says the
- * to-dos go too. The widget gallery's mode comes with the widgets (NEXT 4).
+ * to-dos go too; a tapped nudge opens its day. The widget gallery's mode comes with the widgets (NEXT 4).
  */
 @RunWith(RobolectricTestRunner::class)
 class RedesignTests {
@@ -38,6 +38,26 @@ class RedesignTests {
         assertEquals(AppTab.HISTORY, DemoScreens.make("day").tab)
         val launched = AppModel(MemoryPersistence(), StackState(), null, Profile(), null)
         assertEquals(AppTab.TODAY, launched.tab, "a real launch opens on Today")
+    }
+
+    /** A tapped nudge opens the day it was for: an earlier day's sheet over History, today's on Today (Profile closes). */
+    @Test
+    fun testAnEarlierDaysNudgeOpensThatDayOverHistory() {
+        val model = DemoScreens.make("today")
+        val yesterday = model.today.day.adding(-1)
+        model.openProfile()
+        model.openDay(fromNudge = yesterday)
+        assertEquals(AppTab.HISTORY, model.tab)
+        assertEquals(Sheet.Day(yesterday), model.sheet)
+        assertEquals(listOf<Route>(Route.Main), model.backStack.toList(), "Profile closes, as the iPhone's sheet is replaced")
+        model.openDay(fromNudge = model.today.day)
+        assertEquals(AppTab.TODAY, model.tab)
+        assertNull(model.sheet)
+
+        // The same through the link the notification carries.
+        model.handle(com.tombaxter.taken.core.reminders.NudgeLink.url(yesterday))
+        assertEquals(AppTab.HISTORY, model.tab)
+        assertEquals(Sheet.Day(yesterday), model.sheet)
     }
 
     @Test

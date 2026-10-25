@@ -24,6 +24,7 @@ import com.tombaxter.taken.core.pro.ProReason
 import com.tombaxter.taken.core.pro.ProRoute
 import com.tombaxter.taken.core.pro.ProStatus
 import com.tombaxter.taken.core.profile.Profile
+import com.tombaxter.taken.core.reminders.NudgeLink
 import com.tombaxter.taken.core.retention.RetentionCopy
 import com.tombaxter.taken.core.retention.TodayPrompt
 import com.tombaxter.taken.core.retention.TodayPrompts
@@ -171,11 +172,16 @@ class AppModel(
     demoPrompt: TodayPrompt? = null,
     /** The To-do tab's model (todos.json); tests and screens without one get an empty list in memory. */
     todoModel: TodoModel? = null,
+    /** Taken's notification permission and Profile's Reminder rows (SPEC-ANDROID 10.4); tests give their own. */
+    notificationsModel: NotificationsModel? = null,
 ) {
     /** The To-do tab: the one list, the mic and its sheets. */
     val todo: TodoModel = todoModel ?: TodoModel(
         MemoryTodoPersistence(), TodoState(), clockNow = clockNow, zone = zone, locale = locale, isDemo = isDemo,
     )
+
+    /** Notifications: Android's permission asked in context, and what Profile's Reminder section says about it. */
+    val notifications: NotificationsModel = notificationsModel ?: NotificationsModel(isDemo = isDemo)
 
     var state: StackState by mutableStateOf(initialState)
         private set
@@ -260,6 +266,7 @@ class AppModel(
     init {
         recomputeStats()
         todo.attach(this)
+        notifications.attach(this)
     }
 
     // MARK: Derived
@@ -290,7 +297,7 @@ class AppModel(
     /**
      * The one quiet row under Today's progress line, if any. In CORE no widget exists yet, so the widget invite waits
      * (the iPhone waits the same way until WidgetKit has answered); the trial notice and the weight offer come with their
-     * phases. The nudge offer waits for Reminders (NEXT 3): until this build can post the nudge, Today never offers one.
+     * phases. The nudge offer is back with Reminders (NEXT 3), which can post the nudge it offers.
      */
     val todayPrompt: TodayPrompt?
         get() {
@@ -338,10 +345,14 @@ class AppModel(
         if (dayChanged) recomputeStats()
     }
 
-    /** Taken came to the front (`ON_START`): rebuild, since the time zone or the day may have changed while away. */
+    /**
+     * Taken came to the front (`ON_START`): rebuild, since the time zone or the day may have changed while away; read
+     * Android's notification answer again and rebuild the reminders (the iPhone's `Reminders.reschedule` on foreground).
+     */
     fun didBecomeActive() {
         apply(state)
         todo.didBecomeActive()
+        notifications.didBecomeActive()
     }
 
     /** Taken went to the background (`ON_STOP`): the stack's edit mode ends, so the next open is a tap that logs again. */
@@ -418,10 +429,18 @@ class AppModel(
      */
     fun handle(url: String) {
         if (!url.startsWith("taken://")) return
+        // A tapped nudge, its OPEN, or the note that its TAKE ALL logged nothing: the day it was for.
+        val nudgeDay = NudgeLink.day(url)
+        if (nudgeDay != null) {
+            openDay(fromNudge = nudgeDay)
+            return
+        }
         val todoRoute = TodoCaptureRoute.route(url)
         if (todoRoute != null) {
             openTodoTab()
             if (todoRoute == TodoCaptureRoute.Route.RECORD) todo.requestRecording()
+            // A tapped due-time notification: its to-do scrolls into view with a wash.
+            TodoCaptureRoute.taskId(url)?.let(todo::reveal)
             return
         }
         val route = ProRoute.parse(url)
@@ -434,6 +453,22 @@ class AppModel(
             return
         }
         if (!access.allowsLogging) presentPaywall(PaywallOrigin.LINK)
+    }
+
+    /**
+     * A tapped nudge opens on the day it was for (the iPhone's `openDay(fromNudge:)`): today's on Today, an earlier day's
+     * on its day sheet over History. Profile and any other sheet close, as the iPhone's sheet is replaced.
+     */
+    fun openDay(fromNudge: DayKey) {
+        apply(state)
+        while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
+        if (fromNudge == today.day) {
+            tab = AppTab.TODAY
+            sheet = null
+        } else {
+            tab = AppTab.HISTORY
+            sheet = Sheet.Day(fromNudge)
+        }
     }
 
     /**
@@ -670,19 +705,45 @@ class AppModel(
     // MARK: One-time rows
 
     /**
-     * Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. Until Reminders
-     * (NEXT 3) the offer shows only in demo captures ([NUDGE_AVAILABLE]); with Reminders, Turn on asks for
-     * POST_NOTIFICATIONS first and keeps `reminderEnabled` only once it is granted, as the iPhone's setReminderEnabled does.
+     * Turn on or Not now on the evening nudge offer. Either answer is kept, so the row never comes back. Turn on is, with
+     * Profile's switch, where Android asks for notifications (`requirePro` first): allowed, the nudge comes on and the
+     * toast says when ("Nudge on at 20:00"); refused for good, "Notifications are off for Taken in Settings".
      */
     fun answerNudgeOffer(turnOn: Boolean) {
         if (isDemo) demoPrompt = null
-        if (!turnOn) {
-            write { it.settings.nudgeOfferDone = true }
+        write { it.settings.nudgeOfferDone = true }
+        if (!turnOn) return
+        requirePro { turnOnNudge(fromOffer = true) }
+    }
+
+    /**
+     * Profile's Nudge switch. Turning it off always works. Turning it on needs Pro once something has been logged (no nudge
+     * is scheduled without it): locked, the switch opens the paywall, and the nudge, with Android's prompt, comes on once
+     * Pro does (the iPhone's `setReminder(_:anchor:)`). Either answers Today's offer.
+     */
+    fun setReminder(enabled: Boolean) {
+        if (!enabled) {
+            write { it.settings.setReminder(false) }
+            notifications.nudgeTurnedOff()
             return
         }
-        requirePro {
-            write { it.settings.setReminder(true) }
-            show(Toast(nextToastId(), RetentionCopy.NUDGE_ON, Fmt.minutes(settings.reminderMinutes)))
+        requirePro { turnOnNudge(fromOffer = false) }
+    }
+
+    /** Profile > Reminder > Time: the nudge moves at once (every write rebuilds the reminders). */
+    fun setReminderMinutes(minutes: Int) {
+        write { it.settings.reminderMinutes = minutes }
+    }
+
+    /** The iPhone's `setReminderEnabled(true)`: the nudge comes on only once Android shows Taken's notifications. */
+    private fun turnOnNudge(fromOffer: Boolean) {
+        notifications.request { granted ->
+            if (granted) {
+                write { it.settings.setReminder(true) }
+                if (fromOffer) show(Toast(nextToastId(), RetentionCopy.NUDGE_ON, Fmt.minutes(settings.reminderMinutes)))
+            } else if (fromOffer && notifications.notificationsDenied) {
+                show(Toast(nextToastId(), RetentionCopy.NOTIFICATIONS_OFF))
+            }
         }
     }
 
@@ -773,8 +834,8 @@ class AppModel(
     }
 
     companion object {
-        /** This build can post the evening nudge. False until Reminders (NEXT 3), so Today never offers it before then. */
-        const val NUDGE_AVAILABLE = false
+        /** This build can post the evening nudge (Reminders, NEXT 3), so Today offers it. */
+        const val NUDGE_AVAILABLE = true
 
         /** Erase all data's dialog, said before it acts (Android wording, SPEC-ANDROID 6.4). */
         const val ERASE_MESSAGE =

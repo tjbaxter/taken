@@ -260,16 +260,24 @@ class TodayRowTests {
         assertNull(repair.todayPrompt, "its close hides it")
     }
 
-    /** Android: until Reminders can post the nudge (NEXT 3), Today never offers to turn one on. */
+    /**
+     * With Reminders (NEXT 3) this build can post the nudge, so Today offers it right after the stack is added, until it
+     * is answered (RetentionTests.testTheNudgeOfferShowsRightAfterTheStackIsAddedUntilItIsAnswered, through the model).
+     */
     @Test
-    fun testTodayOffersNoNudgeThisBuildCannotSend() {
+    fun testTodayOffersTheNudgeOnceThisBuildCanSendIt() {
         val zone = ZoneId.of("Europe/London")
         val now = ZonedDateTime.of(2026, 10, 21, 9, 0, 0, 0, zone).toInstant()
         val vd3 = Item(name = "Vitamin D3", code = "VD3", frequency = Frequency.Daily(1), createdAt = now.minusSeconds(86_400), sortIndex = 0)
         val model = model(StackState(items = listOf(vd3)), now, zone)
+        assertTrue(AppModel.NUDGE_AVAILABLE)
         assertFalse(model.settings.reminderEnabled)
         assertFalse(model.settings.nudgeOfferDone, "a new stack, the offer never answered")
-        assertNull(model.todayPrompt, "no Turn on for a nudge that would never come")
+        assertEquals(TodayPrompt.NudgeOffer(20 * 60), model.todayPrompt, "Nudge me at 20:00 if anything's left")
+        model.answerNudgeOffer(turnOn = false)
+        assertNull(model.todayPrompt, "answered, it never comes back")
+        assertTrue(model.settings.nudgeOfferDone)
+        assertFalse(model.settings.reminderEnabled)
     }
 
     // MARK: Saving

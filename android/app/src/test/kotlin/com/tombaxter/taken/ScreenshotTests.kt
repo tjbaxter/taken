@@ -143,6 +143,35 @@ class ScreenshotTests {
     }
 
     /**
+     * Profile's Reminder section in every look (SPEC-ANDROID 10.4), scrolled to it: the nudge on with its time, the
+     * Settings link once notifications are off, the nudge's own channel off, and locked.
+     */
+    @Test
+    fun reminderSettings() {
+        start()
+        for (look in looks) {
+            for (screen in DemoScreens.reminderScreens) {
+                capture("${screen}_${look.raw}", DemoScreens.make(screen, look)) {
+                    compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE).performScrollTo()
+                }
+            }
+        }
+    }
+
+    /** The Reminder section and the explanation at 200% text: nothing is cut to a word. */
+    @Test
+    @Config(fontScale = 2f)
+    fun reminderSettingsLargerText() {
+        start()
+        for (screen in listOf("settings-reminder", "settings-reminder-off", "settings-reminder-locked")) {
+            capture("${screen}_signal_font200", DemoScreens.make(screen)) {
+                compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE).performScrollTo()
+            }
+        }
+        capture("notify-ask_signal_font200", DemoScreens.make("notify-ask"))
+    }
+
+    /**
      * 200% text, Android 14's largest (https://developer.android.com/about/versions/14/features), set as the device's
      * font scale (https://robolectric.org/device-configuration/) so the sheets, which are their own windows, scale too.
      */

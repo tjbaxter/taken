@@ -44,7 +44,15 @@ object DemoScreens {
         // said, the undo bar, the edit and type sheets, and the microphone's rationale.
         "todo", "todo-recording", "todo-cap", "todo-empty", "todo-blocker", "todo-unavailable", "todo-saved",
         "todo-deleted", "todo-edit", "todo-type", "todo-mic-ask",
+        // Reminders (SPEC-ANDROID 10.4): the explanation before Android's notification prompt comes again.
+        "notify-ask",
     )
+
+    /**
+     * Profile's Reminder section (SPEC-ANDROID 10.4), drawn scrolled to it: the nudge on with its time; notifications off
+     * for Taken, with the Settings link; only the nudge's channel off; and locked, where the nudge needs Taken Pro.
+     */
+    val reminderScreens = listOf("settings-reminder", "settings-reminder-off", "settings-reminder-channel", "settings-reminder-locked")
 
     /**
      * The to-dos a screen shows: TodoDemo's one list (a time tonight, a day this week, two done today, and what the
@@ -84,9 +92,11 @@ object DemoScreens {
             val today = clock.day(now)
             state = state.copy(doses = state.doses.filter { clock.day(it) != today })
         }
-        if (screen == "today-nudge-offer") state = state.copy(settings = state.settings.copy(reminderEnabled = false))
+        if (screen == "today-nudge-offer" || screen == "settings-reminder-off" || screen == "settings-reminder-locked") {
+            state = state.copy(settings = state.settings.copy(reminderEnabled = false))
+        }
         state = state.copy(settings = state.settings.copy(theme = look))
-        val locked = screen == "locked"
+        val locked = screen == "locked" || screen == "settings-reminder-locked"
         val persistence = MemoryPersistence(stack = state)
         val ledger = ProLedger(firstSeenAt = now.minusSeconds(86_400L * 60), firstDoseAt = state.doses.minOfOrNull { it.takenAt })
         val prompt = when (screen) {
@@ -134,6 +144,16 @@ object DemoScreens {
             "set-time" -> model.state.items.firstOrNull { it.name == "Magnesium" }?.let { model.sheet = Sheet.SetTime(it.id) }
             "day" -> model.sheet = Sheet.Day(DemoData.sheetDay(now, zone))
             "settings" -> model.openProfile()
+            "settings-reminder", "settings-reminder-locked" -> model.openProfile()
+            "settings-reminder-off" -> {
+                model.openProfile()
+                model.notifications.stageDemo(denied = true)
+            }
+            "settings-reminder-channel" -> {
+                model.openProfile()
+                model.notifications.stageDemo(channelOff = true)
+            }
+            "notify-ask" -> model.notifications.stageDemo(asking = true)
             "todo-recording" -> todo.showDemoRecording(lastMinute = false)
             "todo-cap" -> todo.showDemoRecording(lastMinute = true)
             "todo-blocker" -> todo.stageDemo(blocker = TodoModel.Blocker.MICROPHONE)
