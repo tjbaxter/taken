@@ -20,6 +20,9 @@ kotlin {
 
 dependencies {
     implementation(libs.kotlinx.serialization.json)
+    // Kotlin's own coroutines (SPEC-ANDROID 3.1's rule: Kotlin's own libraries only): the to-do sorter's parts and
+    // deadlines (core/todo/NoteSorter.kt), as the iPhone's actor and tasks. Sends nothing anywhere.
+    implementation(libs.kotlinx.coroutines.core)
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test.junit)
 }
