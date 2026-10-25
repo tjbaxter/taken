@@ -471,7 +471,8 @@ class TodoModel(
         }
 
         override fun onInterrupted() {
-            if (phase == TodoCapture.Phase.LISTENING) scope.launch { finishListening(TodoStopReason.INTERRUPTED) }
+            // The model's scope, not the constructor's parameter of the same name.
+            if (phase == TodoCapture.Phase.LISTENING) this@TodoModel.scope.launch { finishListening(TodoStopReason.INTERRUPTED) }
         }
     }
 
