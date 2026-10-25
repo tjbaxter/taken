@@ -6,8 +6,8 @@ import XCTest
 /// mode, out of the tap's way.
 final class TodayRowTests: XCTestCase {
 
-    /// The standard demo stack: Vitamin D3 taken at 07:42, Fish Oil 1 of 2, Magnesium pending, and Zinc (every other
-    /// day, taken yesterday) under Not today.
+    /// The standard demo stack: Vitamin D3 taken at 07:42, Fish Oil 1 of 2 (2x daily), Magnesium pending, and Zinc
+    /// (every other day, taken yesterday) under Not today.
     @MainActor
     private func demoModel(_ screen: String = "today") -> AppModel {
         AppModel.fromLaunchArguments(["Taken", "-demo", "-screen", screen])
@@ -25,16 +25,21 @@ final class TodayRowTests: XCTestCase {
         let model = demoModel()
         let fish = try row("Fish Oil", in: model)
         XCTAssertTrue(fish.isPending)
+        XCTAssertEqual(fish.takenCount, 1, "2x daily, the morning dose taken")
         model.tap(fish)
 
-        XCTAssertEqual(try row("Fish Oil", in: model).takenCount, fish.takenCount + 1)
+        let after = try row("Fish Oil", in: model)
+        XCTAssertEqual(after.takenCount, 2, "the tap fills the second arc")
+        XCTAssertFalse(after.isPending)
         XCTAssertEqual(model.toast?.message, "Fish Oil taken at", "the toast with Undo, as the ring had")
         XCTAssertNotNil(model.toast?.undo)
         XCTAssertEqual(model.rowLogs, [fish.item.id: 1], "the ring pops and the row washes here, and nowhere else")
 
-        model.tap(try row("Fish Oil", in: model))
-        XCTAssertFalse(try row("Fish Oil", in: model).isPending, "2x daily: the second tap fills the second arc")
-        XCTAssertEqual(model.rowLogs[fish.item.id], 2, "and plays the moment again")
+        let magnesium = try row("Magnesium", in: model)
+        model.tap(magnesium)
+        XCTAssertEqual(model.rowLogs, [fish.item.id: 1, magnesium.item.id: 1], "each row plays its own moment")
+        model.tap(try row("Magnesium", in: model))
+        XCTAssertEqual(model.rowLogs[magnesium.item.id], 1, "a tap on it now shows the times, with no moment")
     }
 
     @MainActor
