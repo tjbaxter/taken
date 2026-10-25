@@ -87,8 +87,8 @@ import kotlin.test.assertTrue
  *
  * Each frame is 1215 x 2160 (405 x 720 dp at xxhdpi, 9:16): a two-line tagline in Taken's words and type, one word lit
  * as on the iPhone's store frames (tools/store-shots/frames.mjs), over the real screen on a rounded card, no device
- * frame and no status bar. The screen is the app at 404 x 760 dp drawn at 2.25 px to the dp (a 360 dpi phone), so it lays
- * out as on a phone and stays sharp: no picture is scaled. The demo is the neutral store set (no medicine names; the
+ * frame and no status bar. The screen is the app at 400 x 830 dp drawn at 2.1 px to the dp (a 336 dpi phone of about 20:9),
+ * so it lays out as on a phone and stays sharp: no picture is scaled. The demo is the neutral store set (no medicine names; the
  * listing check forbids them) on its Thursday at 21:41, in Signal. The story, in order (Tom's brief, 25 Oct 2026): Today
  * where one tap logs, All taken, History, a voice to-do being said, the widget; Taken Pro is left out, since the paywall shows
  * prices. [Own choices: the layout, the sizes, the colours of the widget frame's wallpaper and the tagline words.]
@@ -215,7 +215,7 @@ class PlayStoreScreenshotTests {
 
     /**
      * The widget frame: the stack widget at 4x4 on a home screen's wallpaper, drawn by Glance into an AppWidgetHostView
-     * as WidgetScreenshotTests draws it, at the card's 360 dpi so it sits on the 404 dp screen as on a phone. The
+     * as WidgetScreenshotTests draws it, at the card's 336 dpi so it sits on the 400 dp screen as on a phone. The
      * wallpaper is warm and plain so the dark widget reads against it. [Own choice]
      */
     @Composable
@@ -250,7 +250,7 @@ class PlayStoreScreenshotTests {
     private fun stackWidget(context: Context): View {
         val config = Configuration(context.resources.configuration).apply { densityDpi = SCREEN_DPI }
         val phone = ContextThemeWrapper(context, 0).apply { applyOverrideConfiguration(config) }
-        assertEquals(SCREEN_DENSITY, phone.resources.displayMetrics.density, "the widget is drawn at the card's density")
+        assertEquals(SCREEN_DENSITY, phone.resources.displayMetrics.density, 0.001f, "the widget is drawn at the card's density")
         val now = DemoScreens.now(DemoStack.NEUTRAL)
         val state = DemoData.state(now, allTaken = false, zone = DemoScreens.zone, stack = DemoStack.NEUTRAL)
         assertTrue(state.items.all { it.name in NEUTRAL_STACK })
@@ -280,19 +280,19 @@ class PlayStoreScreenshotTests {
         const val FRAME_HEIGHT = 2160
 
         /**
-         * The screen on the card: 909 x 1710 pixels, a 404 x 760 dp phone at 360 dpi (2.25 px to the dp), tall enough that
-         * All taken shows Not today whole above the tab bar.
+         * The screen on the card: 840 x 1743 pixels, a 400 x 830 dp phone at 336 dpi (2.1 px to the dp, about 20:9), tall
+         * enough that Today shows Not today whole above Take all, and All taken above the tab bar.
          */
-        const val SCREEN_DPI = 360
-        const val SCREEN_DENSITY = 2.25f
-        val CARD_WIDTH = 303.dp
-        val CARD_HEIGHT = 570.dp
+        const val SCREEN_DPI = 336
+        const val SCREEN_DENSITY = 2.1f
+        val CARD_WIDTH = 280.dp
+        val CARD_HEIGHT = 581.dp
         val CARD_TOP = 114.dp
         val CARD_RADIUS = 16.dp
         val TAGLINE_TOP = 22.dp
 
-        /** Where the widget sits on the wallpaper, in the screen's dp: a little above the middle of 760. */
-        val WIDGET_TOP = 136.dp
+        /** Where the widget sits on the wallpaper, in the screen's dp: a little above the middle of 830. */
+        val WIDGET_TOP = 170.dp
 
         /** Google's limit for taglines. */
         const val MAX_TAGLINE_SHARE = 0.20f
