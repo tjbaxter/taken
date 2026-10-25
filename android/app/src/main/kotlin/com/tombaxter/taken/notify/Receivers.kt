@@ -48,8 +48,9 @@ private fun BroadcastReceiver.runAsync(context: Context, work: suspend (AppConta
 /** A kind's alarm went off: the rebuild posts what came due and arms that kind's next moment. */
 class ReminderAlarmReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action?.startsWith(AndroidAlarms.ACTION_PREFIX) != true) return
-        runAsync(context) { it.reminders.rebuild() }
+        val kind = AndroidAlarms.kind(intent.action) ?: return
+        val armedAt = intent.getLongExtra(AndroidAlarms.EXTRA_ARMED_AT, -1L).takeIf { it >= 0 }?.let(Instant::ofEpochMilli)
+        runAsync(context) { it.reminders.alarmWentOff(kind, armedAt) }
     }
 }
 

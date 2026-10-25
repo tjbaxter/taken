@@ -26,6 +26,8 @@ import com.tombaxter.taken.notify.NotificationHost
 class NotificationsModel(
     /** Rebuilds the reminders: on every return to the front, and the moment notifications are allowed. */
     private val rebuild: () -> Unit = {},
+    /** Withdraws posted notifications by tag (`AndroidNotifications.withdraw`). */
+    private val withdraw: (List<String>) -> Unit = {},
     val isDemo: Boolean = false,
 ) {
     /** Android's side, from the activity on screen. */
@@ -59,15 +61,24 @@ class NotificationsModel(
     }
 
     /**
-     * Reads Android's answer again. The iPhone shows the row when notifications are denied while the nudge is on; a row
-     * shown after a no stays until notifications are allowed.
+     * Reads Android's answer again, as the iPhone does on every return to the front: the row shows while notifications
+     * are off and the nudge is on (`notificationsDenied = permission == .denied && reminderEnabled`).
      */
     fun refresh() {
         if (isDemo) return
         val nudgeOn = app?.settings?.reminderEnabled == true
         val allowed = host.notificationsAllowed
-        if (allowed) notificationsDenied = false else if (nudgeOn) notificationsDenied = true
+        notificationsDenied = !allowed && nudgeOn
         nudgeChannelOff = allowed && nudgeOn && host.nudgeChannelOff
+    }
+
+    /**
+     * A nudge was opened (a tap, or its OPEN): it goes from the shade, as an answered notification goes on the iPhone. A
+     * tap dismisses it already (`setAutoCancel`); an action button does not on Android.
+     */
+    fun nudgeOpened(day: com.tombaxter.taken.core.day.DayKey) {
+        if (isDemo) return
+        withdraw(listOf(com.tombaxter.taken.core.reminders.Reminders.REQUEST_PREFIX + day.ordinal))
     }
 
     /** The nudge was turned off in Profile: its row goes with it, as the iPhone's does. */

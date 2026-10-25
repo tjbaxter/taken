@@ -156,6 +156,25 @@ class ReminderTests {
         assertNotNull(posted(Reminders.REQUEST_PREFIX + monday.ordinal), "a rebuild leaves tonight's nudge while something is pending")
     }
 
+    /** An alarm carries its own moment, so a lost record of it (a kill before it was written) never loses the nudge. */
+    @Test
+    fun testAnAlarmThatGoesOffPostsEvenIfItsRecordWasLost() {
+        allowNotifications()
+        seedStack()
+        rebuild()
+        @Suppress("DEPRECATION")
+        val operation = assertNotNull(alarm(ReminderKind.NUDGE)).operation
+        val carried = shadowOf(operation).savedIntent.getLongExtra(AndroidAlarms.EXTRA_ARMED_AT, -1L)
+        assertEquals(at(2026, 10, 12, 21).toEpochMilli(), carried, "the alarm carries the moment it was armed for")
+
+        com.tombaxter.taken.notify.PreferenceArmedMoments(app)[ReminderKind.NUDGE] = null
+        now = at(2026, 10, 12, 21, 3)
+        runBlocking { container.reminders.alarmWentOff(ReminderKind.NUDGE, java.time.Instant.ofEpochMilli(carried)) }
+        assertEquals("1 pending: FSH", posted(Reminders.REQUEST_PREFIX + monday.ordinal)?.text())
+        assertEquals(ReminderKind.NUDGE, AndroidAlarms.kind(AndroidAlarms.ACTION_PREFIX + "NUDGE"))
+        assertNull(AndroidAlarms.kind("something.else"))
+    }
+
     @Test
     fun testNothingIsArmedOrPostedWithoutNotifications() {
         seedStack()

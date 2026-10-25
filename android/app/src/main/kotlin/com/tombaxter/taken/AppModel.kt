@@ -432,6 +432,7 @@ class AppModel(
         // A tapped nudge, its OPEN, or the note that its TAKE ALL logged nothing: the day it was for.
         val nudgeDay = NudgeLink.day(url)
         if (nudgeDay != null) {
+            notifications.nudgeOpened(nudgeDay)
             openDay(fromNudge = nudgeDay)
             return
         }

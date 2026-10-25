@@ -144,7 +144,10 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
             val clockNow = { Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS) }
             // The To-do tab's model lives in the app's scope, not this ViewModel's: a note being saved when the activity
             // finishes (back, a swipe home) still reaches its file.
-            val notifications = NotificationsModel(rebuild = { container.scope.launch { container.reminders.rebuild() } })
+            val notifications = NotificationsModel(
+                rebuild = { container.scope.launch { container.reminders.rebuild() } },
+                withdraw = container.notifications::withdraw,
+            )
             val todo = TodoModel(
                 persistence = container.todoPersistence,
                 initialState = todos,

@@ -1,6 +1,7 @@
 package com.tombaxter.taken.notify
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.AlarmManager
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -61,22 +62,29 @@ class AndroidAlarms(private val context: Context) : AlarmPort {
     private val manager: AlarmManager? get() = context.getSystemService(AlarmManager::class.java)
 
     override fun arm(kind: ReminderKind, at: Instant) {
-        manager?.setWindow(AlarmManager.RTC_WAKEUP, at.toEpochMilli(), ReminderSchedule.WINDOW.toMillis(), operation(kind))
+        manager?.setWindow(AlarmManager.RTC_WAKEUP, at.toEpochMilli(), ReminderSchedule.WINDOW.toMillis(), operation(kind, at))
     }
 
     override fun cancel(kind: ReminderKind) {
-        manager?.cancel(operation(kind))
+        manager?.cancel(operation(kind, null))
     }
 
-    private fun operation(kind: ReminderKind): PendingIntent = PendingIntent.getBroadcast(
-        context,
-        kind.ordinal,
-        Intent(context, ReminderAlarmReceiver::class.java).setAction(ACTION_PREFIX + kind.name),
-        PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
-    )
+    /** The kind's one PendingIntent (told apart by its action), carrying the moment it was armed for. */
+    private fun operation(kind: ReminderKind, at: Instant?): PendingIntent {
+        val intent = Intent(context, ReminderAlarmReceiver::class.java).setAction(ACTION_PREFIX + kind.name)
+        if (at != null) intent.putExtra(EXTRA_ARMED_AT, at.toEpochMilli())
+        return PendingIntent.getBroadcast(context, kind.ordinal, intent, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+    }
 
     companion object {
         const val ACTION_PREFIX = "com.tombaxter.taken.reminder."
+        const val EXTRA_ARMED_AT = "com.tombaxter.taken.reminder.ARMED_AT"
+
+        /** The kind an alarm's intent is for, from its action. */
+        fun kind(action: String?): ReminderKind? =
+            action?.takeIf { it.startsWith(ACTION_PREFIX) }?.removePrefix(ACTION_PREFIX)?.let { name ->
+                ReminderKind.entries.firstOrNull { it.name == name }
+            }
     }
 }
 
@@ -91,11 +99,13 @@ class PreferenceArmedMoments(context: Context) : ArmedMoments {
     override fun get(kind: ReminderKind): Instant? =
         prefs.getLong(key(kind), -1L).takeIf { it >= 0 }?.let(Instant::ofEpochMilli)
 
+    /** Written at once (`commit`): rebuilds run off the main thread, and an alarm must find its moment after a kill. */
+    @SuppressLint("ApplySharedPref")
     override fun set(kind: ReminderKind, at: Instant?) {
         if (get(kind) == at) return
         val edit = prefs.edit()
         if (at == null) edit.remove(key(kind)) else edit.putLong(key(kind), at.toEpochMilli())
-        edit.apply()
+        edit.commit()
     }
 
     private fun key(kind: ReminderKind) = "armed.${kind.name.lowercase()}"

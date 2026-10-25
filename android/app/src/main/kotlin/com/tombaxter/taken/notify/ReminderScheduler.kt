@@ -87,6 +87,22 @@ class ReminderScheduler(
         }
     }
 
+    /**
+     * A kind's alarm went off. Its moment is known to the rebuild from [armed]; the alarm's own copy of it stands in if
+     * that was lost (a kill before it was written), since an alarm that goes off was always armed.
+     */
+    suspend fun alarmWentOff(kind: ReminderKind, armedAt: Instant?) {
+        if (armedAt != null) {
+            withContext(dispatcher) {
+                mutex.withLock {
+                    val known = armed[kind]
+                    if (known == null || known > armedAt) armed[kind] = armedAt
+                }
+            }
+        }
+        rebuild()
+    }
+
     private suspend fun rebuildOnce() {
         // A file that cannot be read now (a full disk mid-read): leave everything as it is until the next rebuild.
         val s = snapshot() ?: return

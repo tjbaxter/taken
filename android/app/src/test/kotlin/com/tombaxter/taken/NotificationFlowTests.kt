@@ -60,7 +60,12 @@ class NotificationFlowTests {
     private val zone: ZoneId = ZoneId.of("Europe/London")
     private val now: Instant = ZonedDateTime.of(2026, 10, 21, 9, 0, 0, 0, zone).toInstant()
 
-    private class Rig(val model: AppModel, val host: FakeNotificationHost, val rebuilds: () -> Int)
+    private class Rig(
+        val model: AppModel,
+        val host: FakeNotificationHost,
+        val rebuilds: () -> Int,
+        val withdrawn: List<String>,
+    )
 
     private fun rig(
         host: FakeNotificationHost = FakeNotificationHost(),
@@ -73,13 +78,14 @@ class NotificationFlowTests {
         state.settings.reminderEnabled = nudgeOn
         if (logged) state.logDose(vd3.id, now.minusSeconds(86_400), zone)
         var rebuilds = 0
-        val notifications = NotificationsModel(rebuild = { rebuilds += 1 })
+        val withdrawn = mutableListOf<String>()
+        val notifications = NotificationsModel(rebuild = { rebuilds += 1 }, withdraw = { withdrawn += it })
         notifications.host = host
         val model = AppModel(
             MemoryPersistence(stack = state), state, ProLedger(firstSeenAt = now), Profile(), null, pro,
             clockNow = { now }, zone = { zone }, locale = { Locale.US }, notificationsModel = notifications,
         )
-        return Rig(model, host) { rebuilds }
+        return Rig(model, host, { rebuilds }, withdrawn)
     }
 
     @Test
@@ -224,6 +230,17 @@ class NotificationFlowTests {
         assertEquals(20 * 60, rig.model.settings.reminderMinutes, "13 hours after a 07:00 wake-up")
         rig.model.setReminderMinutes(21 * 60 + 30)
         assertEquals(21 * 60 + 30, rig.model.settings.reminderMinutes)
+    }
+
+    /** OPEN on a nudge takes it from the shade, as an answered notification goes on the iPhone (a tap does by itself). */
+    @Test
+    fun testAnOpenedNudgeGoesFromTheShade() {
+        val rig = rig(FakeNotificationHost(allowed = true), nudgeOn = true)
+        val yesterday = rig.model.today.day.adding(-1)
+        rig.model.handle(NudgeLink.url(yesterday))
+        assertEquals(listOf(com.tombaxter.taken.core.reminders.Reminders.REQUEST_PREFIX + yesterday.ordinal), rig.withdrawn)
+        assertEquals(AppTab.HISTORY, rig.model.tab)
+        assertEquals(Sheet.Day(yesterday), rig.model.sheet)
     }
 
     /** A tapped nudge opens its day; a tapped due time opens To-do on its task with the wash. */
