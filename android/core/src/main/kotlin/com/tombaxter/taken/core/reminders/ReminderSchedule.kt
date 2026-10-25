@@ -5,6 +5,10 @@ import com.tombaxter.taken.core.day.DayKey
 import com.tombaxter.taken.core.format.Fmt
 import com.tombaxter.taken.core.model.StackState
 import com.tombaxter.taken.core.pro.NudgeWindow
+import com.tombaxter.taken.core.pro.PlanPrice
+import com.tombaxter.taken.core.pro.ProLedger
+import com.tombaxter.taken.core.pro.ProStatus
+import com.tombaxter.taken.core.pro.TrialReminderMark
 import com.tombaxter.taken.core.todo.TodoNotifications
 import com.tombaxter.taken.core.todo.TodoTask
 import java.net.URI
@@ -43,8 +47,8 @@ data class Reminder(
 
 /**
  * Where the trial reminder plugs in. Taken Pro (NEXT 2, SPEC-ANDROID 9.7) owns its rules (`TrialReminder.plan`, the mark
- * in pro.json); Reminders owns its delivery: the "Trial reminder" channel and its alarm. Until the integrator plugs the
- * Pro lane's plan in here, [none] plans nothing and the trial reminder's words stay on Today (`trialReminderDeliverable`).
+ * in pro.json); Reminders owns its delivery: the "Trial reminder" channel and its alarm. The app plugs in
+ * [PlannedTrialReminder], read from the files with every rebuild; [none] plans nothing (tests, and a phone with no trial).
  * The scheduler calls it off the main thread, one rebuild at a time.
  */
 interface TrialReminderSlot {
@@ -54,19 +58,66 @@ interface TrialReminderSlot {
     /** A delivered trial reminder still applies at `now` (a renewing trial, Profile's Trial reminder on). */
     fun stillApplies(now: Instant): Boolean
 
-    /** It was posted at `now`: the Pro lane records it in pro.json (`ProLedgers.withTrialReminder`), so it never comes twice. */
-    fun posted(reminder: Reminder, now: Instant)
+    /**
+     * It was posted at `now`: Taken Pro records it in pro.json (`ProLedgers.withTrialReminder`), so it never comes twice.
+     * Suspends until the record is written, so a receiver's broadcast does not end before it.
+     */
+    suspend fun posted(reminder: Reminder, now: Instant)
 
     companion object {
         /** The iPhone's identifier for the one trial reminder (Shared/TrialReminder.swift). */
-        const val TAG = "taken.pro.trial-end"
+        const val TAG = TrialReminder.IDENTIFIER
 
-        /** No trial reminder planned (until the Pro lane's plan is plugged in). */
+        /** No trial reminder planned. */
         val none: TrialReminderSlot = object : TrialReminderSlot {
             override fun planned(at: Instant): Reminder? = null
             override fun stillApplies(now: Instant): Boolean = false
-            override fun posted(reminder: Reminder, now: Instant) = Unit
+            override suspend fun posted(reminder: Reminder, now: Instant) = Unit
         }
+    }
+}
+
+/**
+ * Taken Pro's trial reminder in the scheduler's slot (SPEC-ANDROID 9.7 and 10.4), read from the files of one rebuild:
+ * Pro's answer (the source's, or pro.json's cached one in a fresh process), pro.json for the prices and the mark, and the
+ * stack for the settings and the doses. The plan is [TrialReminder.plan], the rule `AppModel.trialReminderPlan()` and
+ * `TrialReminder.planFor` use: one reminder, 3 days before a renewing trial ends, at the nudge time or 10:00, while
+ * Profile's Trial reminder is on, and never again once it has gone out ([ProLedger.trialReminder]).
+ *
+ * The mark: the iPhone writes `TrialReminder.nextMark` when it hands the request to iOS, which then delivers it at its
+ * moment whatever happens. On Android Taken's own alarm posts it, and an alarm Doze held back can still be moved by a
+ * later nudge time, so the reminder counts as handed over when it is posted, and [posted] writes the mark then
+ * [Own choice: the same `nextMark` rule, applied at Android's moment of delivery]. A delivered one is withdrawn once it no
+ * longer applies ([stillApplies]: the trial converted, was cancelled, hit a billing issue, or the switch went off).
+ */
+class PlannedTrialReminder(
+    private val status: ProStatus?,
+    private val ledger: ProLedger?,
+    private val state: StackState,
+    private val zone: ZoneId,
+    /** Writes `ProLedger.trialReminder` (`ProLedgers.withTrialReminder`). */
+    private val record: suspend (TrialReminderMark?) -> Unit,
+) : TrialReminderSlot {
+    /** The price the trial renews at, as Play last gave it (pro.json's prices for the plan Pro's answer names). */
+    private val price: PlanPrice? = run {
+        val plan = status?.renewsTo ?: status?.plan ?: return@run null
+        if (plan.isSubscription) ledger?.prices?.get(plan.productId) else null
+    }
+
+    /** The plan as `TrialReminder.plan` makes it at `at`. */
+    fun plan(at: Instant): TrialReminder.Plan? = TrialReminder.plan(status, price, state, at, zone, ledger?.trialReminder)
+
+    override fun planned(at: Instant): Reminder? = plan(at)?.let {
+        Reminder(ReminderKind.TRIAL, TrialReminderSlot.TAG, it.fireAt, title = null, body = it.body)
+    }
+
+    override fun stillApplies(now: Instant): Boolean =
+        state.settings.trialReminderEnabled && TrialReminder.isRenewingTrial(status, now)
+
+    override suspend fun posted(reminder: Reminder, now: Instant) {
+        val handed = TrialReminder.Plan(reminder.fireAt, reminder.fireAt.atZone(zone), reminder.body)
+        val mark = TrialReminder.nextMark(handed, status?.expiresAt, ledger?.trialReminder, now)
+        if (mark != ledger?.trialReminder) record(mark)
     }
 }
 
@@ -178,6 +229,9 @@ object ReminderCopy {
     const val TIME = "Time"
     const val NUDGE_TIME = "Nudge time"
 
+    /** Profile > Reminder's switch for Taken Pro's one trial reminder (Taken/Views/ProfileView.swift, word for word). */
+    const val TRIAL_REMINDER = "Trial reminder"
+
     /** Profile's footnote under Reminder (Taken/Views/ProfileView.swift `nudgeFootnote`). */
     const val FOOTNOTE = "If anything is still pending at this time, Taken nudges you."
 
@@ -219,7 +273,7 @@ object ReminderCopy {
 
     val all: List<String>
         get() = listOf(
-            SECTION, NUDGE, TIME, NUDGE_TIME, FOOTNOTE, NUDGE_LOCKED, NOTIFICATIONS_OFF, NUDGE_CHANNEL_OFF, TAKE_ALL, OPEN,
+            SECTION, NUDGE, TIME, NUDGE_TIME, TRIAL_REMINDER, FOOTNOTE, NUDGE_LOCKED, NOTIFICATIONS_OFF, NUDGE_CHANNEL_OFF, TAKE_ALL, OPEN,
             ASK_TITLE, askBody(20 * 60), CONTINUE, NOT_NOW, nudgePublic(Reminders.body(listOf("VD3", "FSH"))), ReminderKind.NUDGE.channelName,
             ReminderKind.NUDGE.channelDescription, ReminderKind.TRIAL.channelName, ReminderKind.TRIAL.channelDescription,
             ReminderKind.TODO.channelName, ReminderKind.TODO.channelDescription,

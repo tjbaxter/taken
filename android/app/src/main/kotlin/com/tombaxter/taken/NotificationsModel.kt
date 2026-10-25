@@ -3,6 +3,7 @@ package com.tombaxter.taken
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.setValue
+import com.tombaxter.taken.core.reminders.NotificationPermission
 import com.tombaxter.taken.notify.NotificationHost
 
 /**
@@ -45,6 +46,22 @@ class NotificationsModel(
     var nudgeChannelOff: Boolean by mutableStateOf(false)
         private set
 
+    /**
+     * The trial reminder can reach the person as a notification: Android shows Taken's notifications and the "Trial
+     * reminder" channel is on. While it cannot, Today carries the reminder's words (`AppModel.trialReminderDeliverable`,
+     * SPEC-ANDROID 9.7). Read on every return to the front and after each answer.
+     */
+    var trialDeliverable: Boolean by mutableStateOf(false)
+        private set
+
+    /** Android's answer in the shape the trial ask reads (`TrialAsk.shows`): its prompt may still come, or not. */
+    val permission: NotificationPermission
+        get() = when {
+            host.notificationsAllowed -> NotificationPermission.ALLOWED
+            host.notificationsAskable -> NotificationPermission.NOT_DETERMINED
+            else -> NotificationPermission.DENIED
+        }
+
     private var app: AppModel? = null
     private var waiting: ((Boolean) -> Unit)? = null
     private var awaitingPrompt = false
@@ -70,6 +87,7 @@ class NotificationsModel(
         val allowed = host.notificationsAllowed
         notificationsDenied = !allowed && nudgeOn
         nudgeChannelOff = allowed && nudgeOn && host.nudgeChannelOff
+        trialDeliverable = allowed && !host.trialChannelOff
     }
 
     /**
@@ -89,11 +107,13 @@ class NotificationsModel(
 
     /**
      * Notifications for a feature the person just turned on: `then(true)` once Android shows them, `then(false)` when it
-     * answers no. Nothing at all after the explanation's Not now.
+     * answers no. Nothing at all after the explanation's Not now. `explained`: the person has just read why, on the trial
+     * ask, so Android's prompt comes without Taken's explanation before it.
      */
-    fun request(then: (Boolean) -> Unit) {
+    fun request(explained: Boolean = false, then: (Boolean) -> Unit) {
         if (isDemo || host.notificationsAllowed) {
             notificationsDenied = false
+            refresh()
             then(true)
             return
         }
@@ -103,7 +123,7 @@ class NotificationsModel(
             return
         }
         waiting = then
-        if (host.notificationRationaleDue) asking = true else prompt()
+        if (host.notificationRationaleDue && !explained) asking = true else prompt()
     }
 
     /** The explanation's Continue (Android's prompt next) or Not now (nothing changes). */
@@ -120,7 +140,8 @@ class NotificationsModel(
         waiting = null
         if (granted) {
             notificationsDenied = false
-            // To-dos with a time get theirs now.
+            refresh()
+            // To-dos with a time get theirs now, and a trial its reminder.
             rebuild()
         } else if (!host.notificationRationaleDue) {
             // Android will not show its prompt again (a second no): only Settings can turn them on now.

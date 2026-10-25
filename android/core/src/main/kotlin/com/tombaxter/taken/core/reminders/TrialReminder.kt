@@ -23,8 +23,9 @@ import java.time.temporal.ChronoUnit
 // notice "at least three days before the day on which" a trial ends, with its date, price and how to cancel
 // (https://le.utah.gov/~2024/bills/hbillenr/HB0174.pdf).
 //
-// Android: these are the rules and the words only. Posting the notification, its channel and the permission prompt are
-// the Reminders phase's (SPEC-ANDROID 10.4, NEXT 3), which reads `TrialReminder.planFor` and hands the plan to its alarm.
+// Android: these are the rules and the words. Posting the notification, its channel and the permission prompt are the
+// Reminders' (SPEC-ANDROID 10.4): `PlannedTrialReminder` hands `TrialReminder.plan` to the scheduler's alarm, and the
+// trial ask is `AppModel.offerTrialAsk` with `TrialAskSheet`.
 // A trial is known only on the phone that bought it (SPEC-ANDROID 9.4), so only that phone plans a reminder; Google Play
 // itself emails before a trial ends (https://android-developers.googleblog.com/2020/04/building-user-trust-through-more.html).
 // Copy rules: no em or en dash, never the word for no charge, no exclamation marks.
@@ -194,7 +195,8 @@ enum class NotificationPermission {
 /**
  * The one notification ask right after a trial starts. Android's guidance differs from Apple's: "Always provide the
  * option to cancel an educational UI flow" (https://developer.android.com/training/permissions/requesting), so the
- * Android sheet has Continue and Not now (SPEC-ANDROID 10.4). The Reminders phase shows it; these are its rules and words.
+ * Android sheet has Continue and Not now (SPEC-ANDROID 10.4). `AppModel.offerTrialAsk` shows it; these are its rules and
+ * words.
  */
 object TrialAsk {
     /** Show the sheet: a trial just started, Android can still show its prompt, and the sheet never showed. */
@@ -219,9 +221,15 @@ object TrialAsk {
     const val NOT_NOW = "Not now"
     const val ALLOW_HINT = "Shows Android's notification prompt."
 
+    /** TalkBack's action on Continue: "Double tap to show Android's notification prompt". */
+    const val ALLOW_ACTION = "show Android's notification prompt"
+
     fun body(mentionsReminder: Boolean): String = if (mentionsReminder) BODY else BODY_NUDGE_ONLY
 
     /** Every line, for the copy rules test. */
     val all: List<String>
-        get() = listOf(TITLE, BODY, BODY_NUDGE_ONLY, ALLOW, NOT_NOW, ALLOW_HINT, TrialReminder.HOW_TO_CANCEL, TrialReminder.SETTING_FOOTNOTE)
+        get() = listOf(
+            TITLE, BODY, BODY_NUDGE_ONLY, ALLOW, NOT_NOW, ALLOW_HINT, ALLOW_ACTION, TrialReminder.HOW_TO_CANCEL,
+            TrialReminder.SETTING_FOOTNOTE,
+        )
 }

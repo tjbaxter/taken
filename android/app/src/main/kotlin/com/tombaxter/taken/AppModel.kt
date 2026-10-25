@@ -27,6 +27,7 @@ import com.tombaxter.taken.core.pro.ProPendingAction
 import com.tombaxter.taken.core.pro.ProPlan
 import com.tombaxter.taken.core.pro.ProRoute
 import com.tombaxter.taken.core.pro.of
+import com.tombaxter.taken.core.reminders.TrialAsk
 import com.tombaxter.taken.core.reminders.TrialReminder
 import com.tombaxter.taken.core.profile.Profile
 import com.tombaxter.taken.core.reminders.NudgeLink
@@ -282,26 +283,27 @@ class AppModel(
     private var introJob: Job? = null
     private var introWaitsForSheet = false
 
-    // MARK: Seams for the Reminders and Widgets phases (SPEC-ANDROID 10, NEXT 3 and 4)
+    // MARK: Taken Pro meets the reminders and the surfaces (SPEC-ANDROID 9.7, wired at integration)
 
     /**
-     * Pro itself changed (a purchase, a renewal seen, a cancellation, a refund): the widgets, the tile and the reminders
-     * follow it. The integrator sets this to refresh widgets (`updateAll`), the tile and the alarms.
+     * Pro itself changed (a purchase, a renewal seen, a cancellation, a refund, a trial that converted): the widgets, the
+     * tile and the reminders follow it. The app sets this to `AppContainer.proChanged` (the widgets' `updateAll`, the tile
+     * and the alarms).
      */
     var onProChanged: () -> Unit = {}
 
     /**
-     * A trial just started in the paywall, which has closed: the Reminders phase shows its one notification ask here
-     * (`TrialAsk.shows`, SPEC-ANDROID 10.4) and plans the reminder (`trialReminderPlan`).
+     * A trial just started in the paywall, which has closed: the one notification ask ([offerTrialAsk], `TrialAsk.shows`,
+     * SPEC-ANDROID 10.4). Pro's change has already rebuilt the alarms, which plan the reminder (`trialReminderPlan`).
      */
-    var onTrialStarted: () -> Unit = {}
+    var onTrialStarted: () -> Unit = { offerTrialAsk() }
 
     /**
-     * Whether the trial reminder can reach the person as a notification (Reminders built and notifications allowed).
-     * Until the Reminders phase sets it, Today carries the reminder's words instead, as the iPhone does while
-     * notifications are off.
+     * Whether the trial reminder can reach the person as a notification: Android shows Taken's notifications and the
+     * "Trial reminder" channel is on (`NotificationsModel.trialDeliverable`, read again on every return to the front).
+     * Until then Today carries the reminder's words instead, as the iPhone does while notifications are off.
      */
-    var trialReminderDeliverable: () -> Boolean = { false }
+    var trialReminderDeliverable: () -> Boolean = { notifications.trialDeliverable }
 
     /** Goes up each time a tap finishes the day (All taken), to play its check once. */
     var lockInCount: Int by mutableStateOf(0)
@@ -386,8 +388,8 @@ class AppModel(
         }
 
     /**
-     * The trial reminder that should exist now, for the Reminders phase to hand to its alarm (SPEC-ANDROID 10.4): its
-     * moment and its words, or null. Taken Pro never posts it itself.
+     * The trial reminder that should exist now (SPEC-ANDROID 9.7): its moment and its words, or null. The same rule the
+     * reminders' alarm plans with from the files (`PlannedTrialReminder`, 10.4); Taken Pro never posts it itself.
      */
     fun trialReminderPlan(at: Instant = clockNow()): TrialReminder.Plan? =
         TrialReminder.plan(pro.status, renewalPrice, state, at, clock.zone, ledger?.trialReminder)
@@ -987,6 +989,83 @@ class AppModel(
                 write { it.settings.setReminder(true) }
                 if (fromOffer) show(Toast(nextToastId(), RetentionCopy.NUDGE_ON, Fmt.minutes(settings.reminderMinutes)))
             } else if (fromOffer && notifications.notificationsDenied) {
+                show(Toast(nextToastId(), RetentionCopy.NOTIFICATIONS_OFF))
+            }
+        }
+    }
+
+    /**
+     * Profile > Reminder > Trial reminder (the iPhone's `setTrialReminder`): off withdraws it, pending or delivered, and
+     * Today's line with it; on plans it again. The write rebuilds the reminders, as every write does.
+     */
+    fun setTrialReminder(enabled: Boolean) {
+        write { it.settings.trialReminderEnabled = enabled }
+    }
+
+    /** The Trial reminder switch shows while a trial is on and set to renew, the only time the reminder can come. */
+    val showsTrialReminderSwitch: Boolean get() = TrialReminder.isRenewingTrial(pro.status, now)
+
+    // MARK: The trial ask (SPEC-ANDROID 10.4)
+
+    /** A trial started while Android can still show its prompt: the ask waits until nothing else holds the screen. */
+    var trialAskWaiting: Boolean by mutableStateOf(false)
+        private set
+
+    /**
+     * The ask is on screen, with the iPhone's waiting rules (`trialAskLevel`): never over the paywall, a sheet, Android's
+     * prompt or Taken's explanation before it, the microphone's explanation, or a voice note being started, heard or
+     * saved. Something that opens over it takes it away, and it comes back once that has gone.
+     */
+    val showsTrialAsk: Boolean
+        get() = trialAskWaiting && paywall == null && sheet == null && !notifications.asking && !todo.askingMicrophone &&
+            todo.phase == TodoCapture.Phase.IDLE
+
+    /** The words under the ask's title: with the reminder while the trial is long enough to get one. */
+    val trialAskBody: String get() = TrialAsk.body(TrialAsk.mentionsReminder(pro.status, now))
+
+    /**
+     * The paywall closed on a new trial: the ask, once, and only while Android can still show its prompt
+     * (`TrialAsk.shows`). Otherwise the reminder follows Android's answer, as the iPhone's does.
+     */
+    fun offerTrialAsk() {
+        if (isDemo) return
+        if (TrialAsk.shows(trialStarted = true, permission = notifications.permission, alreadyShown = ledger?.trialAskAt != null)) {
+            trialAskWaiting = true
+        }
+    }
+
+    /** Debug captures only: the ask on screen, drawn without a purchase. */
+    internal fun stageTrialAsk() {
+        if (isDemo) trialAskWaiting = true
+    }
+
+    /** The ask is on screen: only now is the one ask used up (`ProLedger.trialAskAt`, the iPhone's `trialAskDidAppear`). */
+    fun trialAskDidAppear() {
+        if (isDemo) return
+        val at = clockNow()
+        updateLedger { ProLedgers.markTrialAskShown(it, at) }
+    }
+
+    /**
+     * Continue or Not now on the trial ask. Continue goes straight to Android's prompt, since the ask is the explanation:
+     * allowed, the evening nudge comes on at its time ("Nudge on at 20:00") and the trial reminder is scheduled with it;
+     * refused for good, "Notifications are off for Taken in Settings". Either answer to Android answers Today's nudge offer
+     * too, so there is never a second ask (the iPhone's `answerTrialAsk`). Not now changes nothing: Android asks for a way
+     * out of every explanation ("Always provide the option to cancel an educational UI flow",
+     * https://developer.android.com/training/permissions/requesting) [Own choice: after Not now, Today's nudge offer may
+     * still ask later, in its own context].
+     */
+    fun answerTrialAsk(proceed: Boolean) {
+        trialAskWaiting = false
+        if (!proceed || isDemo) return
+        notifications.request(explained = true) { granted ->
+            write { s ->
+                s.settings.nudgeOfferDone = true
+                if (granted) s.settings.reminderEnabled = true
+            }
+            if (granted) {
+                show(Toast(nextToastId(), RetentionCopy.NUDGE_ON, Fmt.minutes(settings.reminderMinutes)))
+            } else if (notifications.notificationsDenied) {
                 show(Toast(nextToastId(), RetentionCopy.NOTIFICATIONS_OFF))
             }
         }

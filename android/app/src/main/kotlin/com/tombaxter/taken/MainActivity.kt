@@ -275,7 +275,7 @@ class MainActivity : ComponentActivity(), Platform {
      * reminder it knows cannot come. Not asked yet counts as on: the ask follows a trial (SPEC-ANDROID 10.4).
      */
     override val notificationsOff: Boolean
-        get() = if (notificationsAllowed) ReminderChannels.isOff(this, ReminderKind.TRIAL) else !notificationsAskable
+        get() = if (notificationsAllowed) trialChannelOff else !notificationsAskable
 
     // MARK: VoiceHost
 
@@ -313,6 +313,9 @@ class MainActivity : ComponentActivity(), Platform {
 
     override val nudgeChannelOff: Boolean
         get() = ReminderChannels.isOff(this, ReminderKind.NUDGE)
+
+    override val trialChannelOff: Boolean
+        get() = ReminderChannels.isOff(this, ReminderKind.TRIAL)
 
     override fun requestNotifications() {
         if (Build.VERSION.SDK_INT >= 33) {

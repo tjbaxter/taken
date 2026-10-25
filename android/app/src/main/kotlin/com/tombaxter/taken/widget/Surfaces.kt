@@ -62,7 +62,7 @@ import java.util.Locale
  *
  * Callers: every change to taken.json, pro.json or todos.json (AppContainer), the alarm, a widget's own update, a restart,
  * a clock or time zone change and an update of Taken (the reminders' restart receiver), Taken coming to the front, and Pro
- * changing (`AppModel.onProChanged`, which the integrator connects to [refresh], SPEC-ANDROID 9.7).
+ * changing (`AppContainer.proChanged`, from `AppModel.onProChanged` or a surface's recheck, SPEC-ANDROID 9.7).
  */
 class Surfaces(
     context: Context,
@@ -105,9 +105,9 @@ class Surfaces(
 
     /**
      * Logging needs Taken Pro (PRO.md): Pro's answer is the source's, or pro.json's cached one while the source has none yet
-     * (a widget in a fresh process), as the iPhone's surfaces read the ledger. The iPhone's `ProGate.mayLog` also asks the
-     * store once more when a renewing plan's cache ran out; on Android that recheck is Taken Pro's `ProSource.refresh()`,
-     * for the integrator to add to [SurfaceActions] (SPEC-ANDROID 9.3).
+     * (a widget in a fresh process), as the iPhone's surfaces read the ledger. This is how the surfaces are drawn; a tap
+     * that logs goes through [com.tombaxter.taken.ProRecheck] in [SurfaceActions], which also asks Google Play once more
+     * when a renewing plan's cache ran out (the iPhone's `ProGate.mayLog`, SPEC-ANDROID 9.3).
      */
     fun locked(inputs: Inputs, now: Instant, source: ProSource = pro()): Boolean {
         val status = source.status ?: inputs.ledger?.status

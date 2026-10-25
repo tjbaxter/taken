@@ -68,18 +68,21 @@ object DemoScreens {
     /** Taken Pro's screens (SPEC-ANDROID 9.5 and 9.6): the paywall's states, Today's trial notice, Profile's Pro states. */
     val proScreens = listOf(
         "paywall", "paywall-intro", "paywall-trial-used", "paywall-no-yearly", "paywall-loading", "paywall-offline",
-        "today-trial-notice", "settings-pro-trial", "settings-pro-yearly", "settings-pro-yearly-ending",
+        "today-trial-notice", "trial-ask", "settings-pro-trial", "settings-pro-yearly", "settings-pro-yearly-ending",
         "settings-pro-monthly", "settings-pro-lifetime", "settings-pro-locked", "settings-pro-pending",
     )
 
     /** The Pro screens drawn in every look; the rest in Signal. */
-    val proScreensEveryLook = listOf("paywall", "locked", "settings-pro-trial", "settings-pro-yearly", "settings-pro-lifetime", "settings-pro-locked")
+    val proScreensEveryLook = listOf("paywall", "locked", "trial-ask", "settings-pro-trial", "settings-pro-yearly", "settings-pro-lifetime", "settings-pro-locked")
 
     /**
      * Profile's Reminder section (SPEC-ANDROID 10.4), drawn scrolled to it: the nudge on with its time; notifications off
-     * for Taken, with the Settings link; only the nudge's channel off; and locked, where the nudge needs Taken Pro.
+     * for Taken, with the Settings link; only the nudge's channel off; locked, where the nudge needs Taken Pro; and during
+     * a trial, with Taken Pro's Trial reminder switch (9.7).
      */
-    val reminderScreens = listOf("settings-reminder", "settings-reminder-off", "settings-reminder-channel", "settings-reminder-locked")
+    val reminderScreens = listOf(
+        "settings-reminder", "settings-reminder-off", "settings-reminder-channel", "settings-reminder-locked", "settings-reminder-trial",
+    )
 
     /**
      * The to-dos a screen shows: TodoDemo's one list (a time tonight, a day this week, two done today, and what the
@@ -135,7 +138,7 @@ object DemoScreens {
         val ledger = ProLedger(firstSeenAt = now.minusSeconds(86_400L * 60), firstDoseAt = state.doses.minOfOrNull { it.takenAt })
         val pro = DemoPro.forScreen(screen, now)
         val prompt = when (screen) {
-            // The trial reminder's words on Today, from the moment it would have come (notifications not built yet).
+            // The trial reminder's words on Today, from the moment it would have come, while notifications cannot carry it.
             "today-trial-notice" -> com.tombaxter.taken.core.reminders.TrialReminder.notice(
                 pro.status, pro.offers[ProPlan.YEARLY]?.let { com.tombaxter.taken.core.pro.PlanPrice.of(it) }, state, now, zone,
             )?.let { TodayPrompt.TrialEnds(it) }
@@ -192,7 +195,9 @@ object DemoScreens {
             "weight-list" -> model.sheet = Sheet.WeighIns
             "weight-settings", "weight-data" -> model.openProfile()
             "weight-goal-sheet", "weight-goal-low" -> model.sheet = Sheet.WeightGoal
-            "settings-reminder", "settings-reminder-locked" -> model.openProfile()
+            "settings-reminder", "settings-reminder-locked", "settings-reminder-trial" -> model.openProfile()
+            // The trial ask over Today, the moment the paywall has closed on a new trial (SPEC-ANDROID 10.4).
+            "trial-ask" -> model.stageTrialAsk()
             "settings-reminder-off" -> {
                 model.openProfile()
                 model.notifications.stageDemo(denied = true)
@@ -258,6 +263,9 @@ class DemoPro(
                 "paywall-pending" -> DemoPro(null, outcome = PurchaseOutcome.Pending)
                 "paywall-unlocked" -> DemoPro(null, outcome = PurchaseOutcome.Unlocked(trialStarted = true))
                 "today-trial-notice" -> DemoPro(sub(ProReason.TRIAL, ProPlan.YEARLY, end = now.plus(java.time.Duration.ofDays(2))))
+                // A trial that has just started, and one under way with its reminder still to come.
+                "trial-ask" -> DemoPro(sub(ProReason.TRIAL, ProPlan.YEARLY, end = now.plus(java.time.Duration.ofDays(7))))
+                "settings-reminder-trial" -> DemoPro(sub(ProReason.TRIAL, ProPlan.YEARLY, end = now.plus(java.time.Duration.ofDays(5))))
                 "settings-pro-trial" -> DemoPro(sub(ProReason.TRIAL, ProPlan.YEARLY, end = now.plus(java.time.Duration.ofDays(4))))
                 "settings-pro-yearly" -> DemoPro(sub(ProReason.YEARLY, ProPlan.YEARLY))
                 "settings-pro-yearly-ending" -> DemoPro(sub(ProReason.YEARLY, ProPlan.YEARLY, renews = false, end = now.plus(com.tombaxter.taken.core.pro.PlayEntitlement.ENDING_HORIZON)))

@@ -22,6 +22,9 @@ interface NotificationHost {
     /** The "Evening nudge" channel is turned off in Android's settings. */
     val nudgeChannelOff: Boolean
 
+    /** The "Trial reminder" channel is turned off in Android's settings: the trial reminder's words stay on Today. */
+    val trialChannelOff: Boolean get() = false
+
     /** Android's notification prompt. The answer comes back to `NotificationsModel.answered`. */
     fun requestNotifications()
 

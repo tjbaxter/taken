@@ -8,13 +8,13 @@ import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import com.tombaxter.taken.AppContainer
+import com.tombaxter.taken.ProRecheck
 import com.tombaxter.taken.ProSource
 import com.tombaxter.taken.TakenApp
 import com.tombaxter.taken.core.day.DayClock
 import com.tombaxter.taken.core.day.DayKey
 import com.tombaxter.taken.core.model.Dose
 import com.tombaxter.taken.core.pro.ProCopy
-import com.tombaxter.taken.core.pro.ProGate
 import com.tombaxter.taken.core.pro.ProLedgers
 import com.tombaxter.taken.core.pro.ProPendingAction
 import com.tombaxter.taken.core.reminders.NudgeLink
@@ -155,13 +155,10 @@ object NudgeActions {
                 if (day != null) notifications.postNote(Reminders.STALE_IDENTIFIER, Reminders.staleBody(day), NudgeLink.url(day))
                 return TakeAllOutcome.Stale
             }
-            val ledger = stores.ledger.data.first().ledger
-            val status = pro.status ?: ledger?.status
-            // The iPhone's `ProGate.mayLog` asks the store once more for a renewing plan whose cache ran out; on Android that
-            // recheck is Taken Pro's `ProSource.refresh()`, inside this broadcast's time (SPEC-ANDROID 9.3), for the
-            // integrator to add here.
-            val access = ProGate.access(status, settled = true, legacyLog = false, hasLogged = ProGate.hasLogged(state, ledger), now = now)
-            if (!access.allowsLogging) {
+            // The iPhone's `ProGate.mayLog`: Pro's answer, and for a renewing plan whose cache ran out, one more question to
+            // Google Play (`ProSource.refresh()`) inside this broadcast's time (SPEC-ANDROID 9.3).
+            val allowed = ProRecheck.mayLog(pro, state, now, { stores.ledger.data.first().ledger }, container::proChanged)
+            if (!allowed) {
                 stores.ledger.updateData { file -> LedgerFile(ProLedgers.recordPending(file.ledger, ProPendingAction.TakeAll, now)) }
                 notifications.postNote(Reminders.LOCKED_IDENTIFIER, ProCopy.LOCKED_DIALOG, AndroidNotifications.TODAY)
                 return TakeAllOutcome.Locked

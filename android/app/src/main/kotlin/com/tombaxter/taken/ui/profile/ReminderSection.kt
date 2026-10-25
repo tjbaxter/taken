@@ -1,6 +1,7 @@
 package com.tombaxter.taken.ui.profile
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -26,6 +27,7 @@ import com.tombaxter.taken.NotificationsModel
 import com.tombaxter.taken.PaywallOrigin
 import com.tombaxter.taken.core.reminders.ReminderCopy
 import com.tombaxter.taken.core.reminders.ReminderKind
+import com.tombaxter.taken.core.reminders.TrialReminder
 import com.tombaxter.taken.ui.components.Card
 import com.tombaxter.taken.ui.components.MonoTimeButton
 import com.tombaxter.taken.ui.components.RowDivider
@@ -40,12 +42,15 @@ import com.tombaxter.taken.ui.theme.TakenType
  * `reminderSection`): the Nudge switch; its Time while on; "The nudge needs Taken Pro" while locked, which opens the
  * plans; "Notifications are off for Taken. Open Settings" once Android will not show them, the only link to Settings.
  * Android adds one row: when only the "Evening nudge" channel is off, its own settings page. Taken Pro's Trial reminder
- * switch joins this section with the trial reminder (9.7). The footnote says what the nudge does.
+ * switch sits under the nudge while a trial is on and set to renew (SPEC-ANDROID 9.7, the iPhone's `showsTrialReminder`),
+ * the in-app setting for its own kind of notification. The footnote says what the nudge does, and then what the trial
+ * reminder does while its switch shows.
  */
 @Composable
 internal fun ReminderSection(model: AppModel) {
     val settings = model.settings
     val notifications = model.notifications
+    val showsTrial = model.showsTrialReminderSwitch
     Section(ReminderCopy.SECTION)
     Card(Modifier.testTag("reminder")) {
         Column {
@@ -55,6 +60,13 @@ internal fun ReminderSection(model: AppModel) {
                 RowDivider()
                 SettingRow(ReminderCopy.TIME) {
                     MonoTimeButton(ReminderCopy.NUDGE_TIME, settings.reminderMinutes) { model.setReminderMinutes(it) }
+                }
+            }
+            if (showsTrial) {
+                // The one reminder before a trial ends has its own switch; the nudge's never turns it off.
+                RowDivider()
+                Box(Modifier.testTag("trial-reminder")) {
+                    SwitchRow(ReminderCopy.TRIAL_REMINDER, checked = settings.trialReminderEnabled) { model.setTrialReminder(it) }
                 }
             }
             if (model.isLocked) {
@@ -70,7 +82,7 @@ internal fun ReminderSection(model: AppModel) {
             }
         }
     }
-    Footnote(ReminderCopy.FOOTNOTE)
+    Footnote(if (showsTrial) "${ReminderCopy.FOOTNOTE} ${TrialReminder.SETTING_FOOTNOTE}" else ReminderCopy.FOOTNOTE)
 }
 
 /** No nudge is scheduled without Pro: said where it is set, and a tap opens the plans (the iPhone's lock row). */

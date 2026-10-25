@@ -203,7 +203,8 @@ class ScreenshotTests {
         for (look in looks) {
             for (screen in DemoScreens.reminderScreens) {
                 capture("${screen}_${look.raw}", DemoScreens.make(screen, look)) {
-                    compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE).performScrollTo()
+                    // During a trial the footnote goes on with the trial reminder's line.
+                    compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE, substring = true).performScrollTo()
                 }
             }
             // The nudge time's 24-hour dialog, "Set 20:00".
@@ -230,12 +231,13 @@ class ScreenshotTests {
     @Config(fontScale = 2f)
     fun reminderSettingsLargerText() {
         start()
-        for (screen in listOf("settings-reminder", "settings-reminder-off", "settings-reminder-locked")) {
+        for (screen in listOf("settings-reminder", "settings-reminder-off", "settings-reminder-locked", "settings-reminder-trial")) {
             capture("${screen}_signal_font200", DemoScreens.make(screen)) {
-                compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE).performScrollTo()
+                compose.onNodeWithText(com.tombaxter.taken.core.reminders.ReminderCopy.FOOTNOTE, substring = true).performScrollTo()
             }
         }
         capture("notify-ask_signal_font200", DemoScreens.make("notify-ask"))
+        capture("trial-ask_signal_font200", DemoScreens.make("trial-ask"))
     }
 
     /**

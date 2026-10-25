@@ -80,6 +80,7 @@ import com.tombaxter.taken.Sheet
 import com.tombaxter.taken.Toast
 import com.tombaxter.taken.core.todo.TodoCapture
 import com.tombaxter.taken.ui.add.AddSheet
+import com.tombaxter.taken.ui.paywall.TrialAskSheet
 import com.tombaxter.taken.ui.components.Announcement
 import com.tombaxter.taken.ui.components.AvatarImage
 import com.tombaxter.taken.ui.components.CloseButton
@@ -204,6 +205,8 @@ fun TakenRoot(model: AppModel, platform: Platform) {
         }
         SheetsHost(model, platform)
         PaywallHost(model, platform)
+        // The one notification ask after a trial started, once nothing else holds the screen (SPEC-ANDROID 10.4).
+        if (model.showsTrialAsk) TrialAskSheet(model)
         if (model.todo.askingMicrophone) MicrophoneRationale(model.todo)
         if (model.notifications.asking) NotificationRationale(model.notifications, model.settings.reminderMinutes)
     }

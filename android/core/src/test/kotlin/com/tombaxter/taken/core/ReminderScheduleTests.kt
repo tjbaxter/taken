@@ -179,7 +179,7 @@ class ReminderScheduleTests {
                 Reminder(ReminderKind.TRIAL, TrialReminderSlot.TAG, fireAt, title = null, body = "Your trial ends Wed 4 Nov.")
                     .takeIf { fireAt > at }
             override fun stillApplies(now: Instant): Boolean = applies
-            override fun posted(reminder: Reminder, now: Instant) = Unit
+            override suspend fun posted(reminder: Reminder, now: Instant) = Unit
         }
         val s = snapshot(trial = slot)
         assertEquals(fireAt, ReminderSchedule.nextAlarm(s, ReminderKind.TRIAL, at(2026, 10, 28, 9, 14)))

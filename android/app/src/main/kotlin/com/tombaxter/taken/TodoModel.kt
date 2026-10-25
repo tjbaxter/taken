@@ -318,12 +318,9 @@ class TodoModel(
             ProAccess.PRO, ProAccess.FIRST_SESSION, ProAccess.PENDING -> action()
             ProAccess.LOCKED -> app?.presentPaywall(PaywallOrigin.ACTION, action)
             ProAccess.CHECKING -> scope.launch {
-                // Play's first answer of this launch comes within 4 s (SPEC-ANDROID 9.5).
-                var waited = 0L
-                while (access() == ProAccess.CHECKING && waited < CHECKING_WAIT_MS) {
-                    delay(100)
-                    waited += 100
-                }
+                // Play's first answer of this launch, at most 4 s (`ProSource.settle`, SPEC-ANDROID 9.5): the same wait as
+                // `AppModel.requirePro`, so a note and a dose are let through or locked by one rule (`ProGate.access`).
+                app?.pro?.settle()
                 if (access() == ProAccess.CHECKING) app?.presentPaywall(PaywallOrigin.ACTION, action) else whenAllowed(action)
             }
         }
@@ -799,8 +796,5 @@ class TodoModel(
 
         /** The undo bar after a swipe. */
         const val UNDO_MS = 4_000L
-
-        /** Play's first answer of a launch (SPEC-ANDROID 9.5). */
-        const val CHECKING_WAIT_MS = 4_000L
     }
 }

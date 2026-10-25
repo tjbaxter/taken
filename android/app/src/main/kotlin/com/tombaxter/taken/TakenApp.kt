@@ -12,11 +12,16 @@ import androidx.lifecycle.viewmodel.initializer
 import androidx.lifecycle.viewmodel.viewModelFactory
 import com.tombaxter.taken.core.pro.ProGate
 import com.tombaxter.taken.core.pro.ProLedger
+import com.tombaxter.taken.core.model.StackState
+import com.tombaxter.taken.core.pro.ProLedgers
+import com.tombaxter.taken.core.pro.ProStatus
+import com.tombaxter.taken.core.reminders.PlannedTrialReminder
 import com.tombaxter.taken.core.reminders.ReminderSnapshot
 import com.tombaxter.taken.core.reminders.TrialReminderSlot
 import com.tombaxter.taken.core.todo.TodoNotificationScheduler
 import com.tombaxter.taken.data.DataStorePersistence
 import com.tombaxter.taken.data.DataStoreTodoPersistence
+import com.tombaxter.taken.data.LedgerFile
 import com.tombaxter.taken.data.TakenStores
 import com.tombaxter.taken.notify.AndroidAlarms
 import com.tombaxter.taken.notify.AndroidNotifications
@@ -63,7 +68,9 @@ class AppContainer(context: Context) {
     val persistence = DataStorePersistence(stores, scope)
     val todoPersistence = DataStoreTodoPersistence(stores, scope)
     val weightPersistence = com.tombaxter.taken.data.DataStoreWeightPersistence(stores, scope)
-    val pro: ProSource = BuildWiring.pro(context, persistence, scope)
+    /** Taken Pro's answer: Google Play's in release builds, on for good in debug ([BuildWiring]). Tests hold their own. */
+    var pro: ProSource = BuildWiring.pro(context, persistence, scope)
+        internal set
 
     init {
         // pro.json as it is written: the cached answer before Play's, the trials this phone recorded, the prices.
@@ -71,12 +78,6 @@ class AppContainer(context: Context) {
             stores.ledger.data.catch { }.collect { pro.adoptLedger(it.ledger) }
         }
     }
-
-    /**
-     * Taken Pro's trial reminder, delivered by the reminders on its own channel once the integrator plugs the Pro lane's
-     * plan in here (`TrialReminder.plan` and its mark in pro.json, SPEC-ANDROID 9.7 and 10.4). Until then it plans none.
-     */
-    var trialReminders: TrialReminderSlot = TrialReminderSlot.none
 
     /** The moment and the time zone the reminders plan with: the phone's. Tests hold their own. */
     internal var clock: () -> Instant = { Instant.now() }
@@ -100,8 +101,8 @@ class AppContainer(context: Context) {
 
     /**
      * The home screen widgets and the Take all tile (SPEC-ANDROID 10.1 and 10.2), redrawn after every write and at the
-     * moments the day changes under them. `refresh()` is their one entry point; Pro changing calls it through the Pro
-     * lane's `AppModel.onProChanged` once the integrator connects them (SPEC-ANDROID 9.7).
+     * moments the day changes under them. `refresh()` is their one entry point; Pro changing calls it through
+     * [proChanged] (SPEC-ANDROID 9.7).
      */
     val surfaces = Surfaces(
         context = app,
@@ -161,6 +162,17 @@ class AppContainer(context: Context) {
     }
 
     /**
+     * Pro itself changed (a purchase, a renewal seen, a cancellation, a refund, a trial that converted): the widgets, the
+     * tile and the reminders follow it (SPEC-ANDROID 9.7), so a locked widget opens up, the nudge's window moves and the
+     * trial reminder is planned or withdrawn. `AppModel.onProChanged` calls it, and so does a widget's, the tile's or a
+     * nudge's recheck that changed Pro with no screen open ([ProRecheck]).
+     */
+    fun proChanged() {
+        scope.launch { surfaces.refresh() }
+        scope.launch { reminders.rebuild() }
+    }
+
+    /**
      * What the reminders are planned from, read from the files. Pro's answer is the source's, or pro.json's cached one
      * while the source has none yet (a receiver in a fresh process), as the iPhone's surfaces read the ledger.
      */
@@ -172,10 +184,25 @@ class AppContainer(context: Context) {
         val access = ProGate.access(
             status, settled = true, legacyLog = false, hasLogged = ProGate.hasLogged(stack, ledger), now = clock(),
         )
-        ReminderSnapshot(stack, tasks, ProGate.nudgeWindow(access, status), zone(), trialReminders)
+        ReminderSnapshot(stack, tasks, ProGate.nudgeWindow(access, status), zone(), trialReminder(status, ledger, stack))
     } catch (e: IOException) {
         null
     }
+
+    /**
+     * Taken Pro's trial reminder for one rebuild (SPEC-ANDROID 9.7 and 10.4): the Pro lane's plan over the files just read
+     * ([PlannedTrialReminder]), its mark written to pro.json once it is posted, inside the rebuild, so a receiver's
+     * broadcast never ends before it.
+     */
+    private fun trialReminder(status: ProStatus?, ledger: ProLedger?, stack: StackState): TrialReminderSlot =
+        PlannedTrialReminder(status, ledger, stack, zone()) { mark ->
+            try {
+                stores.ledger.updateData { file -> LedgerFile(ProLedgers.withTrialReminder(file.ledger, mark)) }
+            } catch (e: IOException) {
+                // pro.json cannot be written now. The reminder's moment has passed, so the next rebuild plans none; only
+                // a later nudge time on the same day could plan it again.
+            }
+        }
 }
 
 /**
@@ -230,6 +257,8 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 notificationsModel = notifications,
                 surfaceHost = container.surfaceHost,
             )
+            // Pro itself changed: the widgets, the tile and the alarms follow it (SPEC-ANDROID 9.7).
+            loaded.onProChanged = container::proChanged
             model = loaded
             launch { stores.stack.data.collect { loaded.adopt(it) } }
             launch { stores.ledger.data.collect { file -> file.ledger?.let(loaded::adoptLedger) } }

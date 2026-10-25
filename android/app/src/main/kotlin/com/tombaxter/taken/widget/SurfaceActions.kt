@@ -5,6 +5,7 @@ import androidx.glance.GlanceId
 import androidx.glance.action.ActionParameters
 import androidx.glance.appwidget.action.ActionCallback
 import com.tombaxter.taken.AppContainer
+import com.tombaxter.taken.ProRecheck
 import com.tombaxter.taken.ProSource
 import com.tombaxter.taken.TakenApp
 import com.tombaxter.taken.core.day.DayClock
@@ -44,8 +45,9 @@ sealed interface SurfaceOutcome {
 object SurfaceActions {
     /**
      * TAKE ALL on the widget or the tile: every quick-loggable pending dose at one moment (`takeAllPending`), never one
-     * logged in the last hour. Locked: nothing is written, and the Take all is kept in pro.json for Taken to offer with the
-     * paywall when it next opens (10 minutes), as the iPhone's intent does.
+     * logged in the last hour. Locked, after Pro's one recheck ([ProRecheck]): nothing is written, and the Take all is
+     * kept in pro.json (`ProLedgers.recordPending`) for Taken to offer with the paywall when it next opens (10 minutes),
+     * as the iPhone's `TakeAllIntent` does.
      */
     suspend fun takeAll(
         container: AppContainer,
@@ -56,7 +58,7 @@ object SurfaceActions {
         val stores = container.stores
         val outcome = try {
             val inputs = container.surfaces.read()
-            if (container.surfaces.locked(inputs, now, pro)) {
+            if (!mayLog(container, inputs, now, pro)) {
                 stores.ledger.updateData { file -> LedgerFile(ProLedgers.recordPending(file.ledger, ProPendingAction.TakeAll, now)) }
                 SurfaceOutcome.Locked
             } else {
@@ -80,8 +82,10 @@ object SurfaceActions {
 
     /**
      * A widget row: that item's next dose, only while it is still pending and was not logged in the last hour
-     * (`logNextDoseIfPending`), so a stale widget or a second tap can never log twice. Locked (a widget drawn before Pro
-     * ran out): nothing is logged, and the widget is drawn again read-only, where a tap opens the paywall.
+     * (`logNextDoseIfPending`), so a stale widget or a second tap can never log twice. Locked after Pro's one recheck (a
+     * widget drawn before Pro ran out): nothing is logged, and the widget is drawn again read-only, where the row's tap
+     * opens the paywall with that log kept (`taken://pro?then=log&item=`). Nothing is recorded in pro.json here, as the
+     * iPhone's `LogNextDoseIntent` records nothing: the locked row's own link carries the log.
      */
     suspend fun logNext(
         container: AppContainer,
@@ -93,7 +97,7 @@ object SurfaceActions {
         val stores = container.stores
         val outcome = try {
             val inputs = container.surfaces.read()
-            if (container.surfaces.locked(inputs, now, pro)) {
+            if (!mayLog(container, inputs, now, pro)) {
                 SurfaceOutcome.Locked
             } else {
                 var dose: Dose? = null
@@ -114,6 +118,10 @@ object SurfaceActions {
         return outcome
     }
 }
+
+/** Pro's gate with its one recheck, over the files just read (the iPhone's `ProGate.mayLog`). */
+private suspend fun mayLog(container: AppContainer, inputs: Surfaces.Inputs, now: Instant, pro: ProSource): Boolean =
+    ProRecheck.mayLog(pro, inputs.stack, now, { container.stores.ledger.data.first().ledger }, container::proChanged)
 
 /**
  * A row's tap on the stack widget. Glance runs it in its own broadcast receiver, which "allows extra execution time"
