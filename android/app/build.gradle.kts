@@ -7,6 +7,24 @@ plugins {
     alias(libs.plugins.roborazzi)
 }
 
+// The Play version code (SPEC-ANDROID 3.2). android-release.yml passes its own (an offset plus the run number, so every
+// upload is higher than the last); every other build is 1. Play takes nothing above 2100000000
+// (https://developer.android.com/studio/publish/versioning).
+val playVersionCode: Int = providers.gradleProperty("takenVersionCode").orNull?.let { value ->
+    val code = requireNotNull(value.toIntOrNull()) { "takenVersionCode must be a whole number, not '$value'" }
+    require(code in 1..2_100_000_000) { "takenVersionCode $code is outside Play's 1 to 2100000000" }
+    code
+} ?: 1
+
+// The upload key (SPEC-ANDROID 16). android-release.yml decodes it from its secrets into the runner's temp directory and
+// hands the path, the alias and the password over in environment variables, so no signing detail is in a build file
+// (Google: move signing information out of the build files, https://developer.android.com/studio/publish/app-signing ;
+// GitHub: pass secrets through environment variables, never the command line,
+// https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets). One password for the
+// store and the key, as Google advises on the same signing page. Without these variables the release bundle is
+// unsigned, as android.yml builds it.
+val uploadStoreFile: String? = providers.environmentVariable("TAKEN_UPLOAD_STORE_FILE").orNull?.takeIf { it.isNotBlank() }
+
 android {
     namespace = "com.tombaxter.taken"
     // compileSdk 37 (Android 17 is out); targetSdk 36, which Google Play requires of new apps from 31 August 2026
@@ -18,9 +36,26 @@ android {
         applicationId = "com.tombaxter.taken"
         minSdk = 28
         targetSdk = 36
-        // Android's own first release (SPEC-ANDROID 3.2). android-release.yml sets 1000 + its run number (NEXT 1).
-        versionCode = 1
+        // Android's own first release (SPEC-ANDROID 3.2), the only place the version name is written.
+        versionCode = playVersionCode
         versionName = "1.0.0"
+    }
+
+    signingConfigs {
+        if (uploadStoreFile != null) {
+            create("upload") {
+                val password = providers.environmentVariable("TAKEN_UPLOAD_STORE_PASSWORD").orNull
+                val alias = providers.environmentVariable("TAKEN_UPLOAD_KEY_ALIAS").orNull
+                require(!password.isNullOrEmpty()) { "TAKEN_UPLOAD_STORE_PASSWORD is not set" }
+                require(!alias.isNullOrEmpty()) { "TAKEN_UPLOAD_KEY_ALIAS is not set" }
+                storeFile = file(uploadStoreFile)
+                // The keystore is PKCS12, the format openssl wrote it in (SPEC-ANDROID 16).
+                storeType = "PKCS12"
+                storePassword = password
+                keyAlias = alias
+                keyPassword = password
+            }
+        }
     }
 
     buildTypes {
@@ -33,6 +68,7 @@ android {
             isMinifyEnabled = true
             isShrinkResources = true
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+            if (uploadStoreFile != null) signingConfig = signingConfigs.getByName("upload")
         }
     }
 
@@ -105,6 +141,15 @@ dependencies {
     implementation(libs.navigation3.runtime)
     implementation(libs.navigation3.ui)
     implementation(libs.datastore)
+    // Google Play Billing (SPEC-ANDROID 9). The library brings its own BILLING permission and Play services pieces.
+    implementation(libs.billing.ktx)
+    constraints {
+        // Those Play services pieces bring Fragment 1.1.0; this raises it to the catalog's version without making
+        // Fragment a dependency of Taken's own (https://docs.gradle.org/current/userguide/dependency_constraints.html).
+        implementation("androidx.fragment:fragment:${libs.versions.fragment.get()}") {
+            because("the Activity Result API needs Fragment 1.3.0 or later wherever Fragment is present")
+        }
+    }
     implementation(libs.kotlinx.coroutines.android)
 
     testImplementation(libs.junit)

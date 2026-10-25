@@ -68,6 +68,7 @@ import com.tombaxter.taken.Sheet
 import com.tombaxter.taken.core.format.Fmt
 import com.tombaxter.taken.core.retention.RetentionCopy
 import com.tombaxter.taken.core.retention.TodayPrompt
+import com.tombaxter.taken.core.weight.WeightCopy
 import com.tombaxter.taken.core.stack.DaySummary
 import com.tombaxter.taken.core.stack.ItemDay
 import com.tombaxter.taken.core.stack.ProgressCopy
@@ -91,7 +92,7 @@ import com.tombaxter.taken.ui.theme.TakenType
  * row into a way into its item until the check.
  */
 @Composable
-fun TodayScreen(model: AppModel, bottomDock: @Composable () -> Unit) {
+fun TodayScreen(model: AppModel, openUrl: (String) -> Unit = {}, bottomDock: @Composable () -> Unit) {
     val colors = Taken.colors
     Column(Modifier.fillMaxSize().background(colors.bg)) {
         Column(
@@ -105,7 +106,7 @@ fun TodayScreen(model: AppModel, bottomDock: @Composable () -> Unit) {
         ) {
             TabHeader(model, title = "Today", subtitle = Fmt.longDay(model.today.day))
             if (model.hasStack) {
-                StackContent(model)
+                StackContent(model, openUrl)
             } else {
                 Spacer(Modifier.height(28.dp))
                 EmptyStack(model)
@@ -116,7 +117,7 @@ fun TodayScreen(model: AppModel, bottomDock: @Composable () -> Unit) {
 }
 
 @Composable
-private fun StackContent(model: AppModel) {
+private fun StackContent(model: AppModel, openUrl: (String) -> Unit) {
     val today = model.today
     Spacer(Modifier.height(18.dp))
     ProgressSummary(today, model, model.lockInCount, model.streak)
@@ -127,7 +128,7 @@ private fun StackContent(model: AppModel) {
         val prompt = model.todayPrompt
         if (prompt != null) {
             Spacer(Modifier.height(16.dp))
-            TodayPromptRow(model, prompt)
+            TodayPromptRow(model, prompt, openUrl)
         }
     }
     StackHeader(model)
@@ -355,7 +356,7 @@ private fun LockedBar(text: String, onClick: () -> Unit) {
 
 /** Today's one quiet row (SPEC 3.1): the nudge offer or the repair, never in the way of a row. */
 @Composable
-private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt) {
+private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt, openUrl: (String) -> Unit) {
     val colors = Taken.colors
     val shape = RoundedCornerShape(Taken.shapes.card)
     when (prompt) {
@@ -409,7 +410,58 @@ private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt) {
                 contentAlignment = Alignment.Center,
             ) { Icon(Symbols.Close, contentDescription = null, tint = colors.fgSubtle, modifier = Modifier.size(18.dp)) }
         }
-        // The widget invite, the trial notice and the weight offer come with their phases (NEXT 4, 2 and 6).
+        // The trial reminder's own words while notifications cannot carry them (`TrialReminder.notice`): a tap opens
+        // Play's subscription center, where the trial can be cancelled. No close: it goes when the trial ends, converts
+        // or is cancelled, or with Profile's Trial reminder.
+        is TodayPrompt.TrialEnds -> Row(
+            Modifier.fillMaxWidth().heightIn(min = 48.dp).clip(shape).background(colors.bgRaised, shape).border(1.dp, colors.line, shape)
+                .clickable(role = Role.Button, onClickLabel = "open your subscription") { openUrl(model.manageSubscriptionUrl) }
+                .semantics(mergeDescendants = true) {}
+                .padding(horizontal = 16.dp, vertical = 12.dp)
+                .testTag("trial-notice"),
+            verticalAlignment = Alignment.Top,
+        ) {
+            Icon(Symbols.Notifications, contentDescription = null, tint = colors.signalInk, modifier = Modifier.size(16.dp).padding(top = 2.dp))
+            Spacer(Modifier.width(10.dp))
+            Text(prompt.text, style = TakenType.sans(15, FontWeight.Medium), color = colors.fg)
+        }
+        // The Weight tab offered once (SPEC 3.12): the nudge offer's shape, with Not now and Add tab. Add tab adds the tab
+        // after History without switching to it.
+        TodayPrompt.WeightOffer -> Column(
+            Modifier.fillMaxWidth().background(colors.bgRaised, shape).border(1.dp, colors.line, shape)
+                .padding(start = 16.dp, end = 8.dp, top = 12.dp, bottom = 2.dp)
+                .testTag("weight-offer"),
+        ) {
+            Row(verticalAlignment = Alignment.Top) {
+                Icon(Symbols.MonitorWeight, contentDescription = null, tint = colors.signalInk, modifier = Modifier.size(18.dp).padding(top = 1.dp))
+                Spacer(Modifier.width(10.dp))
+                Text(WeightCopy.OFFER, style = TakenType.sans(15, FontWeight.Medium), color = colors.fg)
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End, verticalAlignment = Alignment.CenterVertically) {
+                Box(
+                    Modifier.heightIn(min = 48.dp).clip(RoundedCornerShape(Taken.shapes.cell))
+                        .clickable(role = Role.Button) { model.answerWeightOffer(addTab = false) }.padding(horizontal = 12.dp),
+                    contentAlignment = Alignment.Center,
+                ) { Text(WeightCopy.NOT_NOW, style = TakenType.sans(15, FontWeight.Medium), color = colors.fgMuted) }
+                Box(
+                    Modifier.heightIn(min = 48.dp)
+                        .clickable(role = Role.Button, onClickLabel = WeightCopy.ADD_TAB_HINT.removeSuffix(".").lowercase()) {
+                            model.answerWeightOffer(addTab = true)
+                        }
+                        .semantics { contentDescription = WeightCopy.ADD_TAB }
+                        .padding(horizontal = 4.dp)
+                        .testTag("weight-offer-add"),
+                    contentAlignment = Alignment.Center,
+                ) {
+                    Box(
+                        Modifier.height(34.dp).background(colors.signalWash, CircleShape).border(1.dp, colors.signalEdge, CircleShape)
+                            .padding(horizontal = 14.dp),
+                        contentAlignment = Alignment.Center,
+                    ) { Text(WeightCopy.ADD_TAB, style = TakenType.sans(15, FontWeight.SemiBold), color = colors.signalInk) }
+                }
+            }
+        }
+        // The widget invite comes with its phase (NEXT 4).
         else -> Unit
     }
 }

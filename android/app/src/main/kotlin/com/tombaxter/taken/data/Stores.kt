@@ -13,6 +13,8 @@ import com.tombaxter.taken.core.pro.ProLedger
 import com.tombaxter.taken.core.pro.ProLedgerCodec
 import com.tombaxter.taken.core.profile.Profile
 import com.tombaxter.taken.core.profile.ProfileCodec
+import com.tombaxter.taken.core.weight.WeightCodec
+import com.tombaxter.taken.core.weight.WeightState
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -85,6 +87,17 @@ class TakenStores(
         produceFile = { file(LEDGER_FILE) },
     )
 
+    /**
+     * weights.json, the Weight tab's file (SPEC-ANDROID 5.1 and 12). An unreadable file is kept aside as
+     * `weights-unreadable-<unix>.json` and the tab starts empty, as the iPhone's WeightStore.readForWrite does.
+     */
+    val weights: DataStore<WeightState> = DataStoreFactory.create(
+        serializer = JsonFileSerializer(WeightState(), WeightCodec::decode, WeightCodec::encode),
+        corruptionHandler = ReplaceFileCorruptionHandler { setAside(WEIGHTS_FILE, "weights-unreadable-"); WeightState() },
+        scope = scope,
+        produceFile = { file(WEIGHTS_FILE) },
+    )
+
     val profile: DataStore<Profile> = DataStoreFactory.create(
         serializer = JsonFileSerializer(Profile(), ProfileCodec::decode, ProfileCodec::encode),
         corruptionHandler = ReplaceFileCorruptionHandler { Profile() },
@@ -113,6 +126,7 @@ class TakenStores(
         const val STACK_FILE = "taken.json"
         const val LEDGER_FILE = "pro.json"
         const val PROFILE_FILE = "profile.json"
+        const val WEIGHTS_FILE = WeightCodec.FILE_NAME
         const val PHOTO_FILE = "profile-photo.jpg"
         val SET_ASIDE_PREFIXES = listOf("taken-unreadable-", "todos-unreadable-", "weights-unreadable-")
     }

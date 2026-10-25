@@ -16,6 +16,7 @@ import com.tombaxter.taken.data.TakenStores
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.flow.catch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -35,13 +36,22 @@ class TakenApp : Application() {
 /**
  * Taken's few objects, by hand (SPEC-ANDROID 3.1: no DI framework for a graph this small,
  * https://developer.android.com/training/dependency-injection/manual): the stores, the persistence over them, and Taken
- * Pro's answer (until Google Play Billing, NEXT 2).
+ * Pro's answer. A release build asks Google Play through the one BillingClient of the process ([BuildWiring], SPEC-ANDROID
+ * 9.3); a debug build, whose `.debug` package Play sells nothing to, reads Pro as on.
  */
 class AppContainer(context: Context) {
     val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     val stores = TakenStores(context)
     val persistence = DataStorePersistence(stores, scope)
-    val pro: ProSource = ProSource.untilBilling
+    val weightPersistence = com.tombaxter.taken.data.DataStoreWeightPersistence(stores, scope)
+    val pro: ProSource = BuildWiring.pro(context, persistence, scope)
+
+    init {
+        // pro.json as it is written: the cached answer before Play's, the trials this phone recorded, the prices.
+        scope.launch {
+            stores.ledger.data.catch { }.collect { pro.adoptLedger(it.ledger) }
+        }
+    }
 }
 
 /**
@@ -61,6 +71,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 container.persistence.updateLedger { it ?: fresh }
             }
             val profile = stores.profile.data.first()
+            val weights = stores.weights.data.first()
             val photo = withContext(Dispatchers.IO) { com.tombaxter.taken.data.PhotoFile.read(stores.photoFile) }
             val loaded = AppModel(
                 persistence = container.persistence,
@@ -70,10 +81,17 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 initialPhoto = photo,
                 pro = container.pro,
                 clockNow = { Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS) },
+                scope = viewModelScope,
+                weightModel = WeightModel(
+                    persistence = container.weightPersistence,
+                    initialState = weights,
+                    clockNow = { Instant.now().truncatedTo(java.time.temporal.ChronoUnit.MILLIS) },
+                ),
             )
             model = loaded
             launch { stores.stack.data.collect { loaded.adopt(it) } }
             launch { stores.ledger.data.collect { file -> file.ledger?.let(loaded::adoptLedger) } }
+            launch { stores.weights.data.collect { loaded.weight.adopt(it) } }
         }
     }
 

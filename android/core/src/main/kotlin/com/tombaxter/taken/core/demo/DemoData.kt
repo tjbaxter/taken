@@ -8,6 +8,7 @@ import com.tombaxter.taken.core.model.Frequency
 import com.tombaxter.taken.core.model.Item
 import com.tombaxter.taken.core.model.StackSettings
 import com.tombaxter.taken.core.model.StackState
+import com.tombaxter.taken.core.weight.WeighIn
 import java.time.Instant
 import java.time.ZoneId
 import java.time.ZonedDateTime
@@ -138,6 +139,93 @@ object DemoData {
 
     /** The demo profile's name: its initials on every tab. */
     const val PROFILE_NAME = "Alex Morgan"
+
+    // The Weight tab's demo (SPEC 3.12, debug screenshots only), ported from Shared/DemoData.swift.
+
+    /**
+     * About 26 weeks of morning weigh-ins, most days: a flat-to-gently-falling line from about 92.6 kg that levels off
+     * near 88.9 kg, with the day-to-day swings a scale shows, to the nearest 0.05 kg. Today's is at 07:xx; without
+     * `includeToday` the history ends yesterday at 07:xx, and yesterday is never skipped.
+     */
+    fun weighIns(now: Instant, includeToday: Boolean = true, zone: ZoneId = ZoneId.systemDefault()): List<WeighIn> {
+        val clock = DayClock(settings.dayStartHour, zone)
+        val today = clock.day(now)
+        val random = SeededRandom(0x5CA1_2026L)
+        val span = 181
+        val out = ArrayList<WeighIn>()
+        for (offset in span downTo 0) {
+            // About one morning in seven goes without a weigh-in; the last one never does.
+            val skipped = random.next() % 7 == 0L && offset != 0 && (includeToday || offset != 1)
+            val swing = (random.next() % 90).toDouble() / 100 - 0.45
+            val minute = 5 + (random.next() % 45).toInt()
+            if (skipped || (!includeToday && offset == 0)) continue
+            val progress = (span - offset).toDouble() / span.toDouble()
+            val level = 92.6 - 3.7 * (1 - Math.pow(1 - progress, 1.6))
+            val at = clock.date(today.adding(-offset), 7, minute)
+            out.add(WeighIn(kg = nearestTwentieth(level + swing), weighedAt = at, utcOffset = DayClock.offset(zone, at)))
+        }
+        return out
+    }
+
+    /**
+     * The goal screens' history (REDESIGN.md, "Goal and moments"): the first weigh-in exactly 97.8 kg, 231 days before the
+     * demo day, then about six mornings in seven, falling about 0.3 kg a week with a fixed swing of up to 0.45 kg, to a
+     * trend of 88.08 today: one point (5%) and "1.1 kg to 87.0" with the goal 87.0 and 180 cm. `extraWeeks` starts it
+     * that much earlier and carries on down 0.24 kg a week, to a trend of about 86.8 and all three points
+     * (`weight-goal-reached`). `momentKg` adds one more weigh-in today (`weight-goal-moment`: 87.1 takes the trend below
+     * 88.02, the 10% point). WeightGoalTests pins all three.
+     */
+    fun goalWeighIns(now: Instant, extraWeeks: Int = 0, momentKg: Double? = null, zone: ZoneId = ZoneId.systemDefault()): List<WeighIn> {
+        val clock = DayClock(settings.dayStartHour, zone)
+        val today = clock.day(now)
+        val random = SeededRandom(0x60A1_0701L)
+        val base = 231
+        val span = base + 7 * extraWeeks
+        val out = ArrayList<WeighIn>()
+        for (offset in span downTo 0) {
+            val day = span - offset
+            // About one morning in seven goes without a weigh-in; the first and today never do.
+            val skipped = random.next() % 7 == 0L && offset != 0 && day != 0
+            val swing = (random.next() % 91).toDouble() / 100 - 0.45
+            val minute = 5 + (random.next() % 45).toInt()
+            if (skipped) continue
+            val level = if (day <= base) {
+                97.8 - 0.3 * day.toDouble() / 7
+            } else {
+                97.8 - 0.3 * base.toDouble() / 7 - 0.24 * (day - base).toDouble() / 7
+            }
+            val kg = if (day == 0) 97.8 else nearestTwentieth(level + swing)
+            val at = clock.date(today.adding(-offset), 7, minute)
+            out.add(WeighIn(kg = kg, weighedAt = at, utcOffset = DayClock.offset(zone, at)))
+        }
+        if (momentKg != null) {
+            val at = clock.date(today, 7, 58)
+            out.add(WeighIn(kg = momentKg, weighedAt = at, utcOffset = DayClock.offset(zone, at)))
+        }
+        return out
+    }
+
+    /**
+     * The stack with a weekly shot added: Semaglutide on today's weekday, logged at 08:00 every week for 26 weeks, today
+     * included, for the chart's dose ticks and Today's one-time weight offer.
+     */
+    fun withWeeklyShot(state: StackState, now: Instant, zone: ZoneId = ZoneId.systemDefault()): StackState {
+        val clock = DayClock(settings.dayStartHour, zone)
+        val today = clock.day(now)
+        val shot = Item(
+            name = "Semaglutide", code = "SEM", frequency = Frequency.Weekdays(setOf(today.weekday)),
+            createdAt = clock.start(today.adding(-182)), sortIndex = state.items.size,
+        )
+        val doses = state.doses + (0..25).map { week -> Dose(itemId = shot.id, takenAt = clock.date(today.adding(-7 * week), 8, 0)) }
+        return state.copy(items = state.items + shot, doses = doses, settings = state.settings.copy())
+    }
+
+    /** Swift's `(value * 20).rounded() / 20`: the nearest 0.05, halves away from zero. */
+    private fun nearestTwentieth(value: Double): Double {
+        val scaled = value * 20
+        val rounded = if (scaled < 0) -Math.floor(-scaled + 0.5) else Math.floor(scaled + 0.5)
+        return rounded / 20
+    }
 }
 
 /** Small deterministic generator so demo history looks the same on every run: state × 6364136223846793005 + 1442695040888963407. */

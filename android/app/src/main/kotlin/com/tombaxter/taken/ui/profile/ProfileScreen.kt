@@ -68,6 +68,10 @@ import com.tombaxter.taken.Sheet
 import com.tombaxter.taken.core.format.Fmt
 import com.tombaxter.taken.core.model.Item
 import com.tombaxter.taken.core.profile.Profile
+import com.tombaxter.taken.core.weight.WeightCSV
+import com.tombaxter.taken.core.weight.WeightCopy
+import com.tombaxter.taken.requireWeightPro
+import com.tombaxter.taken.setWeightTab
 import com.tombaxter.taken.ui.components.AvatarImage
 import com.tombaxter.taken.ui.components.Card
 import com.tombaxter.taken.ui.components.ConfirmDialog
@@ -105,9 +109,9 @@ object ProfileCopy {
 }
 
 /**
- * Profile (SPEC-ANDROID 6.3 and 7.1): a full screen with Up and back, changes saved as they are made. CORE's sections, in
- * the iPhone's order: the header (photo, name, streak), Stack, Look, Your day, Feel, Data, About. Reminder, Taken Pro and
- * Weight join with their phases.
+ * Profile (SPEC-ANDROID 6.3 and 7.1): a full screen with Up and back, changes saved as they are made. The sections, in
+ * the iPhone's order: the header (photo, name, streak), Stack, Look, Your day, Feel, Weight, Taken Pro, Data, About.
+ * Reminder joins with its phase.
  */
 @Composable
 fun ProfileScreen(model: AppModel, platform: Platform) {
@@ -144,10 +148,21 @@ fun ProfileScreen(model: AppModel, platform: Platform) {
                 Footnote(ProfileCopy.DAY_FOOTNOTE)
                 Section("Feel")
                 Card { SwitchRow("Haptics", checked = model.hapticsOn) { model.setHaptics(it) } }
+                // The way in and the way back for the Weight tab (SPEC 3.12): one switch, off until the person turns it
+                // on. Turning it off never deletes a weigh-in.
+                Section(WeightCopy.PROFILE_SECTION)
+                Card {
+                    Box(Modifier.testTag("weight-switch")) {
+                        SwitchRow(WeightCopy.PROFILE_SWITCH, checked = model.weight.showsTab) { model.setWeightTab(it) }
+                    }
+                }
+                Footnote(WeightCopy.PROFILE_FOOTNOTE)
+                ProSection(model, platform)
                 Section("Data")
                 Card {
                     Column {
                         LinkRow("Export CSV") { platform.shareCsv(model.csvExport()) }
+                        WeightDataRows(model, platform)
                         RowDivider()
                         LinkRow("Erase all data", danger = true) { confirmErase = true }
                     }
@@ -180,6 +195,38 @@ fun ProfileScreen(model: AppModel, platform: Platform) {
             },
             onDismiss = { confirmErase = false },
         )
+    }
+}
+
+/**
+ * Export weight CSV (always open, PRO.md: the record is never held back) and Import weight CSV (bulk backdating, so it
+ * follows the weigh-in rule), once the tab is on or there are weigh-ins. Never on the capture path.
+ */
+@Composable
+private fun WeightDataRows(model: AppModel, platform: Platform) {
+    val weight = model.weight
+    if (!weight.showsDataRows) return
+    if (!weight.isEmpty) {
+        RowDivider()
+        Box(Modifier.testTag("export-weight")) {
+            LinkRow(WeightCopy.EXPORT_CSV) {
+                val zone = model.clock.zone
+                val state = weight.state
+                platform.shareWeightCsv { WeightCSV.make(state.weighIns, zone) }
+            }
+        }
+    }
+    RowDivider()
+    Box(Modifier.testTag("import-weight")) {
+        LinkRow(WeightCopy.IMPORT_CSV) {
+            weight.importNote = null
+            model.requireWeightPro {
+                platform.importWeightCsv()
+            }
+        }
+    }
+    weight.importNote?.let { note ->
+        Text(note, style = TakenType.sans(15), color = Taken.colors.fgSubtle, modifier = Modifier.padding(horizontal = 16.dp, vertical = 10.dp))
     }
 }
 
@@ -396,7 +443,7 @@ private fun ReorderRow(model: AppModel, item: Item, index: Int, count: Int) {
 private val SECTION_INSET = 16.dp
 
 @Composable
-private fun Section(title: String, trailing: String? = null) {
+internal fun Section(title: String, trailing: String? = null) {
     val colors = Taken.colors
     Row(Modifier.fillMaxWidth().padding(start = SECTION_INSET, top = 22.dp, bottom = 8.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(title, style = TakenType.sans(15, FontWeight.SemiBold), color = colors.fgMuted, modifier = Modifier.weight(1f).semantics { heading() })
@@ -405,12 +452,12 @@ private fun Section(title: String, trailing: String? = null) {
 }
 
 @Composable
-private fun Footnote(text: String) {
+internal fun Footnote(text: String) {
     Text(text, style = TakenType.sans(14), color = Taken.colors.fgSubtle, modifier = Modifier.padding(top = 8.dp, start = SECTION_INSET))
 }
 
 @Composable
-private fun LinkRow(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, danger: Boolean = false, onClick: () -> Unit) {
+internal fun LinkRow(title: String, icon: androidx.compose.ui.graphics.vector.ImageVector? = null, danger: Boolean = false, onClick: () -> Unit) {
     val colors = Taken.colors
     Row(
         Modifier.fillMaxWidth().heightIn(min = 52.dp).clickable(role = Role.Button, onClick = onClick).padding(horizontal = 16.dp),

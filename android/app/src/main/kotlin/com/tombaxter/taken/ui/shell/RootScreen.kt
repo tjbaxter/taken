@@ -69,8 +69,6 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
-import androidx.compose.ui.window.Dialog
-import androidx.compose.ui.window.DialogProperties
 import androidx.navigation3.runtime.NavEntry
 import androidx.navigation3.ui.NavDisplay
 import com.tombaxter.taken.AppModel
@@ -80,11 +78,9 @@ import com.tombaxter.taken.Haptic
 import com.tombaxter.taken.Route
 import com.tombaxter.taken.Sheet
 import com.tombaxter.taken.Toast
-import com.tombaxter.taken.core.pro.ProCopy
 import com.tombaxter.taken.ui.add.AddSheet
 import com.tombaxter.taken.ui.components.Announcement
 import com.tombaxter.taken.ui.components.AvatarImage
-import com.tombaxter.taken.ui.components.CapsuleGlyph
 import com.tombaxter.taken.ui.components.CloseButton
 import com.tombaxter.taken.ui.components.Symbols
 import com.tombaxter.taken.ui.day.DaySheet
@@ -92,12 +88,18 @@ import com.tombaxter.taken.ui.history.HistoryScreen
 import com.tombaxter.taken.ui.item.ItemEditorScreen
 import com.tombaxter.taken.ui.item.ItemSheet
 import com.tombaxter.taken.ui.item.SetTimeSheet
+import com.tombaxter.taken.ui.paywall.PaywallHost
 import com.tombaxter.taken.ui.profile.ProfileScreen
 import com.tombaxter.taken.ui.theme.Taken
 import com.tombaxter.taken.ui.theme.TakenTheme
 import com.tombaxter.taken.ui.theme.TakenType
 import com.tombaxter.taken.ui.today.TakeAllButton
 import com.tombaxter.taken.ui.today.TodayScreen
+import com.tombaxter.taken.closeWeighIns
+import com.tombaxter.taken.core.weight.WeightCopy
+import com.tombaxter.taken.ui.weight.WeighInsSheet
+import com.tombaxter.taken.ui.weight.WeightGoalSheet
+import com.tombaxter.taken.ui.weight.WeightScreen
 
 /** What the screen needs from Android beyond the model: TalkBack's state, sharing a file, picking a photo. */
 interface Platform {
@@ -109,6 +111,23 @@ interface Platform {
     fun openUrl(url: String)
     val versionName: String
 
+    /**
+     * Notifications are turned off for Taken where Android lets the person turn them off (the app's notification
+     * settings, or a refused prompt on Android 13+). The paywall then promises no reminder it knows cannot come. Not
+     * asked yet counts as on: the ask may follow a trial.
+     */
+    val notificationsOff: Boolean
+
+    /** Shares taken-weight.csv through the Sharesheet; `make` builds its text, off the main thread. */
+    fun shareWeightCsv(make: () -> String) = Unit
+
+    /**
+     * Opens Android's document picker for a CSV, TSV or plain text file (`ActivityResultContracts.OpenDocument`,
+     * https://developer.android.com/training/data-storage/shared/documents-files); the file read goes to
+     * `AppModel.importWeights`. Nothing when the picker is cancelled.
+     */
+    fun importWeightCsv() = Unit
+
     companion object {
         /** For tests and captures: nothing leaves the screen. */
         val none: Platform = object : Platform {
@@ -117,6 +136,7 @@ interface Platform {
             override fun pickPhoto() = Unit
             override fun openUrl(url: String) = Unit
             override val versionName = "1.0.0"
+            override val notificationsOff = false
         }
     }
 }
@@ -153,8 +173,8 @@ fun TakenRoot(model: AppModel, platform: Platform) {
             )
             Announcement(announcement)
         }
-        SheetsHost(model)
-        PaywallHost(model)
+        SheetsHost(model, platform)
+        PaywallHost(model, platform)
     }
 }
 
@@ -166,13 +186,15 @@ fun TakenRoot(model: AppModel, platform: Platform) {
 fun MainShell(model: AppModel, platform: Platform) {
     val colors = Taken.colors
     BackHandler(enabled = model.editingStack || model.tab != AppTab.TODAY) { model.backOnTabs() }
+    // A tab that is not on the bar never stays in front (weights.json changed elsewhere with the Weight tab in front).
+    LaunchedEffect(model.weight.showsTab) { if (model.tab !in model.visibleTabs) model.tab = AppTab.TODAY }
     BoxWithConstraints(Modifier.fillMaxSize().background(colors.bg)) {
         val wide = maxWidth >= 600.dp
         if (wide) {
             Row(Modifier.fillMaxSize()) {
                 NavigationRail(containerColor = colors.bg, modifier = Modifier.fillMaxHeight()) {
                     Spacer(Modifier.height(12.dp))
-                    for (tab in AppTab.entries) {
+                    for (tab in model.visibleTabs) {
                         NavigationRailItem(
                             selected = model.tab == tab,
                             onClick = { model.tab = tab },
@@ -195,7 +217,7 @@ fun MainShell(model: AppModel, platform: Platform) {
                 Box(Modifier.weight(1f).fillMaxWidth()) { TabContent(model, platform, wide = false) }
                 Box(Modifier.fillMaxWidth().height(1.dp).background(colors.line))
                 NavigationBar(containerColor = colors.bg, tonalElevation = 0.dp) {
-                    for (tab in AppTab.entries) {
+                    for (tab in model.visibleTabs) {
                         NavigationBarItem(
                             selected = model.tab == tab,
                             onClick = { model.tab = tab },
@@ -218,11 +240,14 @@ fun MainShell(model: AppModel, platform: Platform) {
 private fun tabTitle(tab: AppTab): String = when (tab) {
     AppTab.TODAY -> "Today"
     AppTab.HISTORY -> "History"
+    AppTab.WEIGHT -> WeightCopy.TAB
 }
 
+/** Material Symbols: pill, calendar_month and, for Weight, monitor_weight (a bathroom scale; the iPhone's scalemass). */
 private fun tabIcon(tab: AppTab, selected: Boolean) = when (tab) {
     AppTab.TODAY -> if (selected) Symbols.PillFill else Symbols.Pill
     AppTab.HISTORY -> if (selected) Symbols.CalendarMonthFill else Symbols.CalendarMonth
+    AppTab.WEIGHT -> if (selected) Symbols.MonitorWeightFill else Symbols.MonitorWeight
 }
 
 /**
@@ -239,7 +264,7 @@ private fun TabContent(model: AppModel, platform: Platform, wide: Boolean) {
     }
     Box(Modifier.fillMaxSize().windowInsetsPadding(WindowInsets.safeDrawing.only(sides))) {
         when (model.tab) {
-            AppTab.TODAY -> TodayScreen(model) {
+            AppTab.TODAY -> TodayScreen(model, openUrl = platform::openUrl) {
                 Column {
                     ToastHost(model, platform)
                     TakeAllButton(model)
@@ -249,6 +274,7 @@ private fun TabContent(model: AppModel, platform: Platform, wide: Boolean) {
                 Box(Modifier.weight(1f)) { HistoryScreen(model) }
                 ToastHost(model, platform)
             }
+            AppTab.WEIGHT -> WeightScreen(model, platform)
         }
     }
 }
@@ -269,19 +295,25 @@ fun TabHeader(model: AppModel, title: String, subtitle: String?) {
             }
         }
         Spacer(Modifier.width(12.dp))
-        Box(
-            Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .clickable(role = Role.Button) { model.openProfile() }
-                .semantics {
-                    contentDescription = if (model.profile.name.isEmpty()) "Profile and settings" else "${model.profile.name}, profile and settings"
-                }
-                .testTag("avatar"),
-            contentAlignment = Alignment.Center,
-        ) {
-            AvatarImage(model.profile.initials, rememberPhoto(model.photo), 36.dp)
-        }
+        AvatarButton(model)
+    }
+}
+
+/** The profile avatar in the top corner of every tab: a 48 dp target, TalkBack "Profile and settings". */
+@Composable
+fun AvatarButton(model: AppModel) {
+    Box(
+        Modifier
+            .size(48.dp)
+            .clip(CircleShape)
+            .clickable(role = Role.Button) { model.openProfile() }
+            .semantics {
+                contentDescription = if (model.profile.name.isEmpty()) "Profile and settings" else "${model.profile.name}, profile and settings"
+            }
+            .testTag("avatar"),
+        contentAlignment = Alignment.Center,
+    ) {
+        AvatarImage(model.profile.initials, rememberPhoto(model.photo), 36.dp)
     }
 }
 
@@ -293,42 +325,15 @@ fun rememberPhoto(bytes: ByteArray?): ImageBitmap? = remember(bytes) {
 
 /** One sheet at a time, over whatever is in front. */
 @Composable
-private fun SheetsHost(model: AppModel) {
+private fun SheetsHost(model: AppModel, platform: Platform) {
     when (val sheet = model.sheet) {
         null -> Unit
         Sheet.Add -> AddSheet(model) { model.sheet = null }
         is Sheet.Day -> DaySheet(model, sheet.day) { model.sheet = null }
         is Sheet.SetTime -> SetTimeSheet(model, sheet.itemId) { model.sheet = null }
         is Sheet.EditItem -> ItemSheet(model, sheet.itemId) { model.sheet = null }
-    }
-}
-
-/**
- * The paywall's place. Taken Pro's purchase screen comes with Google Play Billing (NEXT 2, SPEC-ANDROID 9.6); until then
- * locked mode is reachable only in tests, and this shows the headline and a visible close.
- */
-@Composable
-private fun PaywallHost(model: AppModel) {
-    if (model.paywall == null) return
-    val colors = Taken.colors
-    Dialog(onDismissRequest = { model.closePaywall() }, properties = DialogProperties(usePlatformDefaultWidth = false)) {
-        Column(Modifier.fillMaxSize().background(colors.bg).windowInsetsPadding(WindowInsets.safeDrawing).testTag("paywall")) {
-            Row(Modifier.fillMaxWidth().padding(start = 20.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-                CapsuleGlyph(Modifier.size(22.dp))
-                Spacer(Modifier.width(10.dp))
-                Text("Taken Pro", style = TakenType.sans(17, FontWeight.SemiBold), color = colors.fg, modifier = Modifier.weight(1f))
-                CloseButton { model.closePaywall() }
-            }
-            Spacer(Modifier.height(40.dp))
-            Text(
-                ProCopy.HEADLINE,
-                style = TakenType.sans(36, FontWeight.SemiBold),
-                color = colors.fg,
-                modifier = Modifier.padding(horizontal = 24.dp).semantics { heading() },
-            )
-            Spacer(Modifier.height(10.dp))
-            Text("Every dose, logged to the minute.", style = TakenType.sans(17), color = colors.fgMuted, modifier = Modifier.padding(horizontal = 24.dp))
-        }
+        Sheet.WeighIns -> WeighInsSheet(model, platform) { model.closeWeighIns() }
+        Sheet.WeightGoal -> WeightGoalSheet(model) { model.sheet = null }
     }
 }
 

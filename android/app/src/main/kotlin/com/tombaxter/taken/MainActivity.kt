@@ -1,5 +1,6 @@
 package com.tombaxter.taken
 
+import android.Manifest
 import android.content.ActivityNotFoundException
 import android.content.ContentResolver
 import android.content.Intent
@@ -23,6 +24,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
@@ -55,6 +57,28 @@ class MainActivity : ComponentActivity(), Platform {
         lifecycleScope.launch {
             val jpeg = withContext(Dispatchers.Default) { ProfilePhotos.prepare(contentResolver, uri) } ?: return@launch
             viewModel.model?.setProfilePhoto(jpeg)
+        }
+    }
+
+    /**
+     * Import weight CSV: Android's document picker for a CSV, TSV or plain text file, no storage permission
+     * (https://developer.android.com/training/data-storage/shared/documents-files). The bytes are read off the main thread,
+     * and the result goes to the model, so a picker that outlives a rotation still lands.
+     */
+    private val weightPicker = registerForActivityResult(ActivityResultContracts.OpenDocument()) { uri ->
+        if (uri == null) return@registerForActivityResult
+        lifecycleScope.launch {
+            val bytes = withContext(Dispatchers.IO) {
+                try {
+                    contentResolver.openInputStream(uri)?.use { it.readBytes() }
+                } catch (e: IOException) {
+                    null
+                } catch (e: SecurityException) {
+                    null
+                }
+            }
+            val text = bytes?.let { withContext(Dispatchers.Default) { com.tombaxter.taken.core.weight.WeightImport.text(it) } }
+            viewModel.model?.importWeights(text)
         }
     }
 
@@ -104,6 +128,29 @@ class MainActivity : ComponentActivity(), Platform {
         }
     }
 
+    private val pro: ProSource get() = (application as TakenApp).container.pro
+
+    override fun onStart() {
+        super.onStart()
+        // Google: connect the BillingClient "when your app is launched or comes to the foreground"
+        // (https://developer.android.com/google/play/billing/integrate). Taken Pro asks Play for the account's purchases.
+        pro.attach(this)
+        pro.foreground()
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Google: "call queryPurchasesAsync() in your app's onResume() method to handle purchases that have transitioned to
+        // the PURCHASED state while your app was not running" (same page).
+        pro.resumed()
+    }
+
+    override fun onDestroy() {
+        // Play's purchase screen needs a live activity; a destroyed one is never handed to it.
+        pro.attach(null)
+        super.onDestroy()
+    }
+
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
         pendingLink?.let { outState.putString(PENDING_LINK, it) }
@@ -128,12 +175,25 @@ class MainActivity : ComponentActivity(), Platform {
      * The log is built and written off the main thread, where disk work never belongs
      * (https://developer.android.com/topic/performance/vitals/anr); the Sharesheet opens back on it.
      */
-    override fun shareCsv(make: () -> String) {
+    override fun shareCsv(make: () -> String) = share(com.tombaxter.taken.core.stack.CsvExport.FILE_NAME, make)
+
+    /** taken-weight.csv, the same way. */
+    override fun shareWeightCsv(make: () -> String) = share(com.tombaxter.taken.core.weight.WeightCSV.FILE_NAME, make)
+
+    override fun importWeightCsv() {
+        try {
+            weightPicker.launch(arrayOf("text/csv", "text/comma-separated-values", "text/tab-separated-values", "text/plain"))
+        } catch (e: ActivityNotFoundException) {
+            viewModel.model?.importWeights(null)
+        }
+    }
+
+    private fun share(fileName: String, make: () -> String) {
         lifecycleScope.launch {
             val uri = withContext(Dispatchers.IO) {
                 try {
                     val folder = File(cacheDir, "exports").apply { mkdirs() }
-                    val file = File(folder, com.tombaxter.taken.core.stack.CsvExport.FILE_NAME)
+                    val file = File(folder, fileName)
                     file.writeText(make())
                     FileProvider.getUriForFile(this@MainActivity, "$packageName.files", file)
                 } catch (e: IOException) {
@@ -160,6 +220,14 @@ class MainActivity : ComponentActivity(), Platform {
             // No browser on this phone: nothing to open.
         }
     }
+
+    override val notificationsOff: Boolean
+        get() {
+            if (NotificationManagerCompat.from(this).areNotificationsEnabled()) return false
+            // Before Android 13 notifications are on unless turned off; from 13 a prompt not yet answered may still come.
+            if (Build.VERSION.SDK_INT < 33) return true
+            return checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) == PackageManager.PERMISSION_GRANTED
+        }
 
     override val versionName: String
         get() = try {

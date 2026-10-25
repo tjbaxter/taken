@@ -1,0 +1,266 @@
+name: Android release
+
+# The signed release bundle of Taken for Android for Google Play (android/SPEC-ANDROID.md 15.4 and 16). Run by hand only.
+#
+# 1. A gate: android.yml must have passed on exactly this Android code (its tests, lint, screenshots and bundle checks).
+# 2. The versionCode: version_code_offset + this workflow's run number (below).
+# 3. :app:bundleRelease with R8, signed with the upload key. Play App Signing holds the app signing key; Taken only
+#    ever signs with the upload key (https://support.google.com/googleplay/android-developer/answer/9842756). The
+#    keystore is decoded from the repository secret into the runner's temp directory, never the workspace, readable by
+#    this user only, and deleted in an always() step; the password and alias reach Gradle as environment variables
+#    (app/build.gradle.kts), never on a command line.
+# 4. android/ci/check-bundle.sh, the same checks as android.yml, plus: the versionCode, and the signature: jarsigner
+#    verifies it and keytool shows exactly one signer whose SHA-256 is the upload certificate's below.
+# 5. The bundle as a workflow artifact for 7 days, not zipped, so the downloaded file is the .aab to hand to Play Console
+#    (the first bundle must go through the Console: SPEC-ANDROID 14.1, step 3). The bundle holds no secret: the source is
+#    public and the upload key's private half is not in it.
+# 6. From AAB #2 on, the upload to Play's internal testing track through the Android Publisher API. It runs only from
+#    main and only once the Workload Identity Federation variables exist (NEXT 2, which needs Tom); until then the job is
+#    skipped, never failed.
+#
+# Builds from any branch are allowed, so the first internal build can be made before CORE reaches main; only main ever
+# uploads to Play [Own choice]. This repository is public, so its logs are too: default log levels, secrets only on the
+# steps that use them, nothing secret ever printed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      version_code_offset:
+        # versionCode = this offset + github.run_number. The run number "begins at 1 for the workflow's first run, and
+        # increments with each new run", and "does not change if you re-run the workflow run"
+        # (https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#github-context). So every run
+        # gets a new, higher code, as Play requires ("each successive release of your app uses a greater value", and
+        # no code can be uploaded twice, https://developer.android.com/studio/publish/versioning), and a re-run is
+        # refused below so one code never names two different bundles. The run number restarts only if this file is
+        # renamed or recreated: raise the offset past the last code then. Never lower it.
+        description: "versionCode = this + the run number. Only ever raise it (see the comment in the file)."
+        type: number
+        required: true
+        default: 1000
+      play_release_status:
+        description: "Play upload only (main, NEXT 2): completed serves internal testers at once; draft waits in Play Console."
+        type: choice
+        options: [completed, draft]
+        default: completed
+
+# One release at a time: Play allows a user "only a single edit open at a time"
+# (https://developers.google.com/android-publisher/edits), and runs waiting in line all run, in order (queue: max).
+concurrency:
+  group: android-release
+  cancel-in-progress: false
+  queue: max
+
+# actions: read lets the gate list android.yml's runs.
+permissions:
+  contents: read
+  actions: read
+
+env:
+  # The upload certificate's SHA-256 fingerprint: public (Play Console shows it under App signing), recorded in
+  # SPEC-ANDROID's appendix. The bundle must be signed by this certificate and no other.
+  UPLOAD_CERT_SHA256: "B2:31:09:1A:B4:4E:2D:CB:82:65:A2:18:61:CA:14:1E:5F:DA:96:8A:2E:BC:4B:17:0B:84:00:1F:74:F2:38:7B"
+
+jobs:
+  bundle:
+    name: Signed release bundle and its checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    outputs:
+      artifact: ${{ steps.name.outputs.file }}
+    defaults:
+      run:
+        working-directory: android
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The gate reads the history.
+          fetch-depth: 0
+          persist-credentials: false
+
+      # Nothing ships that android.yml has not passed. A green run counts when it is this commit or an ancestor and
+      # nothing it builds or checks has changed since: android/ (Markdown aside, as ship-setup ignores it for ci.yml),
+      # android.yml itself, and the Play listing files with their check when they exist (SPEC-ANDROID 15.4). Any
+      # branch's run counts, as in .github/actions/ship-setup.
+      - name: android.yml passed for this code
+        working-directory: .
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          head="$(git rev-parse HEAD)"
+          shas="$(gh run list -R "$GITHUB_REPOSITORY" --workflow android.yml --status success --limit 100 \
+                    --json headSha --jq '.[].headSha' | awk '!seen[$0]++')"
+          for sha in $shas; do
+            git cat-file -e "$sha^{commit}" 2>/dev/null || continue
+            git merge-base --is-ancestor "$sha" "$head" || continue
+            if git diff --quiet "$sha" "$head" -- android .github/workflows/android.yml store/play \
+                 scripts/check-play-metadata.py ':(exclude)android/**/*.md'; then
+              echo "android.yml passed on $sha, and nothing it builds or checks has changed since"
+              exit 0
+            fi
+          done
+          echo "::error::No green android.yml run covers the Android code at $head. Let android.yml pass first."
+          exit 1
+
+      - name: Version code
+        id: version
+        env:
+          OFFSET: ${{ inputs.version_code_offset }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_RUN_ATTEMPT" != "1" ]; then
+            echo "::error::A re-run keeps run number $GITHUB_RUN_NUMBER, so it would make a second, different bundle with the same versionCode. Dispatch a new run instead."
+            exit 1
+          fi
+          if ! [[ "$OFFSET" =~ ^[0-9]+$ ]] || [ "$OFFSET" -lt 1000 ]; then
+            echo "::error::version_code_offset must be a whole number of at least 1000, not '$OFFSET'"
+            exit 1
+          fi
+          code=$((OFFSET + GITHUB_RUN_NUMBER))
+          if [ "$code" -gt 2100000000 ]; then
+            echo "::error::versionCode $code is above 2100000000, the greatest Play allows"
+            exit 1
+          fi
+          echo "versionCode $code = offset $OFFSET + run number $GITHUB_RUN_NUMBER"
+          echo "code=$code" >> "$GITHUB_OUTPUT"
+
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      # Read-only cache: this job may reuse downloaded dependencies but never writes a cache other runs would read.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+        with:
+          cache-read-only: true
+
+      # GitHub's documented way to keep a binary in a secret: base64, decoded to a file in the job
+      # (https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/use-secrets). printf is a
+      # shell builtin, so the value never appears in a process list.
+      - name: Upload key into the runner's temp directory
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${KEYSTORE_BASE64:-}" ]; then
+            echo "::error::Missing repository secret ANDROID_UPLOAD_KEYSTORE_BASE64"
+            exit 1
+          fi
+          umask 077
+          store="$RUNNER_TEMP/taken-upload.p12"
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > "$store"
+          chmod 600 "$store"
+          echo "TAKEN_UPLOAD_STORE_FILE=$store" >> "$GITHUB_ENV"
+          echo "Upload keystore decoded: $(stat -c '%a %s bytes' "$store")"
+
+      # From source in this run: --no-build-cache reuses no task output from earlier builds, and
+      # --no-configuration-cache keeps the signing values out of Gradle's on-disk configuration cache.
+      - name: Signed release bundle with R8
+        env:
+          TAKEN_UPLOAD_STORE_PASSWORD: ${{ secrets.ANDROID_UPLOAD_KEYSTORE_PASSWORD }}
+          TAKEN_UPLOAD_KEY_ALIAS: ${{ vars.ANDROID_UPLOAD_KEY_ALIAS }}
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -euo pipefail
+          if [ -z "${TAKEN_UPLOAD_STORE_PASSWORD:-}" ] || [ -z "${TAKEN_UPLOAD_KEY_ALIAS:-}" ]; then
+            echo "::error::Missing secret ANDROID_UPLOAD_KEYSTORE_PASSWORD or variable ANDROID_UPLOAD_KEY_ALIAS"
+            exit 1
+          fi
+          ./gradlew :app:bundleRelease -PtakenVersionCode="$VERSION_CODE" --no-build-cache --no-configuration-cache \
+            --stacktrace
+
+      - name: Remove the upload key
+        if: always()
+        run: |
+          rm -f "$RUNNER_TEMP/taken-upload.p12"
+          ./gradlew --stop >/dev/null 2>&1 || true
+          echo "Upload keystore removed"
+
+      - name: Check the bundle
+        env:
+          VERSION_CODE: ${{ steps.version.outputs.code }}
+        run: |
+          set -euo pipefail
+          ci/check-bundle.sh app/build/outputs/bundle/release/app-release.aab --version-code "$VERSION_CODE" \
+            --signed-by "$UPLOAD_CERT_SHA256" --facts "$RUNNER_TEMP/facts"
+          cat "$RUNNER_TEMP/facts" >> "$GITHUB_ENV"
+
+      - name: Name the bundle
+        id: name
+        run: |
+          set -euo pipefail
+          file="taken-${version_name}-${version_code}.aab"
+          mkdir -p "$RUNNER_TEMP/out"
+          cp app/build/outputs/bundle/release/app-release.aab "$RUNNER_TEMP/out/$file"
+          echo "file=$file" >> "$GITHUB_OUTPUT"
+
+      - name: Bundle artifact
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          path: ${{ runner.temp }}/out/${{ steps.name.outputs.file }}
+          # Not zipped: the artifact is the .aab itself, named after it.
+          archive: false
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Summary
+        env:
+          FILE: ${{ steps.name.outputs.file }}
+        run: |
+          set -euo pipefail
+          mb="$(awk -v b="$bytes" 'BEGIN { printf "%.2f", b / 1e6 }')"
+          sha="$(sha256sum "$RUNNER_TEMP/out/$FILE" | cut -d' ' -f1)"
+          {
+            echo "### Taken for Android $version_name ($version_code)"
+            echo ""
+            echo "| | |"
+            echo "| --- | --- |"
+            echo "| Artifact and file | \`$FILE\` |"
+            echo "| Size | $bytes bytes ($mb MB) |"
+            echo "| versionCode | $version_code |"
+            echo "| versionName | $version_name |"
+            echo "| Signed by (SHA-256) | \`$signer_sha256\` |"
+            echo "| Bundle SHA-256 | \`$sha\` |"
+            echo "| Commit | \`$GITHUB_SHA\` |"
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          if [ "$bytes" -gt 10000000 ]; then
+            echo "::warning::The bundle is $mb MB, over the 10 MB the browser used for the first hand upload takes"
+          fi
+
+  play:
+    name: Upload to Play internal testing
+    needs: bundle
+    # Skipped, not failed, until the Play Developer API access exists (NEXT 2; a Google Cloud service account invited
+    # in Play Console, reached through Workload Identity Federation, needs Tom). Only main uploads.
+    if: github.ref == 'refs/heads/main' && vars.PLAY_WORKLOAD_IDENTITY_PROVIDER != '' && vars.PLAY_SERVICE_ACCOUNT != ''
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      # Only this job may ask GitHub for an OIDC token, which Workload Identity Federation trades for a short-lived
+      # Google access token: "Workload Identity Federation is recommended over Service Account Keys"
+      # (https://github.com/google-github-actions/auth).
+      id-token: write
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: android/ci
+      # The not-zipped artifact downloads as the .aab itself.
+      - uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: ${{ needs.bundle.outputs.artifact }}
+          path: ${{ runner.temp }}/bundle
+      - id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3.0.0
+        with:
+          workload_identity_provider: ${{ vars.PLAY_WORKLOAD_IDENTITY_PROVIDER }}
+          service_account: ${{ vars.PLAY_SERVICE_ACCOUNT }}
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+          create_credentials_file: false
+      - name: Upload to the internal testing track
+        env:
+          PLAY_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          BUNDLE: ${{ runner.temp }}/bundle/${{ needs.bundle.outputs.artifact }}
+          STATUS: ${{ inputs.play_release_status }}
+        run: python3 -I android/ci/play-upload.py com.tombaxter.taken "$BUNDLE" internal "$STATUS"

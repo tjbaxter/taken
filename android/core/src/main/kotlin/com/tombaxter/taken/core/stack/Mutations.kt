@@ -140,13 +140,14 @@ fun StackState.logActiveDose(itemId: UUID, at: Instant, zone: ZoneId = ZoneId.sy
  * Widget row tap: log only while a dose is still pending today and the item was not logged in the last hour, so a stale
  * widget or a second tap never double logs.
  */
-fun StackState.logNextDoseIfPending(itemId: UUID, now: Instant, clock: DayClock): Dose? {
+fun StackState.logNextDoseIfPending(itemId: UUID, now: Instant, clock: DayClock, id: UUID = UUID.randomUUID()): Dose? {
     val item = item(itemId) ?: return null
     if (item.archived) return null
     val engine = StackEngine(this, clock)
     val today = engine.itemDay(item, clock.day(now))
     if (!engine.canQuickLog(today, now)) return null
-    return logDose(itemId, now, clock.zone)
+    // The id is made by the caller (Android): a write replayed onto a file that moved on stores the same dose.
+    return insertDose(doseAt(itemId, now, clock.zone, id))
 }
 
 /**

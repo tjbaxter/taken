@@ -54,12 +54,15 @@ class ScreenshotTests {
     /** The review frames get a phone's system bars; the store frames do not (real app only, no device chrome). */
     private var systemBars = true
 
+    /** The keyboard's height for the typing frames: Robolectric draws no keyboard, so its space shows as the inset. */
+    private var keyboard by mutableStateOf(0.dp)
+
     private fun start() {
         compose.setContent {
             val model = current ?: return@setContent
             // A new model is a new screen: nothing carries over from the last capture.
             key(model) {
-                if (systemBars) WithSystemBars { TakenRoot(model, Platform.none) } else TakenRoot(model, Platform.none)
+                if (systemBars) WithSystemBars(ime = keyboard) { TakenRoot(model, Platform.none) } else TakenRoot(model, Platform.none)
             }
         }
     }
@@ -86,6 +89,53 @@ class ScreenshotTests {
                 capture("${screen}_${look.raw}", DemoScreens.make(screen, look))
             }
         }
+    }
+
+    /**
+     * Taken Pro (SPEC-ANDROID 9.5 and 9.6): the paywall with the trial, after the trial was used, without the yearly plan,
+     * loading and offline; Today locked and with the trial notice; Profile's Taken Pro section in each state. The ones Tom
+     * reviews most in every look, the rest in Signal.
+     */
+    @Test
+    fun takenProScreens() {
+        start()
+        for (look in looks) {
+            for (screen in DemoScreens.proScreensEveryLook) {
+                if (screen in DemoScreens.screens) continue
+                capture("${screen}_${look.raw}", DemoScreens.make(screen, look)) { scrollToPro(screen) }
+            }
+        }
+        for (screen in DemoScreens.proScreens) {
+            if (screen in DemoScreens.proScreensEveryLook) continue
+            capture("${screen}_signal", DemoScreens.make(screen)) { scrollToPro(screen) }
+        }
+    }
+
+    /** Profile's Taken Pro section in view. */
+    private fun scrollToPro(screen: String) {
+        if (screen.startsWith("settings-pro")) compose.onNodeWithText(com.tombaxter.taken.core.pro.ProCopy.RESTORE_AUTOMATIC).performScrollTo()
+    }
+
+    /** What the paywall's button does: Play's PENDING answer, and Pro coming on (the button lit, before it closes). */
+    @Test
+    fun thePaywallAfterItsButton() {
+        start()
+        for (look in listOf(ThemeID.SIGNAL, ThemeID.BLUSH)) {
+            capture("paywall-pending_${look.raw}", DemoScreens.make("paywall-pending", look)) {
+                compose.onNodeWithTag("paywall-cta").performClick()
+            }
+            current = DemoScreens.make("paywall-unlocked", look)
+            compose.waitForIdle()
+            compose.mainClock.autoAdvance = false
+            compose.onNodeWithTag("paywall-cta").performClick()
+            compose.mainClock.advanceTimeBy(400)
+            save("paywall-unlocked_${look.raw}")
+            compose.mainClock.autoAdvance = true
+            compose.waitForIdle()
+        }
+        // Monthly and lifetime chosen: their own terms under the button.
+        capture("paywall-monthly_signal", DemoScreens.make("paywall")) { compose.onNodeWithTag("plan-monthly").performClick() }
+        capture("paywall-lifetime_signal", DemoScreens.make("paywall")) { compose.onNodeWithTag("plan-lifetime").performClick() }
     }
 
     /** The long-press menu on a row: Undo last dose, Set time…, Edit item. */
@@ -148,16 +198,17 @@ class ScreenshotTests {
     @Config(fontScale = 2f)
     fun largerText() {
         start()
-        for (screen in listOf("today", "today-edit", "item", "log", "add", "settings")) {
+        for (screen in listOf("today", "today-edit", "item", "log", "add", "settings", "paywall", "locked")) {
             capture("${screen}_signal_font200", DemoScreens.make(screen))
         }
+        capture("settings-pro-trial_signal_font200", DemoScreens.make("settings-pro-trial")) { scrollToPro("settings-pro-trial") }
     }
 
     @Test
     @Config(qualifiers = SMALL_PHONE)
     fun smallPhone() {
         start()
-        for (screen in listOf("today", "today-edit", "add", "day")) {
+        for (screen in listOf("today", "today-edit", "add", "day", "paywall")) {
             capture("${screen}_signal_small", DemoScreens.make(screen))
         }
     }
@@ -166,9 +217,84 @@ class ScreenshotTests {
     @Config(qualifiers = TABLET)
     fun landscapeTablet() {
         start()
-        for (screen in listOf("today", "log", "settings")) {
+        for (screen in listOf("today", "log", "settings", "paywall")) {
             capture("${screen}_signal_tablet", DemoScreens.make(screen))
         }
+    }
+
+    /**
+     * The Weight tab (SPEC-ANDROID 12): in every look, the page as it opens, typing with the keyboard's space below the
+     * Weigh in bar (the keyboard itself is the system's and is not drawn on the JVM), screen two with the goal and its lit
+     * points (one point and its label, and all three), and Today's one-time offer; the rest in Signal, a few in Blush.
+     */
+    @Test
+    fun weightScreens() {
+        start()
+        for (look in looks) {
+            for (screen in WEIGHT_EVERY_LOOK) captureWeight(screen, look)
+        }
+        for (screen in WeightDemo.pageScreens + WeightDemo.goalScreens) {
+            if (screen in WEIGHT_EVERY_LOOK) continue
+            captureWeight(screen, ThemeID.SIGNAL)
+        }
+        for (screen in listOf("weight-empty", "weight-goal-moment", "weight-list", "weight-goal-sheet")) captureWeight(screen, ThemeID.BLUSH)
+        // The More options menu, the long press on today's number, and a press on the chart.
+        capture("weight-menu_signal", DemoScreens.make("weight")) { compose.onNodeWithTag("weight-more").performClick() }
+        capture("weight-longpress_signal", DemoScreens.make("weight-weighed")) {
+            compose.onNodeWithTag("weight-number").performTouchInput { longClick() }
+        }
+        current = DemoScreens.make("weight-goal")
+        compose.waitForIdle()
+        compose.onNodeWithTag("weight-chart").performTouchInput { down(center) }
+        compose.waitForIdle()
+        save("weight-scrub_signal")
+        compose.onNodeWithTag("weight-chart").performTouchInput { up() }
+        compose.waitForIdle()
+        for (range in listOf("week", "30d")) {
+            capture("weight-trend-$range" + "_signal", DemoScreens.make("weight-trend")) { compose.onNodeWithTag("range-$range").performClick() }
+        }
+    }
+
+    private fun captureWeight(screen: String, look: ThemeID, suffix: String = "") {
+        val typing = WeightDemo.draft(screen) != null
+        keyboard = if (typing) KEYBOARD else 0.dp
+        capture("${screen}_${look.raw}$suffix", DemoScreens.make(screen, look)) {
+            when (screen) {
+                "weight-settings" -> compose.onNodeWithTag("weight-switch").performScrollTo()
+                "weight-data" -> compose.onNodeWithTag("import-weight").performScrollTo()
+            }
+            if (typing) {
+                // The page's 0.35 s wait for the keyboard to settle, before it clears the small line of the bar.
+                compose.mainClock.advanceTimeBy(600)
+                org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idleFor(java.time.Duration.ofMillis(600))
+                compose.waitForIdle()
+                compose.mainClock.advanceTimeBy(600)
+            }
+        }
+        keyboard = 0.dp
+    }
+
+    @Test
+    @Config(fontScale = 2f)
+    fun weightAtLargerText() {
+        start()
+        for (screen in listOf("weight", "weight-entry", "weight-trend", "weight-goal", "weight-list", "weight-goal-sheet", "today-weight-offer")) {
+            captureWeight(screen, ThemeID.SIGNAL, "_font200")
+        }
+    }
+
+    @Test
+    @Config(qualifiers = SMALL_PHONE)
+    fun weightOnASmallPhone() {
+        start()
+        for (screen in listOf("weight", "weight-entry", "weight-goal")) captureWeight(screen, ThemeID.SIGNAL, "_small")
+    }
+
+    @Test
+    @Config(qualifiers = TABLET)
+    fun weightOnATablet() {
+        start()
+        for (screen in listOf("weight", "weight-goal")) capture("${screen}_signal_tablet", DemoScreens.make(screen))
     }
 
     /** The Play store's phone frames: 9:16 at 1215 x 2160, no system bars (SPEC-ANDROID 14.2). */
@@ -194,6 +320,12 @@ class ScreenshotTests {
          * frame shows a pending row above Take all. [Own choice on the size]
          */
         const val STORE = "w405dp-h720dp-xxhdpi"
+
+        /** The Weight frames Tom sees in all four looks. */
+        val WEIGHT_EVERY_LOOK = listOf("weight", "weight-entry", "weight-goal", "weight-goal-reached", "today-weight-offer")
+
+        /** About a phone keyboard's height with its suggestion strip [Own choice for the frames]. */
+        val KEYBOARD = 300.dp
     }
 }
 
@@ -204,11 +336,13 @@ class ScreenshotTests {
  * Robolectric draws none. Edge-to-edge padding then shows as it does on a device. [Own choice: 24 dp]
  */
 @Composable
-fun WithSystemBars(statusBar: Dp = 24.dp, navigationBar: Dp = 24.dp, content: @Composable () -> Unit) {
+fun WithSystemBars(statusBar: Dp = 24.dp, navigationBar: Dp = 24.dp, ime: Dp = 0.dp, content: @Composable () -> Unit) {
     val insets = with(LocalDensity.current) {
         WindowInsetsCompat.Builder()
             .setInsets(WindowInsetsCompat.Type.statusBars(), Insets.of(0, statusBar.roundToPx(), 0, 0))
             .setInsets(WindowInsetsCompat.Type.navigationBars(), Insets.of(0, 0, 0, navigationBar.roundToPx()))
+            .setInsets(WindowInsetsCompat.Type.ime(), Insets.of(0, 0, 0, if (ime > 0.dp) (ime + navigationBar).roundToPx() else 0))
+            .setVisible(WindowInsetsCompat.Type.ime(), ime > 0.dp)
             .build()
     }
     DeviceConfigurationOverride(DeviceConfigurationOverride.WindowInsets(insets)) { content() }
