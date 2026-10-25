@@ -89,12 +89,29 @@ class RescheduleReceiver : BroadcastReceiver() {
             Intent.ACTION_MY_PACKAGE_REPLACED,
         )
 
-        /** Enables the receiver while any reminder is armed, and disables it when none is. */
+        /**
+         * Whether the receiver should be on, from what the reminders and the surfaces last said in this process (null: not
+         * yet): on once either is armed, off only once both have said they are not, and null (leave it as it is) until
+         * then, so a cold start never turns it off and on again from half the facts.
+         */
+        fun wanted(remindersArmed: Boolean?, surfacesArmed: Boolean?): Boolean? = when {
+            remindersArmed == true || surfacesArmed == true -> true
+            remindersArmed == null || surfacesArmed == null -> null
+            else -> false
+        }
+
+        /**
+         * Enables the receiver while any reminder is armed, and disables it when none is. Nothing is written when nothing
+         * changes: the manifest's state (`COMPONENT_ENABLED_STATE_DEFAULT`, which is `android:enabled="false"` here) already
+         * counts as off, since every write broadcasts PACKAGE_CHANGED to the system.
+         */
         fun setEnabled(context: Context, enabled: Boolean) {
             val component = ComponentName(context, RescheduleReceiver::class.java)
-            val wanted = if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
             val packages = context.packageManager
-            if (packages.getComponentEnabledSetting(component) == wanted) return
+            val current = packages.getComponentEnabledSetting(component)
+            val isOn = current == PackageManager.COMPONENT_ENABLED_STATE_ENABLED
+            if (isOn == enabled) return
+            val wanted = if (enabled) PackageManager.COMPONENT_ENABLED_STATE_ENABLED else PackageManager.COMPONENT_ENABLED_STATE_DISABLED
             packages.setComponentEnabledSetting(component, wanted, PackageManager.DONT_KILL_APP)
         }
     }

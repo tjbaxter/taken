@@ -6,6 +6,7 @@ import androidx.compose.ui.semantics.SemanticsProperties
 import androidx.compose.ui.semantics.getOrNull
 import androidx.compose.ui.test.assertContentDescriptionEquals
 import androidx.compose.ui.test.assertIsDisplayed
+import androidx.compose.ui.test.junit4.StateRestorationTester
 import androidx.compose.ui.test.junit4.createAndroidComposeRule
 import androidx.compose.ui.test.longClick
 import androidx.compose.ui.test.onNodeWithTag
@@ -181,6 +182,25 @@ class WeightScreenTests {
         compose.waitForIdle()
         assertNotNull(model.weight.editing)
         compose.onNodeWithTag("weigh-in-editor").assertIsDisplayed()
+    }
+
+    /**
+     * The goal sheet stays open across a configuration change (`model.sheet` is the view model's), and so does what was
+     * typed in it: a rotation, a fold, dark mode or a new font size never puts the stored goal back over the person's own.
+     */
+    @Test
+    fun theGoalSheetKeepsWhatWasTypedAcrossARecreation() {
+        val model = DemoScreens.make("weight-goal-sheet")
+        val restore = StateRestorationTester(compose)
+        restore.setContent { TakenRoot(model, Platform.none) }
+        compose.waitForIdle()
+        compose.onNodeWithTag("goal-field").performTextReplacement("75.0")
+        compose.waitForIdle()
+        restore.emulateSavedInstanceStateRestore()
+        compose.waitForIdle()
+        assertEquals(Sheet.WeightGoal, model.sheet, "the sheet itself is still there")
+        val field = compose.onNodeWithTag("goal-field").fetchSemanticsNode()
+        assertEquals("75.0", field.config.getOrNull(SemanticsProperties.EditableText)?.text, "and so is what was typed")
     }
 
     @Test

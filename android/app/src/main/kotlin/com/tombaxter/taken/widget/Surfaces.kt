@@ -229,6 +229,12 @@ class Surfaces(
 
     private val prefs: SharedPreferences get() = app.getSharedPreferences(PREFS, Context.MODE_PRIVATE)
 
+    init {
+        // Loaded off the main thread as the process starts, so the screen's and the tile's first reads (Profile's tile row,
+        // the widget picker's previews) never wait on the disk.
+        scope.launch(dispatcher) { runCatching { prefs.all } }
+    }
+
     /**
      * The Take all tile is in quick settings, as its service last heard (`onTileAdded`, `onTileRemoved`). Kept outside Auto
      * Backup's list, so a restored phone asks again.

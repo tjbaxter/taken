@@ -48,6 +48,8 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.Saver
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -239,12 +241,15 @@ private fun WeighInEditor(model: AppModel, weighIn: WeighIn) {
     val locale = weightLocale()
     val zone = model.clock.zone
     BackHandler { weight.editing = null }
-    var text by remember { mutableStateOf(WeightFormat.value(weighIn.kg, unit, locale)) }
+    // What is typed and picked survives a configuration change (rotation, fold, dark mode, font size), as the editor
+    // itself does (`WeightModel.editing` lives in the view model's AppModel): the To-do and item sheets keep theirs the
+    // same way (https://developer.android.com/develop/ui/compose/state-saving).
+    var text by rememberSaveable(weighIn.id) { mutableStateOf(WeightFormat.value(weighIn.kg, unit, locale)) }
     val start = remember { LocalDateTime.ofInstant(weighIn.weighedAt, zone) }
-    var date by remember { mutableStateOf(start.toLocalDate()) }
-    var time by remember { mutableStateOf(start.toLocalTime().withSecond(0).withNano(0)) }
-    var pickingDate by remember { mutableStateOf(false) }
-    var pickingTime by remember { mutableStateOf(false) }
+    var date by rememberSaveable(weighIn.id, stateSaver = DateSaver) { mutableStateOf(start.toLocalDate()) }
+    var time by rememberSaveable(weighIn.id, stateSaver = TimeSaver) { mutableStateOf(start.toLocalTime().withSecond(0).withNano(0)) }
+    var pickingDate by rememberSaveable(weighIn.id) { mutableStateOf(false) }
+    var pickingTime by rememberSaveable(weighIn.id) { mutableStateOf(false) }
     val picked = date.atTime(time).atZone(zone).toInstant()
     val sameMinute = WeightImport.minute(picked) == WeightImport.minute(weighIn.weighedAt)
     val moment = if (sameMinute) weighIn.weighedAt else picked
@@ -448,14 +453,15 @@ fun WeightGoalSheet(model: AppModel, onDismiss: () -> Unit) {
     val locale = weightLocale()
     val trend = WeightTrend.trend(weight.state.weighIns, model.clock)
     val existing = weight.goal
-    var text by remember { mutableStateOf(weight.demoTypedGoal ?: existing?.let { WeightGoalCopy.goal(it.kg, unit, locale) } ?: "") }
+    // The typed goal, the picked start and the height survive a configuration change, as the sheet does (`model.sheet`).
+    var text by rememberSaveable { mutableStateOf(weight.demoTypedGoal ?: existing?.let { WeightGoalCopy.goal(it.kg, unit, locale) } ?: "") }
     // The start the person picked in the Start row; until then the start follows the rules as the goal is typed.
-    var pickedDay by remember { mutableStateOf(if (existing?.startPicked == true) existing.startDay else null) }
-    var startPicked by remember { mutableStateOf(existing?.startPicked == true) }
+    var pickedDay by rememberSaveable(stateSaver = OptionalDaySaver) { mutableStateOf(if (existing?.startPicked == true) existing.startDay else null) }
+    var startPicked by rememberSaveable { mutableStateOf(existing?.startPicked == true) }
     // The height in this sheet: the stored one, or what the picker set. Kept only on Save.
-    var heightCm by remember { mutableStateOf(weight.state.heightCm) }
-    var editingHeight by remember { mutableStateOf(false) }
-    var pickingStart by remember { mutableStateOf(false) }
+    var heightCm by rememberSaveable { mutableStateOf(weight.state.heightCm) }
+    var editingHeight by rememberSaveable { mutableStateOf(false) }
+    var pickingStart by rememberSaveable { mutableStateOf(false) }
     var focused by remember { mutableStateOf(false) }
     val requester = remember { FocusRequester() }
     LaunchedEffect(Unit) {
@@ -669,3 +675,12 @@ private fun ChoiceList(values: List<Int>, selected: Int, label: (Int) -> String,
         }
     }
 }
+
+/** A picked day as its epoch day, so a sheet's draft survives a configuration change. */
+private val DateSaver = Saver<LocalDate, Long>(save = { it.toEpochDay() }, restore = { LocalDate.ofEpochDay(it) })
+
+/** A picked time as its second of the day. */
+private val TimeSaver = Saver<LocalTime, Int>(save = { it.toSecondOfDay() }, restore = { LocalTime.ofSecondOfDay(it.toLong()) })
+
+/** The goal sheet's picked start, or none yet (nothing saved, so it starts as none again). */
+private val OptionalDaySaver = Saver<DayKey?, Int>(save = { it?.ordinal }, restore = { DayKey(it) })

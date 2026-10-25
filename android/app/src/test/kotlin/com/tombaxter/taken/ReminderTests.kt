@@ -138,7 +138,7 @@ class ReminderTests {
         val tap = shadowOf(nudge.contentIntent)
         assertTrue(tap.isActivityIntent, "a tap opens the activity directly, no trampoline")
         assertEquals(NudgeLink.url(monday), tap.savedIntent.data.toString())
-        assertEquals(ComponentName(app, MainActivity::class.java), tap.savedIntent.component)
+        assertEquals(ComponentName(app, MainActivity.INTERNAL_LINK), tap.savedIntent.component, "Taken's own way in")
 
         assertEquals(listOf("TAKE ALL", "OPEN"), nudge.actions.map { it.title.toString() })
         val takeAll = shadowOf(nudge.actions[0].actionIntent)
@@ -197,11 +197,37 @@ class ReminderTests {
         runBlocking { container.stores.stack.updateData { s -> s.clone().also { it.settings.setReminder(false) } } }
         rebuild()
         assertNull(alarm(ReminderKind.NUDGE), "the nudge turned off cancels its alarm")
+        // The widgets and the tile say too (no widget, no tile: nothing of theirs is armed): only then does it go off.
+        runBlocking { container.surfaces.refresh() }
         assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED, app.packageManager.getComponentEnabledSetting(receiver))
         assertEquals(
             setOf("android.intent.action.BOOT_COMPLETED", "android.intent.action.TIME_SET", "android.intent.action.TIMEZONE_CHANGED", "android.intent.action.MY_PACKAGE_REPLACED"),
             RescheduleReceiver.ACTIONS,
         )
+    }
+
+    /**
+     * A cold start never turns the restart receiver off and on again from half the facts: each change of a component's
+     * state broadcasts PACKAGE_CHANGED, which makes Android reset and update every placed widget. And nothing is written
+     * when nothing changes, the manifest's default (off) included.
+     */
+    @Test
+    fun testTheRestartReceiverIsDecidedFromBothFactsAndNeverWrittenForNothing() {
+        assertEquals(true, RescheduleReceiver.wanted(remindersArmed = true, surfacesArmed = null), "either armed: on at once")
+        assertEquals(true, RescheduleReceiver.wanted(remindersArmed = null, surfacesArmed = true))
+        assertEquals(true, RescheduleReceiver.wanted(remindersArmed = false, surfacesArmed = true))
+        assertNull(RescheduleReceiver.wanted(remindersArmed = false, surfacesArmed = null), "the surfaces have not said yet: left as it is")
+        assertNull(RescheduleReceiver.wanted(remindersArmed = null, surfacesArmed = false), "the reminders have not said yet")
+        assertEquals(false, RescheduleReceiver.wanted(remindersArmed = false, surfacesArmed = false), "off once both say nothing is armed")
+
+        val receiver = ComponentName(app, RescheduleReceiver::class.java)
+        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, app.packageManager.getComponentEnabledSetting(receiver), "the manifest's off")
+        RescheduleReceiver.setEnabled(app, false)
+        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DEFAULT, app.packageManager.getComponentEnabledSetting(receiver), "already off: nothing written")
+        RescheduleReceiver.setEnabled(app, true)
+        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_ENABLED, app.packageManager.getComponentEnabledSetting(receiver))
+        RescheduleReceiver.setEnabled(app, false)
+        assertEquals(PackageManager.COMPONENT_ENABLED_STATE_DISABLED, app.packageManager.getComponentEnabledSetting(receiver))
     }
 
     @Test

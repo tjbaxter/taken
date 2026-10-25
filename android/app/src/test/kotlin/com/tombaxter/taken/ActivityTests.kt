@@ -143,6 +143,50 @@ class ActivityTests {
         }
     }
 
+    /**
+     * SPEC-ANDROID 10.3: a `taken://` link that reaches the exported MainActivity from outside Taken (another app's explicit
+     * intent, a page) only navigates. It never takes all, logs, or opens the microphone: only Taken's own unexported way in
+     * (`MainActivity.INTERNAL_LINK`, the widgets, the tile, the notifications, the shortcuts) may.
+     */
+    @Test
+    fun aLinkFromOutsideTakenNeverLogs() {
+        seed()
+        val outside = Intent(Intent.ACTION_VIEW, Uri.parse("taken://today?then=take-all"), app, MainActivity::class.java)
+        assertFalse(fromTaken(outside), "MainActivity itself is exported for the launcher: anyone can start it")
+        ActivityScenario.launch<MainActivity>(outside).use { scenario ->
+            val model = scenario.awaitModel()
+            compose.waitForIdle()
+            assertEquals(AppTab.TODAY, model.tab, "it may open Today")
+            assertTrue(model.state.doses.isEmpty(), "and logs nothing")
+
+            scenario.onActivity { it.receiveLink(Intent(outside).setData(Uri.parse("taken://pro?then=take-all"))) }
+            compose.waitForIdle()
+            assertTrue(model.state.doses.isEmpty(), "a pro link from outside keeps no Take all")
+            scenario.onActivity { it.receiveLink(Intent(outside).setData(Uri.parse("taken://todo/record"))) }
+            compose.waitForIdle()
+            assertEquals(AppTab.TODO, model.tab, "To-do comes to the front")
+            assertNull(model.todo.pendingRecording, "but the microphone never starts from outside")
+
+            // The same link through Taken's own way in, as a widget, the tile or the shortcut sends it.
+            val internal = Intent(Intent.ACTION_VIEW, Uri.parse("taken://today?then=take-all"))
+                .setComponent(android.content.ComponentName(app, MainActivity.INTERNAL_LINK))
+            assertTrue(fromTaken(internal))
+            scenario.onActivity { it.receiveLink(internal) }
+            compose.waitForIdle()
+            assertEquals(1, model.state.doses.size, "Taken's own Take all logs")
+        }
+    }
+
+    /** Taken's own way in is an alias of MainActivity that no other app can start. */
+    @Test
+    fun theInternalWayInIsNotExported() {
+        val alias = app.packageManager.getActivityInfo(android.content.ComponentName(app, MainActivity.INTERNAL_LINK), 0)
+        assertFalse(alias.exported, "not exported: only Taken and the launcher's shortcuts (started as Taken) reach it")
+        assertEquals(MainActivity::class.java.name, alias.targetActivity)
+        val widget = com.tombaxter.taken.widget.takenIntent(app, "taken://today?then=take-all")
+        assertEquals(MainActivity.INTERNAL_LINK, widget.component?.className, "the widgets and the tile use it")
+    }
+
     @Test
     fun aRelaunchFromRecentsCarriesNoLink() {
         val link = Intent(Intent.ACTION_VIEW, Uri.parse("taken://today"))

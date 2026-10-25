@@ -14,7 +14,9 @@ import com.tombaxter.taken.core.surfaces.TileState
 import com.tombaxter.taken.core.surfaces.WidgetTap
 import com.tombaxter.taken.widget.SurfaceActions
 import com.tombaxter.taken.widget.takenIntent
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * The Quick Settings tile "Take all" (SPEC-ANDROID 10.2), the iPhone's Control Center control: one tap logs every pending
@@ -33,19 +35,23 @@ class TakeAllTileService : TileService() {
     @Volatile
     private var listening = false
 
+    // Where the tile is kept (`Surfaces.tileAdded`, SharedPreferences) is read and written off the main thread: the system
+    // may bind the tile while Taken's process is starting, before that file has loaded, and the first read waits for it
+    // (StrictMode's disk-read check; https://developer.android.com/topic/performance/vitals/anr).
+
     override fun onTileAdded() {
-        container.surfaces.tileAdded = true
+        container.scope.launch(Dispatchers.IO) { container.surfaces.tileAdded = true }
     }
 
     override fun onTileRemoved() {
-        container.surfaces.tileAdded = false
+        container.scope.launch(Dispatchers.IO) { container.surfaces.tileAdded = false }
     }
 
     override fun onStartListening() {
         listening = true
-        // The tile is there: whatever added it, Profile stops offering it.
-        if (!container.surfaces.tileAdded) container.surfaces.tileAdded = true
         container.scope.launch {
+            // The tile is there: whatever added it, Profile stops offering it.
+            withContext(Dispatchers.IO) { if (!container.surfaces.tileAdded) container.surfaces.tileAdded = true }
             val face = runCatching { container.surfaces.tileFace() }.getOrNull() ?: return@launch
             if (listening) draw(face)
         }

@@ -9,12 +9,10 @@ import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
-import android.net.Uri
 import android.os.Build
 import androidx.core.app.ActivityCompat
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
-import com.tombaxter.taken.MainActivity
 import com.tombaxter.taken.R
 import com.tombaxter.taken.core.reminders.NudgeLink
 import com.tombaxter.taken.core.reminders.Reminder
@@ -22,6 +20,7 @@ import com.tombaxter.taken.core.reminders.ReminderCopy
 import com.tombaxter.taken.core.reminders.ReminderKind
 import com.tombaxter.taken.core.reminders.ReminderSchedule
 import com.tombaxter.taken.core.todo.TodoCaptureRoute
+import com.tombaxter.taken.widget.takenIntent
 import java.time.Instant
 
 /**
@@ -195,7 +194,7 @@ class AndroidNotifications(private val context: Context) : NotificationPort {
     private fun activity(link: String): PendingIntent = PendingIntent.getActivity(
         context,
         0,
-        Intent(Intent.ACTION_VIEW, Uri.parse(link), context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+        takenIntent(context, link),
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
     )
 

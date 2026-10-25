@@ -273,7 +273,7 @@ class SurfaceTests {
         for (intent in intents) {
             assertEquals("android.intent.action.VIEW", intent["action"])
             assertEquals(app.packageName, intent["targetPackage"], "the shortcut opens this build, debug or release")
-            assertEquals(MainActivity::class.java.name, intent["targetClass"])
+            assertEquals(MainActivity.INTERNAL_LINK, intent["targetClass"], "Taken's own, unexported way in (SPEC-ANDROID 10.3)")
         }
         val shortcuts = attributes(app.resources.getXml(R.xml.shortcuts), "shortcut")
         assertEquals(listOf("voice-todo", "take-all"), shortcuts.map { it["shortcutId"] })

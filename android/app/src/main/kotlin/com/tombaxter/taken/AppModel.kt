@@ -560,8 +560,13 @@ class AppModel(
     /**
      * A `taken://` link (SPEC-ANDROID 10.3): today closes whatever is open; todo brings To-do to the front, and
      * todo/record starts listening there; pro opens the paywall.
+     *
+     * `fromTaken`: the link came through Taken's own unexported way in (`MainActivity.INTERNAL_LINK`: a widget, the tile,
+     * a notification, a shortcut). Only then does a link act: Take all, a kept log, the microphone. Any other sender only
+     * navigates, so a web page, a message or another app can never log a dose the person did not take
+     * (https://developer.android.com/privacy-and-security/risks/unsafe-use-of-deeplinks).
      */
-    fun handle(url: String) {
+    fun handle(url: String, fromTaken: Boolean = true) {
         if (!url.startsWith("taken://")) return
         // A tapped nudge, its OPEN, or the note that its TAKE ALL logged nothing: the day it was for.
         val nudgeDay = NudgeLink.day(url)
@@ -573,7 +578,7 @@ class AppModel(
         val todoRoute = TodoCaptureRoute.route(url)
         if (todoRoute != null) {
             openTodoTab()
-            if (todoRoute == TodoCaptureRoute.Route.RECORD) todo.requestRecording()
+            if (todoRoute == TodoCaptureRoute.Route.RECORD && fromTaken) todo.requestRecording()
             // A tapped due-time notification: its to-do scrolls into view with a wash.
             TodoCaptureRoute.taskId(url)?.let(todo::reveal)
             return
@@ -591,20 +596,20 @@ class AppModel(
                     tab = AppTab.TODAY
                     // The "Take all" shortcut (SPEC-ANDROID 10.2): Take all with its snackbar and Undo, or the paywall with
                     // the Take all kept while logging needs Taken Pro.
-                    if (SurfaceLinks.isTakeAll(url)) requirePro { takeAll() }
+                    if (SurfaceLinks.isTakeAll(url) && fromTaken) requirePro { takeAll() }
                 }
             }
             return
         }
         // A locked widget or tile sends `taken://pro`, with the log it was asked for: the paywall, and the log once Pro
         // is on. If Pro is on by now (Play answered since), the log simply happens.
-        val pending = route.then?.let { PendingLog(it, clockNow()) }
+        val pending = route.then?.takeIf { fromTaken }?.let { PendingLog(it, clockNow()) }
         when (access) {
             ProAccess.PRO, ProAccess.FIRST_SESSION, ProAccess.PENDING -> pending?.let(::applyPending)
             ProAccess.LOCKED -> presentPaywall(PaywallOrigin.LINK, pending?.let { log -> { applyPending(log) } })
             ProAccess.CHECKING -> scope.launch {
                 pro.settle()
-                handle(url)
+                handle(url, fromTaken)
             }
         }
     }

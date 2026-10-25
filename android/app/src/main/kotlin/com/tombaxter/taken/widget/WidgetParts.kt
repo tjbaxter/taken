@@ -1,5 +1,6 @@
 package com.tombaxter.taken.widget
 
+import android.content.ComponentName
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -157,9 +158,13 @@ fun Lamp(color: ColorProvider, palette: WidgetPalette) {
     Box(GlanceModifier.size(5.dp).background(color).rounded(palette.lampRadius)) {}
 }
 
-/** The explicit intent every surface opens Taken with: MainActivity, carrying a `taken://` link (SPEC-ANDROID 10.3). */
+/**
+ * The explicit intent every surface opens Taken with: MainActivity through Taken's own unexported alias
+ * ([MainActivity.INTERNAL_LINK]), carrying a `taken://` link (SPEC-ANDROID 10.3). Only a link that came this way may log.
+ */
 fun takenIntent(context: Context, url: String): Intent =
-    Intent(Intent.ACTION_VIEW, url.toUri(), context, MainActivity::class.java)
+    Intent(Intent.ACTION_VIEW, url.toUri())
+        .setComponent(ComponentName(context, MainActivity.INTERNAL_LINK))
         .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
 
 /**

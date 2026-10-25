@@ -32,10 +32,15 @@
 
     <!-- Auto Backup (SPEC-ANDROID 5.4): the JSON files and the photo go to the person's own Drive, end-to-end encrypted
          from Android 9, and never unencrypted (https://developer.android.com/identity/data/autobackup). -->
+    <!-- Predictive back on Android 13 to 15 too: at targetSdk 36 it is on by default only on Android 16 and later, and
+         earlier versions need this opt-in (https://developer.android.com/guide/navigation/custom-back/predictive-back-gesture).
+         Safe here: every back path goes through BackHandler or OnBackPressedDispatcher, with no onBackPressed override and
+         no KEYCODE_BACK handling. -->
     <application
         android:name=".TakenApp"
         android:allowBackup="true"
         android:dataExtractionRules="@xml/data_extraction_rules"
+        android:enableOnBackInvokedCallback="true"
         android:fullBackupContent="@xml/backup_rules"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
@@ -54,19 +59,26 @@
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-            <!-- taken:// links (SPEC-ANDROID 10.3): today, todo, todo/record and pro now; weight comes with its tab. -->
-            <intent-filter>
-                <action android:name="android.intent.action.VIEW" />
-                <category android:name="android.intent.category.DEFAULT" />
-                <category android:name="android.intent.category.BROWSABLE" />
-                <data android:scheme="taken" />
-            </intent-filter>
-            <!-- The two static shortcuts, New voice to-do and Take all (SPEC-ANDROID 10.2): declared on the launcher activity
+            <!-- No taken:// intent filter (SPEC-ANDROID 10.3): every link Taken uses comes from Taken itself, through
+                 explicit intents to .InternalLink below, so no web page, message or other app can hand MainActivity a link
+                 that logs ("check internal state before a deep link acts",
+                 https://developer.android.com/privacy-and-security/risks/unsafe-use-of-deeplinks). MainActivity stays
+                 exported for the launcher; a link that reaches it any other way only navigates.
+                 The two static shortcuts, New voice to-do and Take all (SPEC-ANDROID 10.2): declared on the launcher activity
                  (https://developer.android.com/develop/ui/views/launch/shortcuts/creating-shortcuts). -->
             <meta-data
                 android:name="android.app.shortcuts"
                 android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- Taken's own way in for its links: the widgets, the tile, the notifications and the shortcuts start MainActivity
+             through this alias, which no other app can start (not exported). Launchers start a static shortcut as Taken
+             itself, so its target need not be exported (AOSP LauncherAppsService.startShortcutInner: "Note the target
+             activity doesn't have to be exported"). MainActivity acts on a link's Take all or log only when it came this way. -->
+        <activity-alias
+            android:name=".InternalLink"
+            android:exported="false"
+            android:targetActivity=".MainActivity" />
 
         <!-- The home screen widgets (SPEC-ANDROID 10.1), Glance receivers: exported, as Android's AppWidgetManager sends
              them their updates (https://developer.android.com/develop/ui/compose/glance/create-app-widget). -->

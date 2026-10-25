@@ -60,6 +60,9 @@ class MainActivity : ComponentActivity(), Platform {
     private val viewModel: AppViewModel by viewModels { AppViewModel.factory((application as TakenApp).container) }
     private var pendingLink: String? = null
 
+    /** The pending link came through Taken's own way in ([INTERNAL_LINK]), so its Take all or log may run. */
+    private var pendingFromTaken = false
+
     /** The screen's model once the files are read (the tests reach it here). */
     internal val model: AppModel? get() = viewModel.model
 
@@ -131,7 +134,13 @@ class MainActivity : ComponentActivity(), Platform {
         // launch intent again, and so does a task relaunched from Recents: neither replays the link. Navigation does the
         // same with the deep-link-handled flag it keeps in saved state (NavController's KEY_DEEP_LINK_HANDLED).
         // A link that came before the files were read is carried across in the saved state instead.
-        pendingLink = if (savedInstanceState == null) launchLink(intent) else savedInstanceState.getString(PENDING_LINK)
+        if (savedInstanceState == null) {
+            pendingLink = launchLink(intent)
+            pendingFromTaken = fromTaken(intent)
+        } else {
+            pendingLink = savedInstanceState.getString(PENDING_LINK)
+            pendingFromTaken = savedInstanceState.getBoolean(PENDING_FROM_TAKEN)
+        }
         setContent {
             val model = viewModel.model
             if (model == null) {
@@ -139,7 +148,7 @@ class MainActivity : ComponentActivity(), Platform {
                 return@setContent
             }
             LaunchedEffect(model) {
-                pendingLink?.let(model::handle)
+                pendingLink?.let { model.handle(it, fromTaken = pendingFromTaken) }
                 pendingLink = null
             }
             // Light or dark system bar icons follow the look, not the system (SPEC-ANDROID 6.1).
@@ -202,16 +211,30 @@ class MainActivity : ComponentActivity(), Platform {
 
     override fun onSaveInstanceState(outState: Bundle) {
         super.onSaveInstanceState(outState)
-        pendingLink?.let { outState.putString(PENDING_LINK, it) }
+        pendingLink?.let {
+            outState.putString(PENDING_LINK, it)
+            outState.putBoolean(PENDING_FROM_TAKEN, pendingFromTaken)
+        }
     }
 
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         // The newest intent is the activity's from now on, so a later recreation reads this one, not the first.
         setIntent(intent)
+        receiveLink(intent)
+    }
+
+    /** A link for the running activity: handled now, or once the files are read; it acts only when it came from Taken. */
+    internal fun receiveLink(intent: Intent) {
         val link = intent.data?.toString() ?: return
+        val trusted = fromTaken(intent)
         val model = viewModel.model
-        if (model == null) pendingLink = link else model.handle(link)
+        if (model == null) {
+            pendingLink = link
+            pendingFromTaken = trusted
+        } else {
+            model.handle(link, fromTaken = trusted)
+        }
     }
 
     // MARK: Platform
@@ -373,10 +396,25 @@ class MainActivity : ComponentActivity(), Platform {
             "1.0.0"
         }
 
-    private companion object {
-        const val PENDING_LINK = "taken.pendingLink"
+    companion object {
+        /**
+         * Taken's own, unexported way in for its links (the manifest's activity-alias): the widgets, the tile, the
+         * notifications and the shortcuts start MainActivity through it, and no other app can (SPEC-ANDROID 10.3).
+         */
+        const val INTERNAL_LINK = "com.tombaxter.taken.InternalLink"
+
+        private const val PENDING_LINK = "taken.pendingLink"
+        private const val PENDING_FROM_TAKEN = "taken.pendingLinkFromTaken"
     }
 }
+
+/**
+ * The link came from Taken itself: through [MainActivity.INTERNAL_LINK], which is not exported, so only Taken's own
+ * PendingIntents and the launcher's static shortcuts (started as Taken) reach it. Anything else that starts the exported
+ * MainActivity with a `taken://` link (another app, a page) may only navigate, never log
+ * (https://developer.android.com/privacy-and-security/risks/unsafe-use-of-deeplinks).
+ */
+internal fun fromTaken(intent: Intent?): Boolean = intent?.component?.className == MainActivity.INTERNAL_LINK
 
 /**
  * The `taken://` link an activity was started with, or null: none, or a task relaunched from Recents, which hands the

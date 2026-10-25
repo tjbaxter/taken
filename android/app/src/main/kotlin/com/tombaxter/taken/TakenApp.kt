@@ -123,18 +123,27 @@ class AppContainer(context: Context) {
     /** What Today and Profile ask of the widgets and the tile. */
     val surfaceHost: SurfaceHost = AndroidSurfaceHost(app, surfaces, scope)
 
+    /** Whether a reminder's alarm is armed, as the reminders last said in this process; null until they have. */
     @Volatile
-    private var remindersArmed = false
+    private var remindersArmed: Boolean? = null
 
+    /** Whether the surfaces' refresh alarm is armed, as they last said in this process; null until they have. */
     @Volatile
-    private var surfacesArmed = false
+    private var surfacesArmed: Boolean? = null
 
     /**
      * The receiver for restarts, clock and time zone changes and updates is on while a reminder or a surface's refresh is
-     * armed, and off when neither is (Google's alarm guide enables its boot receiver only while needed).
+     * armed, and off when neither is (Google's alarm guide enables its boot receiver only while needed). Decided only once
+     * both have said in this process, or once either says it is armed: a decision from half the facts would turn the
+     * receiver off and on again at every cold start, and each component-state write broadcasts PACKAGE_CHANGED, which
+     * makes Android reset and update every placed widget (the reason Glance keeps WorkManager's own receiver enabled,
+     * androidx SessionManager's `sessionWorkerKeepEnabled`).
      */
     private fun restartReceiverFollows() {
-        synchronized(this) { RescheduleReceiver.setEnabled(app, remindersArmed || surfacesArmed) }
+        synchronized(this) {
+            val enabled = RescheduleReceiver.wanted(remindersArmed, surfacesArmed) ?: return
+            RescheduleReceiver.setEnabled(app, enabled)
+        }
     }
 
     /**
