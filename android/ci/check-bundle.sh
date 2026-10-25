@@ -74,7 +74,8 @@ package_field() { sed -n "s/.* $1='\([^']*\)'.*/\1/p" <<<"$package_line"; }
 package="$(package_field name)"
 version_code="$(package_field versionCode)"
 version_name="$(package_field versionName)"
-min_sdk="$(sed -n "s/^sdkVersion:'\([0-9]*\)'.*/\1/p" <<<"$badging")"
+# Newer aapt2 prints minSdkVersion:'28', older sdkVersion:'28'.
+min_sdk="$(sed -n -E "s/^(min)?[sS]dkVersion:'([0-9]*)'.*/\2/p" <<<"$badging" | head -n 1)"
 target_sdk="$(sed -n "s/^targetSdkVersion:'\([0-9]*\)'.*/\1/p" <<<"$badging")"
 
 [ "$package" = "com.tombaxter.taken" ] && ok "package com.tombaxter.taken" || fail "package is '$package', not com.tombaxter.taken"
@@ -99,19 +100,24 @@ if [ -f "$report" ]; then
 import re, sys
 lines = open(sys.argv[1], encoding="utf-8").read().splitlines()
 for i, line in enumerate(lines):
-    if line.startswith("uses-permission#"):
-        source = next((l for l in lines[i + 1:i + 4] if l.startswith("ADDED from")), "")
-        found = re.search(r"\[([^\]]+)\]", source)
-        print(f"       {line[len('uses-permission#'):]} <- {found.group(1) if found else 'Taken itself'}")
+    if line.startswith("uses-permission#") and "${" not in line:
+        action = next((l for l in lines[i + 1:i + 4] if l.startswith(("ADDED from", "REMOVED from"))), "")
+        found = re.search(r"\[([^\]]+)\]", action)
+        verb = "removed by" if action.startswith("REMOVED") else "from"
+        print(f"       {line[len('uses-permission#'):]}: {verb} {found.group(1) if found else 'Taken itself'}")
 PY
 fi
+# INTERNET and ACCESS_NETWORK_STATE are declared by com.google.android.datatransport:transport-backend-cct, a compile
+# dependency of the Play Billing Library 9.1.0 (its POM), reviewed and listed in SPEC-ANDROID 3.3. Taken's own code
+# makes no network call.
 allowed=(
   com.android.vending.BILLING
+  android.permission.INTERNET
+  android.permission.ACCESS_NETWORK_STATE
   android.permission.POST_NOTIFICATIONS
   android.permission.RECORD_AUDIO
   android.permission.RECEIVE_BOOT_COMPLETED
   android.permission.WAKE_LOCK
-  android.permission.ACCESS_NETWORK_STATE
   android.permission.FOREGROUND_SERVICE
   com.tombaxter.taken.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION
 )
@@ -119,7 +125,6 @@ forbidden=(
   com.google.android.gms.permission.AD_ID
   android.permission.SCHEDULE_EXACT_ALARM
   android.permission.USE_EXACT_ALARM
-  android.permission.INTERNET
 )
 permissions_ok=1
 for p in $permissions; do
