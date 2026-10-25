@@ -87,10 +87,10 @@ import kotlin.test.assertTrue
  *
  * Each frame is 1215 x 2160 (405 x 720 dp at xxhdpi, 9:16): a two-line tagline in Taken's words and type, one word lit
  * as on the iPhone's store frames (tools/store-shots/frames.mjs), over the real screen on a rounded card, no device
- * frame and no status bar. The screen is the app at 404 x 720 dp drawn at 2.25 px to the dp (a 360 dpi phone), so it lays
+ * frame and no status bar. The screen is the app at 404 x 760 dp drawn at 2.25 px to the dp (a 360 dpi phone), so it lays
  * out as on a phone and stays sharp: no picture is scaled. The demo is the neutral store set (no medicine names; the
  * listing check forbids them) on its Thursday at 21:41, in Signal. The story, in order (Tom's brief, 25 Oct 2026): Today
- * where one tap logs, All taken, History, voice to-dos, the widget; Taken Pro is left out, since the paywall shows
+ * where one tap logs, All taken, History, a voice to-do being said, the widget; Taken Pro is left out, since the paywall shows
  * prices. [Own choices: the layout, the sizes, the colours of the widget frame's wallpaper and the tagline words.]
  *
  * Roborazzi saves each capture when CI records (`recordRoborazziDebug`); this test then drops the alpha channel, after
@@ -189,7 +189,7 @@ class PlayStoreScreenshotTests {
                     }
                 },
                 style = TextStyle(
-                    fontFamily = TakenType.sans, fontWeight = FontWeight.SemiBold, fontSize = 36.sp, lineHeight = 42.sp,
+                    fontFamily = TakenType.sans, fontWeight = FontWeight.SemiBold, fontSize = 32.sp, lineHeight = 38.sp,
                     letterSpacing = (-0.02).em, textAlign = TextAlign.Center,
                 ),
                 onTextLayout = { taglineLines = it.lineCount },
@@ -279,17 +279,20 @@ class PlayStoreScreenshotTests {
         const val FRAME_WIDTH = 1215
         const val FRAME_HEIGHT = 2160
 
-        /** The screen on the card: 909 x 1620 pixels, a 404 x 720 dp phone at 360 dpi (2.25 px to the dp). */
+        /**
+         * The screen on the card: 909 x 1710 pixels, a 404 x 760 dp phone at 360 dpi (2.25 px to the dp), tall enough that
+         * All taken shows Not today whole above the tab bar.
+         */
         const val SCREEN_DPI = 360
         const val SCREEN_DENSITY = 2.25f
         val CARD_WIDTH = 303.dp
-        val CARD_HEIGHT = 540.dp
-        val CARD_TOP = 132.dp
+        val CARD_HEIGHT = 570.dp
+        val CARD_TOP = 114.dp
         val CARD_RADIUS = 16.dp
-        val TAGLINE_TOP = 28.dp
+        val TAGLINE_TOP = 22.dp
 
-        /** Where the widget sits on the wallpaper, in the card's dp. */
-        val WIDGET_TOP = 112.dp
+        /** Where the widget sits on the wallpaper, in the screen's dp: a little above the middle of 760. */
+        val WIDGET_TOP = 136.dp
 
         /** Google's limit for taglines. */
         const val MAX_TAGLINE_SHARE = 0.20f
@@ -311,7 +314,7 @@ class PlayStoreScreenshotTests {
             Shot("Did I take it?\nKnow for *sure.*", "today"),
             Shot("One tap.\n*Done.*", "today-done"),
             Shot("Every day,\non *record.*", "log"),
-            Shot("To-dos?\nJust *say* them.", "todo"),
+            Shot("To-dos?\nJust *say* them.", "todo-recording"),
             Shot("Log it without\n*opening* the app.", WIDGET),
         )
     }
