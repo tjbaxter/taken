@@ -178,6 +178,13 @@ jobs:
             echo "FAIL debug-only demo code in release"; exit 1
           fi
           echo "OK   no demo code in release"
+          # Glance builds the widgets' callbacks by class name (proguard-rules.pro): R8 must keep them, unrenamed.
+          # grep -c reads the whole dex, so unzip never meets a closed pipe under pipefail.
+          for callback in LogNextAction TakeAllAction; do
+            found="$(unzip -p "$aab" 'base/dex/*.dex' | grep -a -c "Lcom/tombaxter/taken/widget/$callback;" || true)"
+            [ "${found:-0}" -gt 0 ] || { echo "FAIL widget callback $callback renamed or removed by R8"; exit 1; }
+          done
+          echo "OK   widget callbacks kept for Glance"
           manifest="$(find app/build/intermediates -path '*release*' -name AndroidManifest.xml | grep -i merged | head -n 1)"
           test -n "$manifest" || { echo "FAIL merged release manifest not found"; exit 1; }
           echo "Merged manifest: $manifest"
