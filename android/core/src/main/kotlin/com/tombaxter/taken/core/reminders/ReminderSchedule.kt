@@ -6,6 +6,7 @@ import com.tombaxter.taken.core.format.Fmt
 import com.tombaxter.taken.core.model.StackState
 import com.tombaxter.taken.core.pro.NudgeWindow
 import com.tombaxter.taken.core.pro.PlanPrice
+import com.tombaxter.taken.core.pro.ProCopy
 import com.tombaxter.taken.core.pro.ProLedger
 import com.tombaxter.taken.core.pro.ProStatus
 import com.tombaxter.taken.core.pro.TrialReminderMark
@@ -235,8 +236,8 @@ object ReminderCopy {
     /** Profile's footnote under Reminder (Taken/Views/ProfileView.swift `nudgeFootnote`). */
     const val FOOTNOTE = "If anything is still pending at this time, Taken nudges you."
 
-    /** Profile > Reminder without Pro: no nudge is scheduled (Shared/ProCopy.swift `nudgeLocked`). */
-    const val NUDGE_LOCKED = "The nudge needs Taken Pro"
+    /** Profile > Reminder without Pro: no nudge is scheduled (Shared/ProCopy.swift `nudgeLocked`), Taken Pro's own line. */
+    const val NUDGE_LOCKED = ProCopy.NUDGE_LOCKED
 
     /** Profile > Reminder once Android will not show Taken's notifications (the iPhone's row, word for word). */
     const val NOTIFICATIONS_OFF = "Notifications are off for Taken. Open Settings"
