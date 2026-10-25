@@ -23,13 +23,6 @@ name: Android release
 # steps that use them, nothing secret ever printed.
 
 on:
-  # TEMPORARY, removed in the next commit: GitHub dispatches a workflow by file name only from the default branch
-  # ("workflow android-release.yml not found on the default branch"), and registers a workflow the first time an event
-  # runs it. This push, which changes only this file, registers it so it can be dispatched by id on feat/android-pro
-  # before CORE reaches main. Every job is skipped on push: nothing builds or signs.
-  push:
-    branches: [feat/android-pro]
-    paths: [.github/workflows/android-release.yml]
   workflow_dispatch:
     inputs:
       version_code_offset:
@@ -70,7 +63,6 @@ env:
 jobs:
   bundle:
     name: Signed release bundle and its checks
-    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     outputs:
@@ -239,7 +231,7 @@ jobs:
     needs: bundle
     # Skipped, not failed, until the Play Developer API access exists (NEXT 2; a Google Cloud service account invited
     # in Play Console, reached through Workload Identity Federation, needs Tom). Only main uploads.
-    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' && vars.PLAY_WORKLOAD_IDENTITY_PROVIDER != '' && vars.PLAY_SERVICE_ACCOUNT != ''
+    if: github.ref == 'refs/heads/main' && vars.PLAY_WORKLOAD_IDENTITY_PROVIDER != '' && vars.PLAY_SERVICE_ACCOUNT != ''
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
