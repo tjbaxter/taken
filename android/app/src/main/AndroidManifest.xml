@@ -42,10 +42,13 @@
         android:supportsRtl="true"
         android:theme="@style/Theme.Taken">
 
+        <!-- Starts on the splash screen's theme; MainActivity hands over to Theme.Taken once Taken has read its files
+             (SPEC-ANDROID 6.1). -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:launchMode="singleTask"
+            android:theme="@style/Theme.Taken.Starting"
             android:windowSoftInputMode="adjustResize">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />

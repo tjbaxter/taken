@@ -7,6 +7,7 @@ import com.tombaxter.taken.core.model.StackState
 import com.tombaxter.taken.core.stack.WidgetSnapshot
 import com.tombaxter.taken.core.stack.eraseAll
 import com.tombaxter.taken.core.theme.Contrast
+import com.tombaxter.taken.core.theme.Launch
 import com.tombaxter.taken.core.theme.ThemeID
 import com.tombaxter.taken.core.theme.ThemeRadius
 import com.tombaxter.taken.core.theme.Looks
@@ -19,7 +20,8 @@ import kotlin.test.assertTrue
 /**
  * Ported from TakenTests/ThemeTests.swift: the look persists with the stack, a file from before looks existed (or with a
  * look this version does not know) reads as Signal, Signal is 1.0's look exactly, and every look's text passes WCAG AA.
- * The icon cases are left out (one launcher icon on Android, SPEC-ANDROID 18); the store round trip runs in :app.
+ * The icon cases adapt: Android has one launcher icon for every look (SPEC-ANDROID 18 and 19 item 5), and LooksTests in
+ * :app checks it ships with its monochrome layer; the store round trip runs in :app. Android adds the launch's veil.
  */
 class ThemeTests {
 
@@ -139,6 +141,20 @@ class ThemeTests {
             assertFalse(dark.isLight)
             assertTrue(Contrast.luminance(dark.tokens.bg) < 0.01)
             assertEquals(ThemeRadius.HUD, dark.radius, "the Signal composition, recoloured")
+        }
+    }
+
+    // MARK: Launch
+
+    /** RootView(veiled: model.theme.isLight): a light look fades in from the dark launch screen over 0.4 s. */
+    @Test
+    fun testALightLookFadesInFromTheLaunchCanvas() {
+        assertEquals(Looks.SIGNAL.tokens.bg, Launch.CANVAS, "the launch screen is Signal's canvas")
+        assertEquals(0x08090AL, Launch.CANVAS, "the iPhone's LaunchBackground")
+        assertEquals(400, Launch.VEIL_MILLIS)
+        assertEquals(listOf(ThemeID.BLUSH), ThemeID.entries.filter { Launch.veiled(Looks.look(it)) }, "only the light look is veiled")
+        for (look in Looks.ALL.filter { !Launch.veiled(it) }) {
+            assertTrue(Contrast.ratio(look.tokens.bg, Launch.CANVAS) < 1.1, "${look.label} starts next to the launch canvas")
         }
     }
 

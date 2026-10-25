@@ -176,6 +176,22 @@ object Looks {
     const val LAUNCH_CANVAS: Long = 0x08090A
 }
 
+/**
+ * A launch (SPEC-ANDROID 6.1). Every launch starts on the launch canvas, Signal's: the iPhone's launch screen
+ * (LaunchBackground in the asset catalog), Android's splash screen. A light look then fades in from it over 0.4 s, easing
+ * out, instead of cutting to white (the iPhone's RootView veil, Taken/Views/TodayView.swift and Taken/TakenApp.swift); a
+ * dark look's canvas is next to the launch canvas already, so it starts with no veil.
+ */
+object Launch {
+    const val CANVAS: Long = Looks.LAUNCH_CANVAS
+
+    /** SwiftUI's `.easeOut(duration: 0.4)`. */
+    const val VEIL_MILLIS: Int = 400
+
+    /** Whether this look starts under the launch canvas's veil. */
+    fun veiled(look: Look): Boolean = look.isLight
+}
+
 /** WCAG 2 contrast maths, as ThemeTests computes it. */
 object Contrast {
     fun luminance(hex: Long): Double {

@@ -28,6 +28,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Modifier
 import androidx.core.content.ContextCompat
 import androidx.core.content.FileProvider
+import androidx.core.splashscreen.SplashScreen.Companion.installSplashScreen
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.compose.LifecycleEventEffect
 import androidx.lifecycle.lifecycleScope
@@ -36,6 +37,7 @@ import com.tombaxter.taken.core.reminders.ReminderKind
 import com.tombaxter.taken.notify.AndroidNotifications
 import com.tombaxter.taken.notify.NotificationHost
 import com.tombaxter.taken.notify.ReminderChannels
+import com.tombaxter.taken.ui.shell.LaunchVeil
 import com.tombaxter.taken.ui.shell.Platform
 import com.tombaxter.taken.ui.shell.TakenRoot
 import com.tombaxter.taken.voice.OnDeviceSpeechCapture
@@ -87,9 +89,21 @@ class MainActivity : ComponentActivity(), Platform {
         viewModel.model?.notifications?.answered(granted)
     }
 
+    /**
+     * Whether the splash screen stays: until Taken has read its files, a few milliseconds, so the first frame is the real
+     * screen and never a blank canvas (SPEC-ANDROID 6.1). Google's own case for keeping it: "loading in-app settings from
+     * a local disk asynchronously" (https://developer.android.com/develop/ui/views/launch/splash-screen).
+     */
+    internal val keepsSplash: Boolean get() = viewModel.model == null
+
     override fun onCreate(savedInstanceState: Bundle?) {
+        // The splash screen on every API level, installed before super.onCreate as core-splashscreen requires
+        // (https://developer.android.com/develop/ui/views/launch/splash-screen/migrate): Signal's canvas and the capsule,
+        // then Theme.Taken.
+        val splash = installSplashScreen()
         enableEdgeToEdge()
         super.onCreate(savedInstanceState)
+        splash.setKeepOnScreenCondition { keepsSplash }
         // A link is handled once. A recreated activity (rotation, fold, resize, a return after process death) gets its
         // launch intent again, and so does a task relaunched from Recents: neither replays the link. Navigation does the
         // same with the deep-link-handled flag it keeps in saved state (NavController's KEY_DEEP_LINK_HANDLED).
@@ -135,7 +149,8 @@ class MainActivity : ComponentActivity(), Platform {
                     }
                 }
             }
-            TakenRoot(model, this)
+            // A light look fades in from the splash screen's canvas, as on the iPhone (SPEC-ANDROID 6.1).
+            LaunchVeil(com.tombaxter.taken.core.theme.Looks.look(model.theme)) { TakenRoot(model, this) }
         }
     }
 

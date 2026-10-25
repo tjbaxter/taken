@@ -100,6 +100,8 @@ dependencies {
 
     implementation(libs.activity.compose)
     implementation(libs.core.ktx)
+    // The splash screen on every API level, Signal's canvas and the capsule (SPEC-ANDROID 6.1). Sends nothing off the phone.
+    implementation(libs.core.splashscreen)
     implementation(libs.lifecycle.runtime.compose)
     implementation(libs.lifecycle.viewmodel.compose)
     implementation(libs.navigation3.runtime)
