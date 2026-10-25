@@ -72,7 +72,11 @@ class RescheduleReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         when (intent.action) {
             Intent.ACTION_BOOT_COMPLETED, Intent.ACTION_TIME_CHANGED, Intent.ACTION_TIMEZONE_CHANGED,
-            Intent.ACTION_MY_PACKAGE_REPLACED -> runAsync(context) { it.reminders.rebuild() }
+            Intent.ACTION_MY_PACKAGE_REPLACED -> runAsync(context) {
+                it.reminders.rebuild()
+                // The widgets' and the tile's refresh alarm went with the restart, and a new clock moves the rollover.
+                it.surfaces.refresh()
+            }
             else -> return
         }
     }

@@ -24,6 +24,7 @@ import com.tombaxter.taken.notify.PreferenceArmedMoments
 import com.tombaxter.taken.notify.ReminderChannels
 import com.tombaxter.taken.notify.ReminderScheduler
 import com.tombaxter.taken.notify.RescheduleReceiver
+import com.tombaxter.taken.widget.Surfaces
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -81,8 +82,46 @@ class AppContainer(context: Context) {
         notifications = notifications,
         armed = PreferenceArmedMoments(app),
         clock = { clock() },
-        onArmed = { any -> RescheduleReceiver.setEnabled(app, any) },
+        onArmed = { any ->
+            remindersArmed = any
+            restartReceiverFollows()
+        },
     )
+
+    /**
+     * The home screen widgets and the Take all tile (SPEC-ANDROID 10.1 and 10.2), redrawn after every write and at the
+     * moments the day changes under them. `refresh()` is their one entry point; Pro changing calls it through the Pro
+     * lane's `AppModel.onProChanged` once the integrator connects them (SPEC-ANDROID 9.7).
+     */
+    val surfaces = Surfaces(
+        context = app,
+        stores = stores,
+        pro = { pro },
+        clock = { clock() },
+        zone = { zone() },
+        scope = scope,
+        onArmed = { any ->
+            surfacesArmed = any
+            restartReceiverFollows()
+        },
+    )
+
+    /** What Today and Profile ask of the widgets and the tile. */
+    val surfaceHost: SurfaceHost = AndroidSurfaceHost(app, surfaces, scope)
+
+    @Volatile
+    private var remindersArmed = false
+
+    @Volatile
+    private var surfacesArmed = false
+
+    /**
+     * The receiver for restarts, clock and time zone changes and updates is on while a reminder or a surface's refresh is
+     * armed, and off when neither is (Google's alarm guide enables its boot receiver only while needed).
+     */
+    private fun restartReceiverFollows() {
+        synchronized(this) { RescheduleReceiver.setEnabled(app, remindersArmed || surfacesArmed) }
+    }
 
     /**
      * Where the To-do tab hands its tasks after every change and every return to the front (SPEC-ANDROID 10.4): a
@@ -101,6 +140,13 @@ class AppContainer(context: Context) {
             merge(stores.stack.data.map { }, stores.todos.data.map { })
                 .catch { }
                 .collect { reminders.rebuild() }
+        }
+        // The widgets and the tile follow the same writes, and pro.json's too (a refused log, Pro's cached answer): the
+        // iPhone's `Sync.afterWrite` reloads its widget timelines and its control after every write.
+        scope.launch {
+            merge(stores.stack.data.map { }, stores.todos.data.map { }, stores.ledger.data.map { })
+                .catch { }
+                .collect { surfaces.refresh() }
         }
     }
 
@@ -165,6 +211,7 @@ class AppViewModel(private val container: AppContainer) : ViewModel() {
                 clockNow = clockNow,
                 todoModel = todo,
                 notificationsModel = notifications,
+                surfaceHost = container.surfaceHost,
             )
             model = loaded
             launch { stores.stack.data.collect { loaded.adopt(it) } }

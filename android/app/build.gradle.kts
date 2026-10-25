@@ -106,6 +106,10 @@ dependencies {
     implementation(libs.navigation3.ui)
     implementation(libs.datastore)
     implementation(libs.kotlinx.coroutines.android)
+    // The home screen widgets (SPEC-ANDROID 10.1): Glance draws RemoteViews from Compose-style code; WorkManager runs its
+    // sessions. Neither sends anything off the phone.
+    implementation(libs.glance.appwidget)
+    implementation(libs.work.runtime.ktx)
 
     testImplementation(libs.junit)
     testImplementation(libs.kotlin.test.junit)
@@ -116,6 +120,9 @@ dependencies {
     testImplementation(libs.compose.ui.test.junit4)
     testImplementation(libs.androidx.test.core)
     testImplementation(libs.androidx.test.ext.junit)
+    // Glance's own unit tests of a widget's content (runGlanceAppWidgetUnitTest,
+    // https://developer.android.com/develop/ui/compose/glance/testing).
+    testImplementation(libs.glance.appwidget.testing)
     // ComponentActivity in the debug manifest, which the Compose test rule launches under Robolectric.
     debugImplementation(libs.compose.ui.test.manifest)
 }

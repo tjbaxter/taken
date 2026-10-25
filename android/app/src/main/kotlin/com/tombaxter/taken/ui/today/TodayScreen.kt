@@ -409,7 +409,30 @@ private fun TodayPromptRow(model: AppModel, prompt: TodayPrompt) {
                 contentAlignment = Alignment.Center,
             ) { Icon(Symbols.Close, contentDescription = null, tint = colors.fgSubtle, modifier = Modifier.size(18.dp)) }
         }
-        // The widget invite, the trial notice and the weight offer come with their phases (NEXT 4, 2 and 6).
+        // "Log from your home screen: add the Taken widget": a tap asks the launcher to pin the stack widget (its own
+        // dialog shows the widget), the close hides it; either way it is gone for good (SPEC-ANDROID 10.1).
+        TodayPrompt.WidgetInvite -> {
+            LaunchedEffect(Unit) { model.noteWidgetInviteShown() }
+            Row(
+                Modifier.fillMaxWidth().background(colors.bgRaised, shape).border(1.dp, colors.line, shape).testTag("widget-invite"),
+                verticalAlignment = Alignment.CenterVertically,
+            ) {
+                Row(
+                    Modifier.weight(1f).heightIn(min = 52.dp).clip(shape)
+                        .clickable(role = Role.Button, onClickLabel = "add the widget") { model.closeWidgetInvite(pin = true) }
+                        .padding(start = 16.dp, top = 12.dp, bottom = 12.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(RetentionCopy.WIDGET_INVITE, style = TakenType.sans(15, FontWeight.Medium), color = colors.fg)
+                }
+                Box(
+                    Modifier.size(48.dp).clip(CircleShape).clickable(role = Role.Button) { model.closeWidgetInvite(pin = false) }
+                        .semantics { contentDescription = RetentionCopy.CLOSE },
+                    contentAlignment = Alignment.Center,
+                ) { Icon(Symbols.Close, contentDescription = null, tint = colors.fgSubtle, modifier = Modifier.size(18.dp)) }
+            }
+        }
+        // The trial notice and the weight offer come with their phases (NEXT 2 and 6).
         else -> Unit
     }
 }

@@ -58,7 +58,59 @@
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="taken" />
             </intent-filter>
+            <!-- The two static shortcuts, New voice to-do and Take all (SPEC-ANDROID 10.2): declared on the launcher activity
+                 (https://developer.android.com/develop/ui/views/launch/shortcuts/creating-shortcuts). -->
+            <meta-data
+                android:name="android.app.shortcuts"
+                android:resource="@xml/shortcuts" />
         </activity>
+
+        <!-- The home screen widgets (SPEC-ANDROID 10.1), Glance receivers: exported, as Android's AppWidgetManager sends
+             them their updates (https://developer.android.com/develop/ui/compose/glance/create-app-widget). -->
+        <receiver
+            android:name=".widget.StackWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_stack_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_stack_info" />
+        </receiver>
+        <receiver
+            android:name=".widget.TodoWidgetReceiver"
+            android:exported="true"
+            android:label="@string/widget_todo_name">
+            <intent-filter>
+                <action android:name="android.appwidget.action.APPWIDGET_UPDATE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.appwidget.provider"
+                android:resource="@xml/widget_todo_info" />
+        </receiver>
+        <!-- The widgets' and the tile's own refresh alarm (the rollover, an item's hour, Pro's end, a due time): not
+             exported, only Taken's PendingIntent reaches it. -->
+        <receiver
+            android:name=".widget.SurfaceRefreshReceiver"
+            android:exported="false" />
+
+        <!-- The Quick Settings tile "Take all" (SPEC-ANDROID 10.2), in active mode: drawn when Taken asks after a write, not
+             each time the panel opens (https://developer.android.com/develop/ui/views/quicksettings-tiles). Only the system
+             can bind it (BIND_QUICK_SETTINGS_TILE). -->
+        <service
+            android:name=".tile.TakeAllTileService"
+            android:exported="true"
+            android:icon="@drawable/ic_stat_taken"
+            android:label="@string/tile_take_all"
+            android:permission="android.permission.BIND_QUICK_SETTINGS_TILE">
+            <intent-filter>
+                <action android:name="android.service.quicksettings.action.QS_TILE" />
+            </intent-filter>
+            <meta-data
+                android:name="android.service.quicksettings.ACTIVE_TILE"
+                android:value="true" />
+        </service>
 
         <!-- The reminders (SPEC-ANDROID 10.4). The alarm and TAKE ALL receivers are not exported: only Taken's own
              PendingIntents reach them. -->
@@ -69,7 +121,7 @@
             android:name=".notify.NudgeActionReceiver"
             android:exported="false" />
         <!-- Off until an alarm is armed, as Google's alarm guide does with its boot receiver; Taken enables it while any
-             reminder is armed and disables it when none is. Exported because the system sends these: "If this receiver
+             reminder, or the widgets' and the tile's refresh, is armed and disables it when none is. Exported because the system sends these: "If this receiver
              listens for broadcasts sent from the system ... set android:exported to "true""
              (https://developer.android.com/develop/background-work/background-tasks/broadcasts). Anything else that sends
              one only starts a rebuild, which changes nothing that is already right. -->

@@ -38,7 +38,8 @@ object DemoScreens {
     fun morning(): Instant = ZonedDateTime.of(2026, 10, 21, 7, 20, 0, 0, zone).toInstant()
 
     val screens = listOf(
-        "empty", "today", "today-pending", "today-done", "today-edit", "today-nudge-offer", "today-repair", "locked",
+        "empty", "today", "today-pending", "today-done", "today-edit", "today-nudge-offer", "today-repair",
+        "today-widget-invite", "locked",
         "add", "add-search", "item", "set-time", "log", "day", "settings",
         // The To-do tab (SPEC-ANDROID 11): the list, listening, past 4:00, empty, the blockers, a note just saved as
         // said, the undo bar, the edit and type sheets, and the microphone's rationale.
@@ -81,7 +82,8 @@ object DemoScreens {
     fun make(screen: String, look: ThemeID = ThemeID.SIGNAL, stack: DemoStack = DemoStack.STANDARD): AppModel {
         val pending = screen == "today-pending"
         val now = if (pending) morning() else now(stack)
-        val allTaken = screen == "today-done"
+        // The widget invite shows on the first day that reaches All taken.
+        val allTaken = screen == "today-done" || screen == "today-widget-invite"
         var state = when (screen) {
             "empty", "add", "add-search" -> StackState(settings = StackSettings(reminderEnabled = true))
             else -> DemoData.state(now, allTaken = allTaken, yesterdayPartial = screen == "today-repair", zone = zone, stack = stack)
@@ -102,6 +104,7 @@ object DemoScreens {
         val prompt = when (screen) {
             "today-nudge-offer" -> TodayPrompt.NudgeOffer(state.settings.reminderMinutes)
             "today-repair" -> TodayPrompt.Repair(com.tombaxter.taken.core.day.DayClock(state.settings.dayStartHour, zone).day(now).adding(-1))
+            "today-widget-invite" -> TodayPrompt.WidgetInvite
             else -> null
         }
         val todoState = todos(screen, now)
@@ -127,6 +130,8 @@ object DemoScreens {
             launchEditing = screen == "today-edit",
             demoPrompt = prompt,
             todoModel = todo,
+            // An Android 13 phone whose launcher can pin widgets, without the tile yet: Profile offers it.
+            surfaceHost = SurfaceHost.fake(canPin = true, offersTile = true),
         )
         when (screen) {
             "add" -> {

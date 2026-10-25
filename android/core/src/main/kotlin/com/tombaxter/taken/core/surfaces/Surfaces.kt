@@ -379,7 +379,8 @@ object WidgetCopy {
 
     fun left(count: Int): String = "$count left"
 
-    /** Profile's offer of the tile (Android 13 and later), and what it says under it. */
+    /** Profile's offer of the tile (Android 13 and later), its section and what it says under it. */
+    const val TILE_SECTION = "Quick settings"
     const val ADD_TILE = "Add the Take all tile"
     const val ADD_TILE_FOOTNOTE = "Take all from quick settings, on the lock screen too. It shows how many are left, never a name."
 
@@ -393,7 +394,7 @@ object WidgetCopy {
             TAKEN, PRO, TAKE_ALL, LOGGED, LOCKED, DONE, ALL_TAKEN, EMPTY_TITLE, EMPTY_HINT, NOTHING_DUE, ADD_STACK, TAP, NO_TIME,
             pending(2), STACK_NAME, STACK_DESCRIPTION, TODO_NAME, TODO_DESCRIPTION, TODO, TODO_EMPTY, NEW_VOICE_TODO,
             LOCKED_SPOKEN, LOCK_MARK_SPOKEN, ALL_TAKEN_SPOKEN, EMPTY_SPOKEN, TILE_LABEL, TILE_LOCKED, TILE_ALL_TAKEN,
-            TILE_NO_STACK, TILE_NOTHING_DUE, left(2), ADD_TILE, ADD_TILE_FOOTNOTE, SHORTCUT_TAKE_ALL, SHORTCUT_VOICE_SHORT,
+            TILE_NO_STACK, TILE_NOTHING_DUE, left(2), TILE_SECTION, ADD_TILE, ADD_TILE_FOOTNOTE, SHORTCUT_TAKE_ALL, SHORTCUT_VOICE_SHORT,
             SHORTCUT_VOICE_LONG,
         )
 }

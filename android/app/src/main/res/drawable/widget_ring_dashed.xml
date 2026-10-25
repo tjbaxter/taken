@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- A pending row's dashed ring on the stack widget (the iPhone's 2-on 2-off dash), white for the widget to tint. -->
+<shape xmlns:android="http://schemas.android.com/apk/res/android"
+    android:shape="oval">
+    <stroke
+        android:width="1dp"
+        android:color="#FFFFFFFF"
+        android:dashGap="2dp"
+        android:dashWidth="2dp" />
+    <size
+        android:width="9dp"
+        android:height="9dp" />
+</shape>

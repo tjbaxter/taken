@@ -28,6 +28,7 @@ import com.tombaxter.taken.core.reminders.NudgeLink
 import com.tombaxter.taken.core.retention.RetentionCopy
 import com.tombaxter.taken.core.retention.TodayPrompt
 import com.tombaxter.taken.core.retention.TodayPrompts
+import com.tombaxter.taken.core.surfaces.SurfaceLinks
 import com.tombaxter.taken.core.stack.Adherence
 import com.tombaxter.taken.core.stack.CsvExport
 import com.tombaxter.taken.core.stack.DaySummary
@@ -174,6 +175,8 @@ class AppModel(
     todoModel: TodoModel? = null,
     /** Taken's notification permission and Profile's Reminder rows (SPEC-ANDROID 10.4); tests give their own. */
     notificationsModel: NotificationsModel? = null,
+    /** The home screen widgets and the tile, as Today and Profile see them (SPEC-ANDROID 10.1 and 10.2). */
+    private val surfaceHost: SurfaceHost = SurfaceHost.none,
 ) {
     /** The To-do tab: the one list, the mic and its sheets. */
     val todo: TodoModel = todoModel ?: TodoModel(
@@ -252,6 +255,21 @@ class AppModel(
     /** Demo captures show a one-time row only when their screen asks for it. */
     private var demoPrompt: TodayPrompt? by mutableStateOf(demoPrompt)
 
+    /**
+     * A Taken stack widget is on the home screen, as last read when Taken came to the front; null until then, which counts
+     * as placed, so the invite waits for the answer (the iPhone passes `lockScreenWidget ?? true`).
+     */
+    var widgetPlaced: Boolean? by mutableStateOf(null)
+        private set
+
+    /** The launcher can pin a widget from inside Taken; without it the invite has nothing to offer and never shows. */
+    var canPinWidget: Boolean by mutableStateOf(surfaceHost.canPinWidget)
+        private set
+
+    /** Profile offers the Take all tile: Android 13 and later, until it is in quick settings (SPEC-ANDROID 10.2). */
+    var tileOffered: Boolean by mutableStateOf(surfaceHost.offersTile)
+        private set
+
     /** Navigation 3's back stack. */
     val backStack: SnapshotStateList<Route> = mutableStateListOf(Route.Main)
 
@@ -295,16 +313,17 @@ class AppModel(
     val lockedBarText: String get() = ProCopy.lockedBar(eligible = pro.introEligible, intro = null)
 
     /**
-     * The one quiet row under Today's progress line, if any. In CORE no widget exists yet, so the widget invite waits
-     * (the iPhone waits the same way until WidgetKit has answered); the trial notice and the weight offer come with their
-     * phases. The nudge offer is back with Reminders (NEXT 3), which can post the nudge it offers.
+     * The one quiet row under Today's progress line, if any. The widget invite (NEXT 4) waits until Android has said whether
+     * a stack widget is placed, and never shows where the launcher cannot pin one; the trial notice and the weight offer
+     * come with their phases. The nudge offer is back with Reminders (NEXT 3), which can post the nudge it offers.
      */
     val todayPrompt: TodayPrompt?
         get() {
             if (isDemo) return demoPrompt
             return TodayPrompts.pick(
                 settings = settings, hasStack = hasStack, today = today, repairDay = repairDay, locked = isLocked,
-                widgetPlaced = true, trialNotice = null, weightOffer = false, nudgeAvailable = NUDGE_AVAILABLE,
+                widgetPlaced = (widgetPlaced ?: true) || !canPinWidget, trialNotice = null, weightOffer = false,
+                nudgeAvailable = NUDGE_AVAILABLE,
             )
         }
 
@@ -353,6 +372,7 @@ class AppModel(
         apply(state)
         todo.didBecomeActive()
         notifications.didBecomeActive()
+        checkWidgets()
     }
 
     /** Taken went to the background (`ON_STOP`): the stack's edit mode ends, so the next open is a tap that logs again. */
@@ -450,6 +470,9 @@ class AppModel(
             if (url.removePrefix("taken://").substringBefore('?').substringBefore('/') == "today") {
                 while (backStack.size > 1) backStack.removeAt(backStack.lastIndex)
                 tab = AppTab.TODAY
+                // The "Take all" shortcut (SPEC-ANDROID 10.2): Take all with its snackbar and Undo, or the paywall with the
+                // Take all kept while logging needs Taken Pro.
+                if (SurfaceLinks.isTakeAll(url)) requirePro { takeAll() }
             }
             return
         }
@@ -748,6 +771,53 @@ class AppModel(
         }
     }
 
+    // MARK: Widgets and the tile (SPEC-ANDROID 10.1 and 10.2)
+
+    /**
+     * Taken came to the front: the surfaces catch up, and someone who already has the stack widget on the home screen never
+     * gets the invite (the iPhone's `checkLockScreenWidget`, which reads WidgetKit's configured widgets; Android reads
+     * Taken's placed widgets). A placed widget answers the invite for good.
+     */
+    private fun checkWidgets() {
+        if (isDemo) return
+        surfaceHost.didBecomeActive(theme)
+        canPinWidget = surfaceHost.canPinWidget
+        tileOffered = surfaceHost.offersTile
+        if (settings.widgetInviteDone) {
+            widgetPlaced = false
+            return
+        }
+        surfaceHost.checkStackWidget { found ->
+            widgetPlaced = found
+            if (found && !settings.widgetInviteDone) write { it.settings.widgetInviteDone = true }
+        }
+    }
+
+    /** The widget invite is on screen: the day it first showed is kept, so it shows on that day only. */
+    fun noteWidgetInviteShown() {
+        if (isDemo || settings.widgetInviteDay != null) return
+        val day = today.day.ordinal
+        write { it.settings.widgetInviteDay = day }
+    }
+
+    /**
+     * A tap on the widget invite or its close: either way it is gone for good. The tap asks the launcher to pin the stack
+     * widget, which shows its own dialog (`requestPinGlanceAppWidget`, https://developer.android.com/develop/ui/compose/glance/pin-in-app);
+     * the iPhone's tap opens how to add it, which Android's launcher dialog makes unneeded (SPEC-ANDROID 7.1).
+     */
+    fun closeWidgetInvite(pin: Boolean) {
+        if (isDemo) demoPrompt = null else write { it.settings.widgetInviteDone = true }
+        if (pin) {
+            feel(Haptic.TICK)
+            surfaceHost.requestPinStackWidget()
+        }
+    }
+
+    /** Profile's "Add the Take all tile": Android's own prompt; once the tile is in quick settings the row goes. */
+    fun addTile() {
+        surfaceHost.requestAddTile { added -> if (added) tileOffered = false }
+    }
+
     /** The repair line's close: hidden for the day it was about. It never says the streak broke. */
     fun closeRepair(day: DayKey) {
         if (isDemo) {
@@ -774,6 +844,7 @@ class AppModel(
         if (look == theme) return
         feel(Haptic.TICK)
         write { it.settings.theme = look }
+        surfaceHost.lookChanged(look)
     }
 
     // MARK: Profile
