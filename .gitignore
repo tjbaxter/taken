@@ -15,3 +15,11 @@ screenshots/
 *.provisionprofile
 .env*
 /ios
+# Taken for Android (android/SPEC-ANDROID.md 16): build output, and signing material that never belongs in the repo
+android/.gradle/
+android/.kotlin/
+android/**/build/
+local.properties
+keystore.properties
+*.jks
+*.keystore

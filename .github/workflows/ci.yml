@@ -7,6 +7,13 @@ on:
       - "docs/**"
       - "brand/**"
       - "**/*.md"
+      # Taken for Android builds and tests in android.yml on Linux; an Android change never starts these macOS jobs
+      # (android/SPEC-ANDROID.md 15.5).
+      - "android/**"
+      - "store/play/**"
+      - ".github/workflows/android.yml"
+      - ".github/workflows/android-release.yml"
+      - "scripts/check-play-metadata.py"
   workflow_dispatch:
 
 concurrency:

@@ -56,7 +56,10 @@ jobs:
           for sha in $shas; do
             git cat-file -e "$sha^{commit}" 2>/dev/null || continue
             git merge-base --is-ancestor "$sha" "$head" || continue
-            if git diff --quiet "$sha" "$head" -- . ':(exclude)docs/**' ':(exclude)brand/**' ':(exclude)*.md'; then
+            # Taken for Android is ignored by ci.yml (android/SPEC-ANDROID.md 15.5), so its files never hold this up.
+            if git diff --quiet "$sha" "$head" -- . ':(exclude)docs/**' ':(exclude)brand/**' ':(exclude)*.md' \
+                 ':(exclude)android/**' ':(exclude)store/play/**' ':(exclude).github/workflows/android*.yml' \
+                 ':(exclude)scripts/check-play-metadata.py'; then
               echo "ci.yml passed on $sha, and nothing it checks has changed since"
               exit 0
             fi

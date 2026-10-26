@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Android 11 and lower (SPEC-ANDROID 5.4): the same files, and only when the backup is encrypted on the phone. -->
+<full-backup-content>
+    <include domain="file" path="datastore/taken.json" requireFlags="clientSideEncryption" />
+    <include domain="file" path="datastore/pro.json" requireFlags="clientSideEncryption" />
+    <include domain="file" path="datastore/todos.json" requireFlags="clientSideEncryption" />
+    <include domain="file" path="datastore/weights.json" requireFlags="clientSideEncryption" />
+    <include domain="file" path="datastore/profile.json" requireFlags="clientSideEncryption" />
+    <include domain="file" path="profile-photo.jpg" requireFlags="clientSideEncryption" />
+</full-backup-content>

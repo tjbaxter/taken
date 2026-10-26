@@ -14,7 +14,9 @@ runs:
     # Nothing ships that ci.yml has not passed: the build, the unit tests, and the screenshots with their link checks
     # (taken://todo must bring the To-do tab to the front). A green run counts when it is this commit or an ancestor and
     # nothing ci.yml checks has changed since. ci.yml ignores docs/, brand/ and Markdown, and it neither builds nor tests
-    # the two shipping workflows or this action, so a change to them needs no new CI run either.
+    # the two shipping workflows or this action, so a change to them needs no new CI run either. It ignores Taken for
+    # Android too (android/, store/play/, the android workflows and their metadata check, android/SPEC-ANDROID.md 15.5),
+    # so an Android commit on main never holds up the next iPhone build.
     - name: CI passed for this code
       shell: bash
       env:
@@ -31,7 +33,9 @@ runs:
           git merge-base --is-ancestor "$sha" "$head" || continue
           if git diff --quiet "$sha" "$head" -- . ':(exclude)docs/**' ':(exclude)brand/**' ':(exclude)*.md' \
                ':(exclude).github/workflows/internal-testflight.yml' ':(exclude).github/workflows/app-store-build.yml' \
-               ':(exclude).github/actions/ship-setup/**'; then
+               ':(exclude).github/actions/ship-setup/**' \
+               ':(exclude)android/**' ':(exclude)store/play/**' ':(exclude).github/workflows/android*.yml' \
+               ':(exclude)scripts/check-play-metadata.py'; then
             echo "ci.yml passed on $sha, and nothing it checks has changed since"
             exit 0
           fi

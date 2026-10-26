@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- What the launcher shows of a Taken widget until its first drawing arrives (the widget infos' initialLayout): the
+     launch canvas with the capsule, where Glance's default is a stock frame with a spinner (glance-appwidget 1.2.0,
+     glance_default_loading_layout). The look is not known to a static layout, so it is Signal's canvas, the one every
+     launch of Taken starts from (SPEC-ANDROID 6.1 and 10.1) [Own choice]. The id is the one Android 12 and later round
+     and animate as the widget's background (https://developer.android.com/develop/ui/views/appwidgets/enhance). -->
+<FrameLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@android:id/background"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_loading_frame">
+
+    <ImageView
+        android:layout_width="48dp"
+        android:layout_height="48dp"
+        android:layout_gravity="center"
+        android:contentDescription="@string/app_name"
+        android:src="@drawable/splash_icon" />
+</FrameLayout>

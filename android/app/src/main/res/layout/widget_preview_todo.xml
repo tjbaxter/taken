@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The to-do widget in the widget picker on Android 12 to 14 (previewLayout): the mic, the count and the open list, in
+     Signal. Android 15 and later show the generated preview in the person's own look. -->
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="@drawable/widget_preview_background"
+    android:orientation="vertical"
+    android:padding="10dp"
+    tools:ignore="HardcodedText,UseAppTint,ContentDescription,NestedWeights,SmallSp">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="48dp"
+        android:gravity="center_vertical"
+        android:baselineAligned="false"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="To-do"
+                android:textColor="#F4F4F5"
+                android:textSize="15sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="3 to-dos"
+                android:textColor="#A1A1AA"
+                android:textSize="12sp" />
+        </LinearLayout>
+
+        <FrameLayout
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="@drawable/widget_preview_mic">
+
+            <ImageView
+                android:layout_width="22dp"
+                android:layout_height="22dp"
+                android:layout_gravity="center"
+                android:src="@drawable/ic_widget_mic"
+                android:tint="#08090A" />
+        </FrameLayout>
+    </LinearLayout>
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="Take the bins out"
+        android:textColor="#F4F4F5"
+        android:textSize="14sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="Renew the car insurance"
+        android:textColor="#F4F4F5"
+        android:textSize="14sp" />
+
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:gravity="center_vertical"
+        android:ellipsize="end"
+        android:maxLines="1"
+        android:text="Send Mum the photos"
+        android:textColor="#F4F4F5"
+        android:textSize="14sp" />
+</LinearLayout>

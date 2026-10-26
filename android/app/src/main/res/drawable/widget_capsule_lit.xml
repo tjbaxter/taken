@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Taken mark's lit half, white so the widget tints it with the look's signal: the iPhone widgets' small capsule
+     glyph (Shared/Theme.swift CapsuleGlyph), not the launcher icon's. Widgets draw drawables, not Compose canvases. -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="24dp"
+    android:height="24dp"
+    android:viewportWidth="56"
+    android:viewportHeight="56">
+    <group
+        android:translateX="-26"
+        android:translateY="-26">
+        <group
+            android:pivotX="54"
+            android:pivotY="54"
+            android:rotation="-45">
+            <path
+                android:fillColor="#FFFFFFFF"
+                android:pathData="M53,42.5 L39.5,42.5 A11.5,11.5 0 0,0 39.5,65.5 L53,65.5 Z" />
+        </group>
+    </group>
+</vector>

@@ -1,0 +1,212 @@
+name: Android
+
+# Taken for Android (android/SPEC-ANDROID.md section 15). Everything runs on GitHub's standard ubuntu-24.04 runners: this
+# repository is public, and "GitHub Actions usage is free for self-hosted runners and for public repositories that use
+# standard GitHub-hosted runners" (https://docs.github.com/en/billing/concepts/product-billing/github-actions). No Mac and
+# no emulator: the unit tests run on the JVM, the screens are drawn by Robolectric's native graphics and saved by
+# Roborazzi, as Google's Now in Android does on Linux CI (https://github.com/android/nowinandroid/blob/main/.github/workflows/Build.yaml).
+#
+# Java 21: AGP 9.4 needs 17 or later, and Robolectric 4.17 runs Android 16 (API 36, Taken's targetSdk) only on Java 21
+# (its DefaultSdkProvider, https://github.com/robolectric/robolectric/blob/robolectric-4.17/robolectric/src/main/java/org/robolectric/plugins/DefaultSdkProvider.java).
+
+# Branches only, never tags: "Path filters are not evaluated for pushes of tags", and with neither filter a workflow runs
+# for both, so every iPhone release tag would start these jobs; with only `branches` defined "the workflow won't run for
+# events affecting the undefined Git ref" (https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax).
+on:
+  push:
+    branches: ["**"]
+    paths:
+      - "android/**"
+      - ".github/workflows/android.yml"
+      # Draws the Android launcher icon, the splash glyph and the Play icon (the icons job).
+      - "brand/icon.py"
+      # Draws the Play feature graphic from Taken's tokens and fonts (the icons job).
+      - "brand/play.py"
+      - "brand/fonts/**"
+  workflow_dispatch:
+
+concurrency:
+  group: android-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+# Every action is pinned to a full commit SHA, the version in a comment: "Pinning an action to a full length commit SHA is
+# currently the only way to use an action as an immutable release"
+# (https://docs.github.com/en/actions/security-for-github-actions/security-guides/security-hardening-for-github-actions).
+# Each is the newest release at least two weeks old on 25 Oct 2026, the rule libs.versions.toml keeps.
+
+defaults:
+  run:
+    working-directory: android
+
+jobs:
+  core:
+    name: Core rules and their tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # The Google Play listing in store/play (fastlane supply's layout): Play's limits, the Health Content and Services
+      # disclaimer, the Subscriptions policy's terms and the house copy rules, and the graphics' sizes, formats and
+      # alpha read from each file's header (SPEC-ANDROID 14.2). Python's standard library only, so it runs first and
+      # needs neither Java nor Gradle.
+      - name: Play listing text and graphics
+        run: python3 scripts/check-play-metadata.py
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      # Caches Gradle and validates the committed wrapper jar against Gradle's published checksums.
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Core unit tests (the ported XCTest cases)
+        run: ./gradlew :core:test --stacktrace
+      - name: Test counts
+        if: always()
+        run: |
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+          for path in glob.glob("core/build/test-results/**/*.xml", recursive=True):
+              suite = ET.parse(path).getroot()
+              for key in totals:
+                  totals[key] += int(suite.get(key, 0))
+          print(f"core: {totals['tests']} tests, {totals['failures']} failures, {totals['errors']} errors, {totals['skipped']} skipped")
+          PY
+      - name: Test report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: core-test-report
+          path: android/core/build/reports/tests/
+          retention-days: 7
+
+  app:
+    name: App unit tests, lint and debug build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: App unit tests (Robolectric), lint and the debug APK
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug :app:assembleDebug --stacktrace
+      - name: Test counts
+        if: always()
+        run: |
+          python3 - <<'PY' | tee -a "$GITHUB_STEP_SUMMARY"
+          import glob, xml.etree.ElementTree as ET
+          totals = {"tests": 0, "failures": 0, "errors": 0, "skipped": 0}
+          for path in glob.glob("app/build/test-results/**/*.xml", recursive=True):
+              suite = ET.parse(path).getroot()
+              for key in totals:
+                  totals[key] += int(suite.get(key, 0))
+          print(f"app: {totals['tests']} tests, {totals['failures']} failures, {totals['errors']} errors, {totals['skipped']} skipped")
+          PY
+      - name: Test and lint reports
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: app-test-report
+          path: |
+            android/app/build/reports/
+            android/app/build/test-results/
+          retention-days: 7
+
+  screenshots:
+    name: Screenshots for Tom
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      # Record only, for now: once Tom approves a set it is committed as the baseline and this becomes
+      # verifyRoborazziDebug (SPEC-ANDROID 15.2).
+      - name: Draw every screen (Robolectric + Roborazzi)
+        run: ./gradlew :app:recordRoborazziDebug --stacktrace
+      # The Play phone screenshots (SPEC-ANDROID 14.2) must be what the app draws now: PlayStoreScreenshotTests writes
+      # them to play/phoneScreenshots, and each committed one must match byte for byte, so the listing never shows an
+      # older app. The fresh ones are in the android-screenshots artifact below.
+      - name: The Play screenshots are what the app draws
+        run: python3 scripts/check-play-metadata.py --rendered app/build/outputs/roborazzi/play/phoneScreenshots
+      - name: android-screenshots
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: android-screenshots
+          path: android/app/build/outputs/roborazzi/**/*.png
+          if-no-files-found: error
+          retention-days: 30
+      - name: Test report
+        if: failure()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: screenshots-test-report
+          path: android/app/build/reports/tests/
+          retention-days: 7
+
+  icons:
+    name: Icons and Play graphics drawn from Taken's artwork
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      # brand/icon.py draws the launcher icon's three layers, the splash screen's glyph and the Play store icon from the
+      # iPhone icon's geometry (SPEC-ANDROID 17, NEXT 7). This draws them again, fails on any difference, and checks
+      # Play's icon rules. numpy and Pillow at the versions the iPhone's icons were rendered with, from PyPI, each wheel
+      # checked against its published SHA-256 ("Hash-checking mode",
+      # https://pip.pypa.io/en/stable/topics/secure-installs/).
+      - name: numpy and Pillow
+        run: |
+          set -euo pipefail
+          python3 --version
+          python3 -m venv "$RUNNER_TEMP/icons"
+          cat > "$RUNNER_TEMP/icons-requirements.txt" <<'REQ'
+          numpy==2.3.5 --hash=sha256:0d8163f43acde9a73c2a33605353a4f1bc4798745a8b1d73183b28e5b435ae28
+          pillow==12.2.0 --hash=sha256:62f5409336adb0663b7caa0da5c7d9e7bdbaae9ce761d34669420c2a801b2780 --hash=sha256:b86024e52a1b269467a802258c25521e6d742349d760728092e1bc2d135b4d76
+          REQ
+          "$RUNNER_TEMP/icons/bin/pip" install --quiet --require-hashes --only-binary :all: -r "$RUNNER_TEMP/icons-requirements.txt"
+      - name: The Android icons are what brand/icon.py draws
+        run: '"$RUNNER_TEMP/icons/bin/python" brand/icon.py --android --check'
+      # brand/play.py draws the Play feature graphic (1024 x 500, no alpha) from Taken's tokens and fonts, and the store
+      # listing's icon.png must be icon.py's Play icon byte for byte (SPEC-ANDROID 14.2). This draws them again and fails
+      # on any difference; the fresh drawing is kept as an artifact so a change can be looked at before it is committed.
+      - name: The Play graphics are what brand/play.py draws
+        run: '"$RUNNER_TEMP/icons/bin/python" brand/play.py --check --fresh-out "$RUNNER_TEMP/play-graphics"'
+      - name: play-graphics
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: play-graphics
+          path: ${{ runner.temp }}/play-graphics/*.png
+          if-no-files-found: warn
+          retention-days: 30
+
+  release:
+    name: Release bundle (R8, unsigned) and its checks
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-java@de7274f081f381c8f8158605e0321c36c376e2e6 # v6.0.1
+        with:
+          distribution: temurin
+          java-version: "21"
+      - uses: gradle/actions/setup-gradle@3f5f9adaf7d9fecd50b5935e54106014257a94e6 # v6.4.0
+      - name: Release bundle with R8
+        run: ./gradlew :app:bundleRelease --stacktrace
+      # One OK or FAIL line per check (SPEC-ANDROID 3.3 and 15.4): SDK levels, permissions, the Billing Library, 16 KB
+      # page sizes, no debug or demo code. The same script checks the signed bundle in android-release.yml.
+      - name: Check the bundle
+        run: ci/check-bundle.sh app/build/outputs/bundle/release/app-release.aab

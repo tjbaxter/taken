@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Taken</string>
+
+    <!-- The widget gallery (SPEC-ANDROID 10.1): a unique name and a description that says its value
+         (https://developer.android.com/docs/quality-guidelines/widget-quality, WD-4.4 and WD-4.5). -->
+    <string name="widget_stack_name">Taken</string>
+    <string name="widget_stack_description">Did I take it? Tap to log.</string>
+    <string name="widget_todo_name">Voice to-do</string>
+    <string name="widget_todo_description">Tap the mic and say what you need to do.</string>
+
+    <!-- The Quick Settings tile (SPEC-ANDROID 10.2): at most 18 characters
+         (https://developer.android.com/develop/ui/views/quicksettings-tiles). -->
+    <string name="tile_take_all">Take all</string>
+
+    <!-- The static shortcuts: short labels of about 10 characters, long ones of at most 25
+         (https://developer.android.com/develop/ui/views/launch/shortcuts/creating-shortcuts). -->
+    <string name="shortcut_take_all_short">Take all</string>
+    <string name="shortcut_take_all_long">Take all</string>
+    <string name="shortcut_voice_short">Voice to-do</string>
+    <string name="shortcut_voice_long">New voice to-do</string>
+</resources>
