@@ -58,7 +58,7 @@ jobs:
             echo "::error::Missing repository secret EXPO_TOKEN"
             exit 1
           fi
-          test "$(node --version)" = "v22.23.1"
+          test "$(node --version)" = "v22.23.4"
           npx --yes eas-cli@24.11.0 build -p ios -e internal --local --non-interactive --freeze-credentials \
             --output "$RUNNER_TEMP/Taken-internal.ipa"
           test -f "$RUNNER_TEMP/Taken-internal.ipa"
